@@ -1,14 +1,15 @@
 {
   "name": "roboexx",
   "private": true,
-  "version": "2.1.4",
+  "version": "2.1.5",
   "type": "module",
   "description": "RoboExx — Pico W tabanlı blok tabanlı programlama uygulaması",
   "scripts": {
     "dev": "vite --host",
     "collab": "node server/index.js",
     "start": "concurrently --names \"collab,vite\" --prefix-colors \"orange,cyan\" --kill-others \"npm:collab\" \"npm:dev\"",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "type-check": "tsc --noEmit",
     "preview": "vite preview",
     "postinstall": "node -e \"const fs=require('fs');const p='node_modules/blockly/media';if(fs.existsSync(p))fs.cpSync(p,'public/blockly-media',{recursive:true,force:true});\""
   },
