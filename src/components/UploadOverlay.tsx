@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { UploadProgress } from '../serial/types';
 
 interface Props {
@@ -7,13 +7,19 @@ interface Props {
 }
 
 export function UploadOverlay({ progress, onDismiss }: Props) {
-  // Başarılı durumda 1.6sn sonra otomatik kapan
+  // onDismiss her render'da yeni referans olabiliyor (App'te inline arrow fn).
+  // useEffect dependency'si olsaydı timer her render'da reset olurdu.
+  // Bu yüzden ref'te tutup effect'in dependency'sinden çıkarıyoruz.
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  // Başarılı durumda 2.5sn sonra otomatik kapan
   useEffect(() => {
     if (progress?.phase === 'success') {
-      const t = setTimeout(onDismiss, 1600);
+      const t = setTimeout(() => dismissRef.current(), 2500);
       return () => clearTimeout(t);
     }
-  }, [progress?.phase, onDismiss]);
+  }, [progress?.phase]);
 
   if (!progress) return null;
 
@@ -57,6 +63,7 @@ export function UploadOverlay({ progress, onDismiss }: Props) {
               {formatBytes(bytesTotal)} yazıldı · {speedKBs.toFixed(1)} KB/s
             </div>
             <div className="upload-hint">Pico W yeniden başlatılıyor…</div>
+            <button className="upload-dismiss-btn" onClick={onDismiss}>Tamam</button>
           </>
         )}
 
