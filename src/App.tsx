@@ -9,6 +9,7 @@ import { ProjectsPanel } from './components/ProjectsPanel';
 import { SerialMonitor, type SerialLine, type LineKind } from './components/SerialMonitor';
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
+import { SensorDashboard } from './components/SensorDashboard';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
 import type { ThemeId } from './themes/types';
@@ -285,6 +286,7 @@ export default function App() {
   // ====================================================================
   const [pressedKeysDisplay, setPressedKeysDisplay] = useState<string>('');
   const [gamepadActive, setGamepadActive] = useState<boolean>(false);
+  const [sensorPanelOpen, setSensorPanelOpen] = useState<boolean>(false);
   useEffect(() => {
     if (bridgeState !== 'connected') {
       setPressedKeysDisplay('');
@@ -1353,6 +1355,7 @@ export default function App() {
           await activeBridge.forceReset();
           addLine('system', '⚠ Bridge sıfırlandı');
         }}
+        onSensorPanel={() => setSensorPanelOpen(true)}
         themeId={themeId}
         onToggleLight={toggleLight}
         lastSavedText={lastSavedText}
@@ -1471,6 +1474,11 @@ export default function App() {
       </main>
 
       <UploadOverlay progress={uploadProgress} onDismiss={() => setUploadProgress(null)} />
+
+      <SensorDashboard
+        open={sensorPanelOpen}
+        onClose={() => setSensorPanelOpen(false)}
+      />
 
       {/* Klavye / gamepad basılı tuş göstergesi — sağ alt köşede küçük popup */}
       {pressedKeysDisplay && (

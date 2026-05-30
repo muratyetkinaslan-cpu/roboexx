@@ -4360,3 +4360,377 @@ g.blocklyDraggable > path:first-of-type {
   from { transform: scale(0.92); opacity: 0; }
   to   { transform: scale(1);    opacity: 1; }
 }
+
+/* ========================================================
+   SENSÖR PANELİ — popup + robot resmi + canlı değer balonları
+   ======================================================== */
+.sensor-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: sensor-fade-in 180ms ease-out;
+}
+@keyframes sensor-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.sensor-card {
+  background: linear-gradient(180deg, #181820 0%, #11111a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  color: #eaeaef;
+  overflow: hidden;
+  animation: sensor-card-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+@keyframes sensor-card-pop {
+  from { transform: translateY(20px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0) scale(1);       opacity: 1; }
+}
+
+/* Başlık */
+.sensor-header {
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sensor-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.sensor-title-icon { font-size: 24px; }
+.sensor-poll-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+.sensor-header-actions {
+  display: flex;
+  gap: 10px;
+}
+.sensor-header-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 120ms ease;
+}
+.sensor-header-btn:hover {
+  background: rgba(255, 179, 71, 0.18);
+  border-color: rgba(255, 179, 71, 0.5);
+}
+.sensor-close-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 120ms ease;
+}
+.sensor-close-btn:hover {
+  background: rgba(255, 100, 100, 0.18);
+  border-color: rgba(255, 100, 100, 0.5);
+  color: white;
+}
+
+/* Robot sahnesi */
+.sensor-stage {
+  position: relative;
+  padding: 20px;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(80, 100, 200, 0.15) 0%, transparent 60%),
+    linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.3) 100%);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 360px;
+}
+.sensor-robot-img {
+  width: 100%;
+  max-width: 680px;
+  height: auto;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.5));
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Sensör balonları */
+.sensor-bubble {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: rgba(20, 22, 30, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 179, 71, 0.4);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: white;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: transform 220ms ease, border-color 220ms ease;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+}
+.sensor-bubble.ok { border-color: rgba(74, 222, 128, 0.55); }
+.sensor-bubble.err {
+  border-color: rgba(255, 100, 100, 0.55);
+  opacity: 0.7;
+}
+.sensor-bubble-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.sensor-bubble-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffb347;
+  font-feature-settings: 'tnum';
+  letter-spacing: 0.5px;
+}
+.sensor-bubble.ok .sensor-bubble-value { color: #6ee7b7; }
+.sensor-bubble.err .sensor-bubble-value { color: #ff8b8b; }
+.sensor-bubble-dot {
+  position: absolute;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  color: rgba(255, 179, 71, 0.85);
+}
+.sensor-bubble.ok .sensor-bubble-dot { color: rgba(110, 231, 183, 0.9); }
+.sensor-bubble.err .sensor-bubble-dot { color: rgba(255, 139, 139, 0.7); }
+
+.sensor-bubble-top .sensor-bubble-dot    { bottom: -14px; left: 50%; transform: translateX(-50%); }
+.sensor-bubble-bottom .sensor-bubble-dot { top: -14px;    left: 50%; transform: translateX(-50%); }
+.sensor-bubble-left .sensor-bubble-dot   { right: -14px;  top: 50%; transform: translateY(-50%); }
+.sensor-bubble-right .sensor-bubble-dot  { left: -14px;   top: 50%; transform: translateY(-50%); }
+
+/* Alt liste */
+.sensor-list {
+  padding: 16px 22px 22px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+}
+.sensor-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.5fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+.sensor-row-name { font-weight: 600; font-size: 14px; }
+.sensor-row-meta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.sensor-row-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-feature-settings: 'tnum';
+  text-align: right;
+  min-width: 64px;
+}
+.sensor-row-value.ok { color: #6ee7b7; }
+.sensor-row-value.err { color: rgba(255, 139, 139, 0.7); }
+
+/* ===== Settings popup ===== */
+.sensor-settings-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.sensor-settings-card {
+  background: #1a1a22;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  width: min(640px, 100%);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  color: #eaeaef;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+}
+.sensor-settings-header {
+  padding: 18px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sensor-settings-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.sensor-settings-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+  flex: 1;
+}
+.sensor-settings-hint {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.sensor-settings-row {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.sensor-settings-row:last-child { border-bottom: none; }
+.sensor-settings-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.sensor-settings-name-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+.sensor-settings-name-input:focus {
+  outline: none;
+  border-color: rgba(255, 179, 71, 0.6);
+}
+.sensor-settings-type {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.sensor-settings-pins {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.sensor-settings-pins label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sensor-settings-pins label > span {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.sensor-settings-pins input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 5px 8px;
+  width: 64px;
+  color: white;
+  font-size: 14px;
+  font-feature-settings: 'tnum';
+}
+.sensor-settings-pins input:focus {
+  outline: none;
+  border-color: rgba(255, 179, 71, 0.6);
+}
+.sensor-settings-hint-inline {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+.sensor-settings-footer {
+  padding: 14px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.2);
+}
+.sensor-settings-footer-right {
+  display: flex;
+  gap: 8px;
+}
+.sensor-settings-btn-reset,
+.sensor-settings-btn-cancel,
+.sensor-settings-btn-save {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 120ms ease;
+}
+.sensor-settings-btn-reset {
+  background: transparent;
+  color: rgba(255, 100, 100, 0.85);
+  border-color: rgba(255, 100, 100, 0.3);
+}
+.sensor-settings-btn-reset:hover {
+  background: rgba(255, 100, 100, 0.1);
+}
+.sensor-settings-btn-cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+}
+.sensor-settings-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.sensor-settings-btn-save {
+  background: linear-gradient(180deg, #ffb347 0%, #ff9020 100%);
+  color: #1a1a1a;
+}
+.sensor-settings-btn-save:hover {
+  filter: brightness(1.1);
+}

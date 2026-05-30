@@ -26,6 +26,8 @@ const MSG_END = 0x03;
 const MSG_PING = 0x04;
 const MSG_RESET = 0x05;
 const MSG_KEY = 0x06;
+const MSG_SENSOR_REQ = 0x07;
+const MSG_SENSOR_REPLY = 0x14;
 
 // Pico'dan gelen durum kodları
 const STATUS_READY = 0x10;
@@ -55,6 +57,8 @@ export class BLEBridge {
   /** Son alınan durum kodu (notify ile gelir) */
   private lastStatus: number | null = null;
   private statusWaiters: Array<(status: number) => void> = [];
+  /** Sensör cevap callback'i — payload byte'ları gelir */
+  public onSensorReply: ((payload: Uint8Array) => void) | null = null;
   /**
    * Kod yükleme sonrası Pico reset olunca beklenen kopma.
    * true ise gattserverdisconnected'da cihazı UNUTMA — otomatik reconnect dene.
@@ -431,6 +435,29 @@ export class BLEBridge {
     }
   }
 
+  /**
+   * Sensör değerleri için Pico'ya istek gönder.
+   * sensors: her sensör için [type, pin1, pin2] tuple'ları (her biri 0-255).
+   * Pico cevap olarak `onSensorReply(payload)` çağırır — payload her sensör
+   * için 2 byte uint16 LE değer içerir.
+   */
+  async requestSensors(sensors: Array<[number, number, number]>): Promise<void> {
+    if (this.state !== 'connected' || !this.rxChar) return;
+    if (sensors.length === 0) return;
+    const payload = new Uint8Array(1 + sensors.length * 3);
+    payload[0] = MSG_SENSOR_REQ;
+    for (let i = 0; i < sensors.length; i++) {
+      payload[1 + i * 3]     = sensors[i][0] & 0xFF;
+      payload[1 + i * 3 + 1] = sensors[i][1] & 0xFF;
+      payload[1 + i * 3 + 2] = sensors[i][2] & 0xFF;
+    }
+    try {
+      await this._writeRaw(payload);
+    } catch {
+      // sessiz yut
+    }
+  }
+
   // ====== private ======
 
   private _setState(s: BridgeState): void {
@@ -455,6 +482,16 @@ export class BLEBridge {
     const value = target.value;
     if (!value || value.byteLength < 1) return;
     const status = value.getUint8(0);
+
+    // Sensör cevabı (0x14) ise ayrı handle et — STATUS değil, payload var
+    if (status === MSG_SENSOR_REPLY) {
+      if (this.onSensorReply) {
+        const payload = new Uint8Array(value.buffer, value.byteOffset + 1, value.byteLength - 1);
+        try { this.onSensorReply(payload); } catch {}
+      }
+      return;
+    }
+
     this.lastStatus = status;
     // Bekleyenleri uyandır
     const waiters = this.statusWaiters;

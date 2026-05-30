@@ -44,6 +44,36 @@ MSG_END   = 0x03   # bitir, kaydet, reset
 MSG_PING  = 0x04   # bağlantı testi
 MSG_RESET = 0x05   # Pico'yu yeniden başlat (kullanıcı kodu çıkmak istiyorsa)
 MSG_KEY   = 0x06   # klavye durumu: basılı tuşların ASCII string'i (örn "wa")
+MSG_SENSOR_REQ = 0x07  # sensör değer talebi: payload = sensör listesi (struct)
+MSG_SENSOR_REPLY = 0x14  # sensör değer cevabı: değerler (struct)
+
+# Sensör tipleri (MSG_SENSOR_REQ payload'ında her sensör 4 byte: tip + pin1 + pin2 + ek)
+SENSOR_DIGITAL = 0x01    # tek pin, 0/1 — line follower, buton
+SENSOR_ANALOG = 0x02     # ADC pin (26-28) — LDR, potansiyometre
+SENSOR_ULTRASONIC = 0x03 # trig + echo pin
+SENSOR_TEMP_INTERNAL = 0x04  # dahili sıcaklık (pin yok)
+
+
+def _measure_ultrasonic(trig_pin, echo_pin, timeout_us=30000):
+    """Tek bir ultrasonik okuma yap, mm cinsinden döner. Timeout = 0xFFFF."""
+    try:
+        import machine, time
+        trig = machine.Pin(trig_pin, machine.Pin.OUT)
+        echo = machine.Pin(echo_pin, machine.Pin.IN)
+        trig.value(0)
+        time.sleep_us(2)
+        trig.value(1)
+        time.sleep_us(10)
+        trig.value(0)
+        # HIGH süresini ölç
+        dur = machine.time_pulse_us(echo, 1, timeout_us)
+        if dur < 0:
+            return 0xFFFF  # zaman aşımı / yansıma yok
+        # mm: dur (us) * 0.343 / 2  (ses hızı 343 m/s = 0.343 mm/us)
+        mm = int(dur * 0.343 / 2)
+        return min(mm, 65000)
+    except Exception:
+        return 0xFFFB
 
 # Tarayıcıya bildirilecek durum kodları
 STATUS_READY = 0x10
@@ -124,6 +154,9 @@ class BLEUart:
         # MSG_END IRQ -> ana thread'e ertelemek için
         self._save_pending = False
         self._save_conn = None
+        # MSG_SENSOR_REQ IRQ -> ana thread'e ertelemek için
+        self._sensor_req_pending = None
+        self._sensor_req_conn = None
 
     def set_callbacks(self, show_progress=None, on_complete=None, on_error=None):
         """Yükleme aşamalarında dış kodu bilgilendir."""
@@ -197,6 +230,69 @@ class BLEUart:
                 try: self._on_error(str(e))
                 except Exception: pass
 
+    def _do_read_sensors(self, _arg):
+        """
+        Ana thread'de çalışır. Tarayıcıdan gelen sensör listesini okur,
+        her sensör için 2 byte değer (uint16 LE) gönderir.
+
+        Sensör tipleri:
+          0x01 SENSOR_DIGITAL    — pin1 = GP pin, 0 veya 1
+          0x02 SENSOR_ANALOG     — pin1 = ADC pin (26-28), 0-65535
+          0x03 SENSOR_ULTRASONIC — pin1 = trig, pin2 = echo, mm cinsinden mesafe
+          0x04 SENSOR_TEMP_INT   — pin yok, dahili sıcaklık × 100
+        """
+        if not self._sensor_req_pending:
+            return
+        req = self._sensor_req_pending
+        conn = self._sensor_req_conn
+        self._sensor_req_pending = None
+        if conn is None:
+            return
+
+        try:
+            import machine
+        except Exception:
+            return
+
+        # Cevap: [STATUS_REPLY_TAG: 0x14][n sensör × 2 byte]
+        reply = bytearray([MSG_SENSOR_REPLY])
+        i = 0
+        while i + 2 < len(req):
+            stype = req[i]
+            pin1 = req[i+1]
+            pin2 = req[i+2]
+            value = 0xFFFF  # default = "okunamadı" işaretçisi
+            try:
+                if stype == SENSOR_DIGITAL:
+                    p = machine.Pin(pin1, machine.Pin.IN, machine.Pin.PULL_UP)
+                    value = p.value()  # 0 veya 1
+                elif stype == SENSOR_ANALOG:
+                    if pin1 < 26 or pin1 > 29:
+                        value = 0xFFFE
+                    else:
+                        adc = machine.ADC(pin1)
+                        value = adc.read_u16()  # 0-65535
+                elif stype == SENSOR_ULTRASONIC:
+                    value = _measure_ultrasonic(pin1, pin2)
+                elif stype == SENSOR_TEMP_INTERNAL:
+                    adc = machine.ADC(4)
+                    raw = adc.read_u16()
+                    volt = raw * 3.3 / 65535
+                    temp = 27 - (volt - 0.706) / 0.001721
+                    value = max(0, min(65535, int(temp * 100)))
+                else:
+                    value = 0xFFFD
+            except Exception:
+                value = 0xFFFC
+            reply.append(value & 0xFF)
+            reply.append((value >> 8) & 0xFF)
+            i += 3
+
+        try:
+            self._send(conn, bytes(reply))
+        except Exception as e:
+            print("[BLE] sensör cevap gönderme hatası:", e)
+
     def _irq(self, event, data):
         if event == _IRQ_CENTRAL_CONNECT:
             conn_handle, _, _ = data
@@ -245,6 +341,17 @@ class BLEUart:
                 keys_str = bytes(data[1:]).decode('ascii', 'ignore')
                 if _roboexx_ref is not None:
                     _roboexx_ref.set_pressed_keys(keys_str)
+            except Exception:
+                pass
+            return
+
+        if msg_type == MSG_SENSOR_REQ:
+            # data: [0x07][sensör listesi: her sensör 3 byte (type, pin1, pin2)]
+            # IRQ context — sensör okumak biraz zaman alır, schedule ile ana thread'e
+            self._sensor_req_pending = bytes(data[1:])
+            self._sensor_req_conn = conn_handle
+            try:
+                micropython.schedule(self._do_read_sensors, 0)
             except Exception:
                 pass
             return

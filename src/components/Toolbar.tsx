@@ -34,6 +34,9 @@ interface Props {
   /** Force reset — bridge sıkışırsa kurtarma */
   onForceReset: () => void;
 
+  /** Sensör paneli aç — canlı sensör değerleri popup'ı */
+  onSensorPanel: () => void;
+
   /** Açık/koyu tema geçişi */
   themeId: ThemeId;
   onToggleLight: () => void;
@@ -182,6 +185,19 @@ export function Toolbar(props: Props) {
               <circle cx="13" cy="4" r="2" fill="currentColor" />
             </svg>
             Modülleri Yükle
+          </button>
+
+          {/* Sensör paneli — robot resmi üzerinde canlı sensör değerleri */}
+          <button
+            className="btn btn-ghost btn-sensor-panel"
+            onClick={props.onSensorPanel}
+            disabled={!isConnected || props.connectionMode !== 'ble'}
+            title={props.connectionMode === 'ble'
+              ? "Sensör paneli — robot resmi üzerinde canlı sensör değerleri"
+              : "Sensör paneli BLE bağlantısında kullanılabilir"}
+          >
+            <span style={{ fontSize: 14 }}>🤖</span>
+            Sensör Paneli
           </button>
 
           {/* Çalıştır — sadece USB modunda (BLE'de canlı çıktı pratik değil) */}
