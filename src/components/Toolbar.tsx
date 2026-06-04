@@ -175,29 +175,31 @@ export function Toolbar(props: Props) {
         {/* GRUP 2: Çalıştırma — modülleri yükle + çalıştır/durdur + yükle */}
         <div className="toolbar-group toolbar-group-actions">
           <button
-            className="btn btn-ghost btn-upload-lib"
+            className="btn btn-ghost btn-icon-only btn-upload-lib"
             onClick={props.onUploadLibrary}
             disabled={!isConnected || isBusy}
-            title="RoboExx kütüphanesini (roboexx.py) Pico'ya yükle. Bir kez yaparsın yeter."
+            data-tooltip="Modülleri Yükle"
+            data-tooltip-detail="RoboExx kütüphanesini Pico'ya yazar. Bir kez yapman yeter."
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
               <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               <circle cx="13" cy="4" r="2" fill="currentColor" />
             </svg>
-            Modülleri Yükle
           </button>
 
           {/* Sensör paneli — robot resmi üzerinde canlı sensör değerleri */}
           <button
-            className="btn btn-ghost btn-sensor-panel"
+            className="btn btn-ghost btn-icon-only btn-sensor-panel"
             onClick={props.onSensorPanel}
             disabled={!isConnected || props.connectionMode !== 'ble'}
-            title={props.connectionMode === 'ble'
-              ? "Sensör paneli — robot resmi üzerinde canlı sensör değerleri"
-              : "Sensör paneli BLE bağlantısında kullanılabilir"}
+            data-tooltip="Sensör Paneli"
+            data-tooltip-detail={
+              props.connectionMode === 'ble'
+                ? 'Robot resmi üzerinde canlı sensör değerleri'
+                : 'Sadece BLE bağlantısında kullanılabilir'
+            }
           >
-            <span style={{ fontSize: 14 }}>🤖</span>
-            Sensör Paneli
+            <span style={{ fontSize: 18, lineHeight: 1 }}>🤖</span>
           </button>
 
           {/* Çalıştır — sadece USB modunda (BLE'de canlı çıktı pratik değil) */}

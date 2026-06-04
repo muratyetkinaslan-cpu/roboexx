@@ -4737,3 +4737,102 @@ g.blocklyDraggable > path:first-of-type {
 
 
 
+
+/* ========================================================
+   ICON-ONLY BUTONLAR + ÖZEL TOOLTIP POPUP
+   Hover'da başlık + açıklama gösteren güzel popup.
+   ======================================================== */
+
+/* Icon-only buton — kare, padding eşit, sadece içeriği ortalar */
+.btn-icon-only {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative; /* tooltip için anchor */
+  gap: 0;
+}
+
+/* Tooltip popup — hover'da CSS ile */
+.btn-icon-only[data-tooltip]:hover::before,
+.btn-icon-only[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: none;
+}
+
+/* Başlık (üst kısım) */
+.btn-icon-only[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  background: rgba(20, 20, 24, 0.96);
+  color: white;
+  padding: 8px 12px 4px;
+  border-radius: 8px 8px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  z-index: 1000;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.1px;
+}
+
+/* Açıklama (alt kısım) */
+.btn-icon-only[data-tooltip-detail]::after {
+  content: attr(data-tooltip-detail);
+  position: absolute;
+  top: calc(100% + 38px); /* başlıkla aynı kutu, alt parça */
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  background: rgba(20, 20, 24, 0.96);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 12px 9px;
+  border-radius: 0 0 8px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  z-index: 1000;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Tek satır tooltip için (detail boş ise) ::after gizlenir */
+.btn-icon-only[data-tooltip]:not([data-tooltip-detail])::after,
+.btn-icon-only[data-tooltip-detail=""]::after {
+  display: none;
+}
+.btn-icon-only:not([data-tooltip-detail])[data-tooltip]::before,
+.btn-icon-only[data-tooltip-detail=""][data-tooltip]::before {
+  border-radius: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Disabled buton için tooltip soluk */
+.btn-icon-only:disabled[data-tooltip]:hover::before,
+.btn-icon-only:disabled[data-tooltip]:hover::after {
+  background: rgba(20, 20, 24, 0.88);
+}
+
+/* Açık tema desteği */
+[data-theme="galaxy-orange-light"] .btn-icon-only[data-tooltip]::before,
+[data-theme="galaxy-orange-light"] .btn-icon-only[data-tooltip-detail]::after {
+  background: rgba(30, 30, 36, 0.96);
+  color: white;
+}
+[data-theme="galaxy-orange-light"] .btn-icon-only[data-tooltip-detail]::after {
+  color: rgba(255, 255, 255, 0.78);
+}
