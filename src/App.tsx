@@ -1159,6 +1159,7 @@ export default function App() {
    * RoboExx modüllerini Pico'ya yükler:
    *  - roboexx.py (PicoBricks API)
    *  - songs.py (hazır şarkılar)
+   *  - pca9685.py (PCA9685 I2C servo sürücüsü)
    *  - main.py (BLE bootloader)
    *  - device_name.txt (BLE cihaz adı)
    */
@@ -1167,30 +1168,34 @@ export default function App() {
     let libCode: string;
     let mainCode: string;
     let songsCode = '';
+    let pcaCode = '';
     try {
       const results = await Promise.all([
         fetch(`${import.meta.env.BASE_URL}lib/roboexx.py`),
         fetch(`${import.meta.env.BASE_URL}lib/roboexx_main.py`),
         fetch(`${import.meta.env.BASE_URL}lib/songs.py`),
+        fetch(`${import.meta.env.BASE_URL}lib/pca9685.py`),
       ]);
-      const [libRes, mainRes, songsRes] = results;
+      const [libRes, mainRes, songsRes, pcaRes] = results;
       if (!libRes.ok) throw new Error(`roboexx.py HTTP ${libRes.status}`);
       if (!mainRes.ok) throw new Error(`roboexx_main.py HTTP ${mainRes.status}`);
       if (!songsRes.ok) throw new Error(`songs.py HTTP ${songsRes.status}`);
+      if (!pcaRes.ok) throw new Error(`pca9685.py HTTP ${pcaRes.status}`);
       libCode = await libRes.text();
       mainCode = await mainRes.text();
       songsCode = await songsRes.text();
+      pcaCode = await pcaRes.text();
     } catch (e) {
       addLine('error', `Kütüphane dosyası okunamadı: ${(e as Error).message}`);
       return;
     }
 
-    // 1) roboexx.py — toplam ilerlemenin %0-40'ı
+    // 1) roboexx.py — toplam ilerlemenin %0-30'u
     addLine('system', `⬆ roboexx.py yükleniyor (${libCode.length} bayt)`);
     setUploadProgress({ phase: 'uploading', pct: 0, bytesSent: 0, bytesTotal: libCode.length, speedKBs: 0 });
     try {
       await activeBridge.uploadLibrary('roboexx.py', libCode, (p) => {
-        setUploadProgress({ phase: 'uploading', pct: p.pct * 0.4, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+        setUploadProgress({ phase: 'uploading', pct: p.pct * 0.3, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
       addLine('system', `✓ roboexx.py yüklendi`);
     } catch (e) {
@@ -1200,12 +1205,12 @@ export default function App() {
       return;
     }
 
-    // 2) songs.py — müzik kütüphanesi  %40-55
+    // 2) songs.py — müzik kütüphanesi  %30-45
     addLine('system', `⬆ songs.py yükleniyor (${songsCode.length} bayt)`);
-    setUploadProgress({ phase: 'uploading', pct: 40, bytesSent: 0, bytesTotal: songsCode.length, speedKBs: 0 });
+    setUploadProgress({ phase: 'uploading', pct: 30, bytesSent: 0, bytesTotal: songsCode.length, speedKBs: 0 });
     try {
       await activeBridge.uploadLibrary('songs.py', songsCode, (p) => {
-        setUploadProgress({ phase: 'uploading', pct: 40 + p.pct * 0.15, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+        setUploadProgress({ phase: 'uploading', pct: 30 + p.pct * 0.15, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
       addLine('system', '✓ songs.py yüklendi');
     } catch (e) {
@@ -1215,7 +1220,22 @@ export default function App() {
       return;
     }
 
-    // 3) main.py (BLE bootloader)  — %55-95
+    // 3) pca9685.py — I2C servo sürücüsü  %45-55
+    addLine('system', `⬆ pca9685.py yükleniyor (${pcaCode.length} bayt)`);
+    setUploadProgress({ phase: 'uploading', pct: 45, bytesSent: 0, bytesTotal: pcaCode.length, speedKBs: 0 });
+    try {
+      await activeBridge.uploadLibrary('pca9685.py', pcaCode, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: 45 + p.pct * 0.1, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      addLine('system', '✓ pca9685.py yüklendi');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `pca9685.py yükleme hatası: ${err.message}`);
+      return;
+    }
+
+    // 4) main.py (BLE bootloader)  — %55-95
     addLine('system', `⬆ main.py (BLE bootloader) yükleniyor (${mainCode.length} bayt)`);
     setUploadProgress({ phase: 'uploading', pct: 55, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
     try {
@@ -1230,7 +1250,7 @@ export default function App() {
       return;
     }
 
-    // 4) device_name.txt — BLE cihaz adı (kişiselleştirilmiş)
+    // 5) device_name.txt — BLE cihaz adı (kişiselleştirilmiş)
     addLine('system', `⬆ Cihaz adı yazılıyor: "${deviceName}"`);
     try {
       await activeBridge.uploadLibrary('device_name.txt', deviceName, (p) => {

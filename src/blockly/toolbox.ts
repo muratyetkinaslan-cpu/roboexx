@@ -161,6 +161,13 @@ export const toolboxXml = `
     </block>
   </category>
 
+  <category name="Servo v3 (PCA9685)" categorystyle="servo_category">
+    <block type="rx_servo_v3">
+      <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
+    </block>
+    <block type="rx_servo_v3_off"></block>
+  </category>
+
   <category name="RGB LED" categorystyle="rgb_category">
     <block type="rx_rgb_init"></block>
     <block type="rx_rgb_set_all"></block>

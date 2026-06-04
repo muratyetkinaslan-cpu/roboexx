@@ -1108,6 +1108,77 @@ Blockly.Blocks['rx_servo_v2'] = {
   },
 };
 
+// ============================================================
+//  Servo v3 — PCA9685 16-Kanal I2C PWM/Servo Sürücüsü
+//  Pico'ya I2C ile bağlanan harici kart (Adafruit & uyumlu).
+//  Bir bloka 16 servo bağlanabilir, her kanala bağımsız açı verilir.
+// ============================================================
+Blockly.Blocks['rx_servo_v3'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servoArm))
+      .appendField('PCA9685 servo — kanal')
+      .appendField(
+        new Blockly.FieldDropdown([
+          ['0', '0'],   ['1', '1'],   ['2', '2'],   ['3', '3'],
+          ['4', '4'],   ['5', '5'],   ['6', '6'],   ['7', '7'],
+          ['8', '8'],   ['9', '9'],   ['10', '10'], ['11', '11'],
+          ['12', '12'], ['13', '13'], ['14', '14'], ['15', '15'],
+        ]),
+        'CHANNEL'
+      )
+      .appendField('açı');
+    this.appendValueInput('ANGLE').setCheck('Number');
+    this.appendDummyInput().appendField('°');
+    // Pin ve adres ayarları — varsayılan: SDA=GP4, SCL=GP5, adres=0x40
+    this.appendDummyInput()
+      .appendField('  ⚙ SDA')
+      .appendField(new Blockly.FieldNumber(4, 0, 28, 1), 'SDA')
+      .appendField('SCL')
+      .appendField(new Blockly.FieldNumber(5, 0, 28, 1), 'SCL')
+      .appendField('adres 0x')
+      .appendField(new Blockly.FieldTextInput('40'), 'ADDR');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'PCA9685 I2C servo sürücüsü üzerindeki seçili kanala 0-180° açı yazar. ' +
+      'Varsayılan: SDA=GP4, SCL=GP5, adres 0x40 (Adafruit kart için).'
+    );
+  },
+};
+
+Blockly.Blocks['rx_servo_v3_off'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servoArm))
+      .appendField('PCA9685 servo — kanal')
+      .appendField(
+        new Blockly.FieldDropdown([
+          ['0', '0'],   ['1', '1'],   ['2', '2'],   ['3', '3'],
+          ['4', '4'],   ['5', '5'],   ['6', '6'],   ['7', '7'],
+          ['8', '8'],   ['9', '9'],   ['10', '10'], ['11', '11'],
+          ['12', '12'], ['13', '13'], ['14', '14'], ['15', '15'],
+        ]),
+        'CHANNEL'
+      )
+      .appendField('serbest bırak');
+    this.appendDummyInput()
+      .appendField('  ⚙ SDA')
+      .appendField(new Blockly.FieldNumber(4, 0, 28, 1), 'SDA')
+      .appendField('SCL')
+      .appendField(new Blockly.FieldNumber(5, 0, 28, 1), 'SCL')
+      .appendField('adres 0x')
+      .appendField(new Blockly.FieldTextInput('40'), 'ADDR');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Seçili PCA9685 kanalının PWM\'ini durdurur (servo motoru rahat bırakır, akım çekmez).');
+  },
+};
+
 Blockly.Blocks['rx_dc_motor'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
