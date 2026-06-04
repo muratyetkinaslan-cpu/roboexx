@@ -4168,122 +4168,8 @@ g.blocklyDraggable > path:first-of-type {
   margin-top: 2px;
 }
 
-/* ========================================
-   Kit Seçim Popup'ı — Modülleri Yükle
-   ======================================== */
-
-.kit-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(3px);
-  z-index: 9000;
-  padding: 24px;
-}
-
-.kit-modal {
-  width: 100%;
-  max-width: 460px;
-  background: var(--rx-surface);
-  border: 1px solid var(--rx-border);
-  border-radius: 16px;
-  padding: 26px 24px 20px;
-  box-shadow: 0 16px 56px rgba(0, 0, 0, 0.45);
-}
-
-.kit-modal-title {
-  font-size: 17px;
-  font-weight: 800;
-  color: var(--rx-text);
-  margin: 0 0 6px;
-  text-align: center;
-}
-.kit-modal-desc {
-  font-size: 12.5px;
-  color: var(--rx-text-dim);
-  margin: 0 0 18px;
-  text-align: center;
-}
-
-.kit-modal-options {
-  display: flex;
-  gap: 12px;
-}
-
-.kit-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 18px 14px;
-  background: var(--rx-surface2);
-  border: 1.5px solid var(--rx-border);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.15s var(--ease-out);
-  text-align: center;
-}
-.kit-card:hover {
-  border-color: var(--rx-accent);
-  background: var(--rx-accent-soft);
-  transform: translateY(-2px);
-}
-
-.kit-card-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-}
-.kit-card-icon-pico {
-  background: rgba(46, 127, 214, 0.15);
-  color: #2e7fd6;
-}
-.kit-card-icon-berry {
-  background: rgba(232, 184, 31, 0.15);
-  color: #cda015;
-}
-
-.kit-card-name {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--rx-text);
-}
-.kit-card-desc {
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--rx-text-muted);
-}
-
-.kit-modal-cancel {
-  display: block;
-  margin: 16px auto 0;
-  padding: 8px 20px;
-  background: transparent;
-  border: 1px solid var(--rx-border);
-  border-radius: 8px;
-  color: var(--rx-text-dim);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.13s var(--ease-out);
-}
-.kit-modal-cancel:hover {
-  background: var(--rx-surface2);
-  color: var(--rx-text);
-}
-
 /* Mobil — kartlar alt alta */
 @media (max-width: 480px) {
-  .kit-modal-options {
-    flex-direction: column;
-  }
 }
 
 /* ========================================
@@ -4734,9 +4620,6 @@ g.blocklyDraggable > path:first-of-type {
 .sensor-settings-btn-save:hover {
   filter: brightness(1.1);
 }
-
-
-
 
 /* ========================================================
    ICON-ONLY BUTONLAR + ÖZEL TOOLTIP POPUP

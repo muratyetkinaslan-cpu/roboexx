@@ -242,47 +242,6 @@ export const toolboxXml = `
 
   <sep></sep>
 
-  <category name="🚗 BerryBot" categorystyle="dcmotor_category">
-    <category name="Hareket" categorystyle="dcmotor_category">
-      <block type="bb_move"></block>
-      <block type="bb_stop"></block>
-      <block type="bb_motors">
-        <value name="LEFT"><shadow type="math_number"><field name="NUM">150</field></shadow></value>
-        <value name="RIGHT"><shadow type="math_number"><field name="NUM">150</field></shadow></value>
-      </block>
-    </category>
-    <category name="RGB Şerit" categorystyle="rgb_category">
-      <block type="bb_rgb_all"></block>
-      <block type="bb_rgb_one">
-        <value name="INDEX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
-      </block>
-      <block type="bb_rgb_off"></block>
-    </category>
-    <category name="LED Matris" categorystyle="led_category">
-      <block type="bb_matrix_shape"></block>
-      <block type="bb_matrix_clear"></block>
-    </category>
-    <category name="Sensörler" categorystyle="sensor_category">
-      <block type="bb_distance"></block>
-      <block type="bb_line"></block>
-      <block type="bb_light"></block>
-      <block type="bb_button"></block>
-    </category>
-    <category name="IR Kumanda" categorystyle="ir_category">
-      <block type="bb_ir_start"></block>
-      <block type="bb_ir_key"></block>
-    </category>
-    <category name="Ses" categorystyle="buzzer_category">
-      <block type="bb_horn"></block>
-      <block type="bb_buzzer">
-        <value name="FREQ"><shadow type="math_number"><field name="NUM">440</field></shadow></value>
-        <value name="DUR"><shadow type="math_number"><field name="NUM">300</field></shadow></value>
-      </block>
-    </category>
-  </category>
-
-  <sep></sep>
-
   <category name="Değişkenler" categorystyle="variable_category" custom="VARIABLE"></category>
 
   <category name="Fonksiyonlar" categorystyle="procedure_category" custom="PROCEDURE"></category>

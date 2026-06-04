@@ -1,6 +1,6 @@
 # RoboExx — Raspberry Pi Pico W için Blok Tabanlı Programlama
 
-Çocuklar için Türkçe blok tabanlı Python programlama ortamı. Raspberry Pi Pico W ve PicoBricks/BerryBot kitleri ile çalışır.
+Çocuklar için Türkçe blok tabanlı Python programlama ortamı. Raspberry Pi Pico W ve PicoBricks kiti ile çalışır.
 
 ## Özellikler
 
@@ -24,7 +24,7 @@
 2. Pico'yu USB ile bilgisayara bağla
 3. RoboExx'i tarayıcıda aç
 4. "Bağlan" → seri portu seç
-5. "Modülleri Yükle" → PicoBricks veya BerryBot seç → kütüphane + BLE bootloader yüklenir
+5. "Modülleri Yükle" → RoboExx kütüphanesi + BLE bootloader yüklenir
 6. Pico'ya RESET bas
 7. Artık BLE üzerinden kablosuz çalışabilir (kit varsa pille besle)
 

@@ -141,7 +141,7 @@ export default function App() {
   const [portInfo, setPortInfo] = useState<PortInfo | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   /** "Modülleri Yükle" basınca açılan kit seçim popup'ı görünür mü? */
-  const [kitModalOpen, setKitModalOpen] = useState(false);
+
   /** Bağlantı modu: USB (Web Serial) veya BLE (Web Bluetooth) */
   const [connectionMode, setConnectionMode] = useState<'usb' | 'ble'>(() => {
     return (localStorage.getItem('roboexx.connection-mode') as 'usb' | 'ble') || 'usb';
@@ -1144,96 +1144,78 @@ export default function App() {
   };
 
   /**
-   * "Modülleri Yükle" — kit seçim popup'ını açar.
-   * Kullanıcı PicoBricks mi BerryBot mu seçer, ardından runUploadLibrary
-   * o kite uygun .py dosyalarını Pico'ya yazar.
+   * "Modülleri Yükle" — RoboExx modüllerini (roboexx.py + main.py + songs.py + device_name.txt)
+   * Pico'ya yükler. Bağlantı kontrolü yapar, doğrudan yükleme başlatır.
    */
   const handleUploadLibrary = () => {
     if (bridgeState !== 'connected' && bridgeState !== 'busy') {
       addLine('error', 'Önce bir cihaza bağlan (USB veya Bluetooth)');
       return;
     }
-    setKitModalOpen(true);
+    runUploadLibrary();
   };
 
   /**
-   * Seçilen kite göre modülleri Pico'ya yükler.
-   *  - 'picobricks' → roboexx.py + main.py (BLE bootloader) + device_name.txt
-   *  - 'berrybot'   → berrybot.py + main.py (BLE bootloader) + device_name.txt
-   *
-   * Her iki kit de Raspberry Pi Pico tabanlı; BLE bootloader (main.py)
-   * ortak. BerryBot'un kendi BLE modülü ileride ayrı ele alınacak.
+   * RoboExx modüllerini Pico'ya yükler:
+   *  - roboexx.py (PicoBricks API)
+   *  - songs.py (hazır şarkılar)
+   *  - main.py (BLE bootloader)
+   *  - device_name.txt (BLE cihaz adı)
    */
-  const runUploadLibrary = async (kit: 'picobricks' | 'berrybot') => {
-    setKitModalOpen(false);
-
-    // Kite göre yüklenecek kütüphane dosyası
-    const libFile = kit === 'berrybot' ? 'berrybot.py' : 'roboexx.py';
-    const kitLabel = kit === 'berrybot' ? 'BerryBot' : 'PicoBricks';
-
-    addLine('system', `📚 ${kitLabel} modülleri indiriliyor…`);
+  const runUploadLibrary = async () => {
+    addLine('system', `📚 RoboExx modülleri indiriliyor…`);
     let libCode: string;
     let mainCode: string;
     let songsCode = '';
-    const wantSongs = kit === 'picobricks'; // songs.py şimdilik PicoBricks için
     try {
-      const fetches: Promise<Response>[] = [
-        fetch(`${import.meta.env.BASE_URL}lib/${libFile}`),
+      const results = await Promise.all([
+        fetch(`${import.meta.env.BASE_URL}lib/roboexx.py`),
         fetch(`${import.meta.env.BASE_URL}lib/roboexx_main.py`),
-      ];
-      if (wantSongs) {
-        fetches.push(fetch(`${import.meta.env.BASE_URL}lib/songs.py`));
-      }
-      const results = await Promise.all(fetches);
-      const libRes = results[0];
-      const mainRes = results[1];
-      if (!libRes.ok) throw new Error(`${libFile} HTTP ${libRes.status}`);
+        fetch(`${import.meta.env.BASE_URL}lib/songs.py`),
+      ]);
+      const [libRes, mainRes, songsRes] = results;
+      if (!libRes.ok) throw new Error(`roboexx.py HTTP ${libRes.status}`);
       if (!mainRes.ok) throw new Error(`roboexx_main.py HTTP ${mainRes.status}`);
+      if (!songsRes.ok) throw new Error(`songs.py HTTP ${songsRes.status}`);
       libCode = await libRes.text();
       mainCode = await mainRes.text();
-      if (wantSongs) {
-        const songsRes = results[2];
-        if (!songsRes.ok) throw new Error(`songs.py HTTP ${songsRes.status}`);
-        songsCode = await songsRes.text();
-      }
+      songsCode = await songsRes.text();
     } catch (e) {
       addLine('error', `Kütüphane dosyası okunamadı: ${(e as Error).message}`);
       return;
     }
 
-    // 1) Kütüphane (.py)  — toplam ilerlemenin %0-40'ı
-    addLine('system', `⬆ ${libFile} yükleniyor (${libCode.length} bayt)`);
+    // 1) roboexx.py — toplam ilerlemenin %0-40'ı
+    addLine('system', `⬆ roboexx.py yükleniyor (${libCode.length} bayt)`);
     setUploadProgress({ phase: 'uploading', pct: 0, bytesSent: 0, bytesTotal: libCode.length, speedKBs: 0 });
     try {
-      await activeBridge.uploadLibrary(libFile, libCode, (p) => {
+      await activeBridge.uploadLibrary('roboexx.py', libCode, (p) => {
         setUploadProgress({ phase: 'uploading', pct: p.pct * 0.4, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
-      addLine('system', `✓ ${libFile} yüklendi`);
+      addLine('system', `✓ roboexx.py yüklendi`);
     } catch (e) {
       const err = e as Error;
       setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
-      addLine('error', `${libFile} yükleme hatası: ${err.message}`);
+      addLine('error', `roboexx.py yükleme hatası: ${err.message}`);
       return;
     }
 
-    // 1b) songs.py — müzik kütüphanesi (sadece PicoBricks)  %40-55
-    if (wantSongs && songsCode) {
-      addLine('system', `⬆ songs.py yükleniyor (${songsCode.length} bayt)`);
-      setUploadProgress({ phase: 'uploading', pct: 40, bytesSent: 0, bytesTotal: songsCode.length, speedKBs: 0 });
-      try {
-        await activeBridge.uploadLibrary('songs.py', songsCode, (p) => {
-          setUploadProgress({ phase: 'uploading', pct: 40 + p.pct * 0.15, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
-        });
-        addLine('system', '✓ songs.py yüklendi');
-      } catch (e) {
-        const err = e as Error;
-        setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
-        addLine('error', `songs.py yükleme hatası: ${err.message}`);
-        return;
-      }
+    // 2) songs.py — müzik kütüphanesi  %40-55
+    addLine('system', `⬆ songs.py yükleniyor (${songsCode.length} bayt)`);
+    setUploadProgress({ phase: 'uploading', pct: 40, bytesSent: 0, bytesTotal: songsCode.length, speedKBs: 0 });
+    try {
+      await activeBridge.uploadLibrary('songs.py', songsCode, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: 40 + p.pct * 0.15, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      addLine('system', '✓ songs.py yüklendi');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `songs.py yükleme hatası: ${err.message}`);
+      return;
     }
 
-    // 2) main.py (BLE bootloader)  — %55-95
+    // 3) main.py (BLE bootloader)  — %55-95
     addLine('system', `⬆ main.py (BLE bootloader) yükleniyor (${mainCode.length} bayt)`);
     setUploadProgress({ phase: 'uploading', pct: 55, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
     try {
@@ -1248,14 +1230,14 @@ export default function App() {
       return;
     }
 
-    // 3) device_name.txt — BLE cihaz adı (kişiselleştirilmiş)
+    // 4) device_name.txt — BLE cihaz adı (kişiselleştirilmiş)
     addLine('system', `⬆ Cihaz adı yazılıyor: "${deviceName}"`);
     try {
       await activeBridge.uploadLibrary('device_name.txt', deviceName, (p) => {
         setUploadProgress({ phase: 'uploading', pct: 95 + p.pct * 0.05, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
       setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
-      addLine('system', `✓ ${kitLabel} modülleri hazır · Cihaz: "${deviceName}"`);
+      addLine('system', `✓ RoboExx modülleri hazır · Cihaz: "${deviceName}"`);
       addLine('info', 'Pico\'yu yeniden başlat (RESET tuşu veya gücü kes/aç) — sonra BLE üzerinden bağlanabilirsin');
     } catch (e) {
       const err = e as Error;
@@ -1494,48 +1476,6 @@ export default function App() {
         <div className="keys-overlay" aria-live="polite">
           <span className="keys-overlay-label">{gamepadActive ? '🎮' : '⌨'}</span>
           <span className="keys-overlay-keys">{pressedKeysDisplay}</span>
-        </div>
-      )}
-
-      {/* Kit seçim popup'ı — "Modülleri Yükle" basınca açılır */}
-      {kitModalOpen && (
-        <div className="kit-modal-backdrop" onClick={() => setKitModalOpen(false)}>
-          <div className="kit-modal" onClick={(e) => e.stopPropagation()}>
-            <h2 className="kit-modal-title">Hangi kiti kullanıyorsun?</h2>
-            <p className="kit-modal-desc">
-              Modüller seçtiğin kite göre Pico'ya yüklenecek.
-            </p>
-            <div className="kit-modal-options">
-              <button className="kit-card" onClick={() => runUploadLibrary('picobricks')}>
-                <div className="kit-card-icon kit-card-icon-pico">
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-                    <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
-                    <rect x="7" y="9" width="4" height="4" rx="0.6" fill="currentColor" />
-                    <rect x="13" y="9" width="4" height="4" rx="0.6" fill="currentColor" />
-                    <path d="M7 16h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                </div>
-                <div className="kit-card-name">PicoBricks</div>
-                <div className="kit-card-desc">LED, servo, sensör modülleri · RoboExx kütüphanesi</div>
-              </button>
-
-              <button className="kit-card" onClick={() => runUploadLibrary('berrybot')}>
-                <div className="kit-card-icon kit-card-icon-berry">
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-                    <rect x="4" y="8" width="16" height="9" rx="2" stroke="currentColor" strokeWidth="1.8" />
-                    <circle cx="8" cy="19" r="2.2" stroke="currentColor" strokeWidth="1.8" />
-                    <circle cx="16" cy="19" r="2.2" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M9 8V5.5M15 8V5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </div>
-                <div className="kit-card-name">BerryBot</div>
-                <div className="kit-card-desc">Robot araç kiti · motor, RGB şerit, IR · BerryBot kütüphanesi</div>
-              </button>
-            </div>
-            <button className="kit-modal-cancel" onClick={() => setKitModalOpen(false)}>
-              Vazgeç
-            </button>
-          </div>
         </div>
       )}
 
