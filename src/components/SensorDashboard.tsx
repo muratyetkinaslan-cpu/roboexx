@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DEFAULT_SENSORS,
   SENSOR_TYPE,
@@ -51,7 +51,6 @@ export function SensorDashboard({ open, onClose }: Props) {
     const onReply = (payload: Uint8Array) => {
       const now = Date.now();
       const newReadings: Record<string, SensorReading> = {};
-      // Her sensör için 2 byte uint16 LE
       for (let i = 0; i < configs.length; i++) {
         const offset = i * 2;
         if (offset + 1 >= payload.length) break;
@@ -66,7 +65,6 @@ export function SensorDashboard({ open, onClose }: Props) {
     };
     bleBridge.onSensorReply = onReply;
 
-    // İlk istek + her 500ms tekrarla
     const sendRequest = () => {
       if (configs.length === 0) return;
       const tuples: Array<[number, number, number]> = configs.map((c) => [

@@ -1,0 +1,26 @@
+# Render Blueprint — RoboExx Canlı Paylaşım Sunucusu
+#
+# https://render.com'da Yeni Service oluştururken bu dosya otomatik okunur.
+# Veya manuel dashboard'dan da kurulabilir:
+#   Type: Web Service
+#   Root Directory: server
+#   Build Command: npm install
+#   Start Command: npm start
+#   Environment: Node
+#   Plan: Free
+#
+# Kullanıcı render.com → New → Blueprint → GitHub repo seç → Apply
+services:
+  - type: web
+    name: roboexx-collab
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # PORT otomatik Render tarafından set edilir
+    healthCheckPath: /

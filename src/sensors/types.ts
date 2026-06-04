@@ -110,10 +110,8 @@ export function formatValue(cfg: SensorConfig, r: SensorReading): string {
       return r.raw ? '1' : '0';
     case SENSOR_TYPE.ULTRASONIC:
       if (r.raw === 0xFFFF) return '∞';
-      // mm → cm dönüşümü
       return (r.raw / 10).toFixed(1) + ' cm';
     case SENSOR_TYPE.ANALOG: {
-      // ADC ham 0-65535, yüzdeye çevir
       const pct = Math.round((r.raw / 65535) * 100);
       return pct + '%';
     }

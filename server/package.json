@@ -1,0 +1,19 @@
+{
+  "name": "roboexx-collab-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RoboExx Canlı Paylaşım WebSocket sunucusu (Yjs sync)",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "yjs": "^13.6.18",
+    "y-protocols": "^1.0.6",
+    "lib0": "^0.2.94"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

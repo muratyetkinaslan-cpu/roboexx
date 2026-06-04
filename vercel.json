@@ -26,6 +26,7 @@
     }
   ],
   "env": {
-    "VITE_LIVE_SHARE_ENABLED": "false"
+    "VITE_LIVE_SHARE_ENABLED": "true",
+    "VITE_COLLAB_URL": "wss://roboexx-collab.onrender.com"
   }
 }

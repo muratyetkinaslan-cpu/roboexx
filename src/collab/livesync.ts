@@ -76,23 +76,23 @@ export interface RoomConnection {
 // ====== Server URL ======
 
 /**
- * Tarayıcı HTTPS'te ise wss://aynı-host:5173/collab kullan (Vite proxy)
- * Tarayıcı HTTP'te ise ws://aynı-host:1234 doğrudan kullan
- *
- * Bu sayede:
- *   - localhost HTTP veya HTTPS — her ikisinde de çalışır
- *   - LAN IP HTTPS — proxy ile WSS çalışır (mixed content sorunu yok)
- *   - LAN IP HTTP — doğrudan WS, ama Web Serial çalışmaz
+ * Production'da (Vercel deploy) → VITE_COLLAB_URL env var (Render gibi external WS)
+ * Localhost HTTPS → wss://aynı-host:5173/collab (Vite proxy)
+ * Localhost HTTP → ws://aynı-host:1234
  */
 function defaultServerUrl(): string {
+  // Production env var (build sırasında inject edilir)
+  const envUrl = import.meta.env.VITE_COLLAB_URL;
+  if (envUrl && typeof envUrl === 'string') {
+    return envUrl;
+  }
   if (typeof window === 'undefined') return 'ws://localhost:1234';
   const host = window.location.hostname || 'localhost';
+  // Localhost dev için path-based detection
   if (window.location.protocol === 'https:') {
-    // HTTPS sayfa → WSS proxy üzerinden (Vite /collab path'i)
     const port = window.location.port || '5173';
     return `wss://${host}:${port}/collab`;
   }
-  // HTTP sayfa → doğrudan ws
   return `ws://${host}:1234`;
 }
 

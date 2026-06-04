@@ -287,6 +287,7 @@ export default function App() {
   const [pressedKeysDisplay, setPressedKeysDisplay] = useState<string>('');
   const [gamepadActive, setGamepadActive] = useState<boolean>(false);
   const [sensorPanelOpen, setSensorPanelOpen] = useState<boolean>(false);
+
   useEffect(() => {
     if (bridgeState !== 'connected') {
       setPressedKeysDisplay('');
