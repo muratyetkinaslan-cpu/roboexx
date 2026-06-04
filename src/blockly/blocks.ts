@@ -1111,13 +1111,36 @@ Blockly.Blocks['rx_servo_v2'] = {
 // ============================================================
 //  Servo v3 — PCA9685 16-Kanal I2C PWM/Servo Sürücüsü
 //  Pico'ya I2C ile bağlanan harici kart (Adafruit & uyumlu).
-//  Bir bloka 16 servo bağlanabilir, her kanala bağımsız açı verilir.
+//  Akış: önce 'PCA9685 başlat' (bir kez), sonra istediğin kadar
+//  'servo kanal X açı Y' bloğu.
 // ============================================================
+
+Blockly.Blocks['rx_pca9685_init'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servoArm))
+      .appendField('PCA9685 başlat — SDA')
+      .appendField(new Blockly.FieldNumber(4, 0, 28, 1), 'SDA')
+      .appendField('SCL')
+      .appendField(new Blockly.FieldNumber(5, 0, 28, 1), 'SCL')
+      .appendField('adres 0x')
+      .appendField(new Blockly.FieldTextInput('40'), 'ADDR');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'PCA9685 I2C servo sürücüsünü başlatır. Bir kez başlangıçta çağır, ' +
+      'sonra servo bloklarını istediğin kadar kullan. Default: SDA=GP4, SCL=GP5, adres 0x40.'
+    );
+  },
+};
+
 Blockly.Blocks['rx_servo_v3'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.servoArm))
-      .appendField('PCA9685 servo — kanal')
+      .appendField('servo — kanal')
       .appendField(
         new Blockly.FieldDropdown([
           ['0', '0'],   ['1', '1'],   ['2', '2'],   ['3', '3'],
@@ -1130,21 +1153,13 @@ Blockly.Blocks['rx_servo_v3'] = {
       .appendField('açı');
     this.appendValueInput('ANGLE').setCheck('Number');
     this.appendDummyInput().appendField('°');
-    // Pin ve adres ayarları — varsayılan: SDA=GP4, SCL=GP5, adres=0x40
-    this.appendDummyInput()
-      .appendField('  ⚙ SDA')
-      .appendField(new Blockly.FieldNumber(4, 0, 28, 1), 'SDA')
-      .appendField('SCL')
-      .appendField(new Blockly.FieldNumber(5, 0, 28, 1), 'SCL')
-      .appendField('adres 0x')
-      .appendField(new Blockly.FieldTextInput('40'), 'ADDR');
     this.setStyle('servo_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(true);
     this.setTooltip(
-      'PCA9685 I2C servo sürücüsü üzerindeki seçili kanala 0-180° açı yazar. ' +
-      'Varsayılan: SDA=GP4, SCL=GP5, adres 0x40 (Adafruit kart için).'
+      'PCA9685 üzerindeki seçili kanala 0-180° açı yazar. ' +
+      'İlk kullanımdan önce "PCA9685 başlat" bloğunu kullanırsan pin/adresi belirleyebilirsin.'
     );
   },
 };
@@ -1153,7 +1168,7 @@ Blockly.Blocks['rx_servo_v3_off'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.servoArm))
-      .appendField('PCA9685 servo — kanal')
+      .appendField('servo — kanal')
       .appendField(
         new Blockly.FieldDropdown([
           ['0', '0'],   ['1', '1'],   ['2', '2'],   ['3', '3'],
@@ -1164,13 +1179,6 @@ Blockly.Blocks['rx_servo_v3_off'] = {
         'CHANNEL'
       )
       .appendField('serbest bırak');
-    this.appendDummyInput()
-      .appendField('  ⚙ SDA')
-      .appendField(new Blockly.FieldNumber(4, 0, 28, 1), 'SDA')
-      .appendField('SCL')
-      .appendField(new Blockly.FieldNumber(5, 0, 28, 1), 'SCL')
-      .appendField('adres 0x')
-      .appendField(new Blockly.FieldTextInput('40'), 'ADDR');
     this.setStyle('servo_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);

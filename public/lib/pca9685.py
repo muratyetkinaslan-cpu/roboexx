@@ -4,13 +4,15 @@ PCA9685 16-kanal I2C PWM/Servo sürücüsü — RoboExx için MicroPython kütü
 Adafruit PCA9685 ve uyumlu kartları destekler. Pico W üzerinde I2C0 (GP4/GP5)
 veya I2C1 (GP6/GP7, GP10/GP11 vs.) kullanılabilir.
 
-Kullanım — RoboExx Blokları'ndan otomatik üretilen kod:
-    from pca9685 import servo_v3
-    servo_v3(0, 90)              # kanal 0, açı 90°
-    servo_v3(5, 180, sda=4, scl=5, addr=0x40, freq=50)
+Kullanım — RoboExx Blokları'ndan üretilen kod:
+    from pca9685 import init_pca9685, servo_v3
+    init_pca9685(sda=4, scl=5, addr=0x40, freq=50)   # bir kez, başlangıçta
+    servo_v3(0, 90)                                   # kanal 0, 90°
+    servo_v3(1, 45)                                   # kanal 1, 45°
+    servo_v3(2, 120)                                  # kanal 2, 120°
 
-İlk çağrıda I2C ve PCA9685 başlatılır, sonraki çağrılar aynı bus'ı kullanır.
-Farklı pin'ler ile çağrılırsa yeniden başlatılır (esnek olsun diye).
+`init_pca9685()` çağrılmadan da servo_v3 çalışır — ilk çağrıda default config
+ile otomatik başlatılır (geriye dönük uyum).
 """
 
 from machine import Pin, I2C
@@ -19,6 +21,7 @@ import time
 # Modül-level cache — tek I2C bus + tek PCA9685 instance
 _pca = None
 _cur_cfg = None  # (sda, scl, addr, freq)
+_default_cfg = (4, 5, 0x40, 50)  # init_pca9685() ile değiştirilebilir
 
 
 class PCA9685:
@@ -56,12 +59,12 @@ class PCA9685:
         if prescale > 255:
             prescale = 255
         old_mode = self._read8(self.MODE1)
-        # Sleep'e geç
+        # Sleep'e geç, prescale yaz, geri dön
         self._write8(self.MODE1, (old_mode & 0x7F) | 0x10)
         self._write8(self.PRESCALE, prescale)
         self._write8(self.MODE1, old_mode)
         time.sleep_ms(5)
-        # Restart (gerekli yoksa atla)
+        # Restart
         self._write8(self.MODE1, old_mode | 0xA1)
 
     def set_pwm(self, channel, on, off):
@@ -75,17 +78,18 @@ class PCA9685:
         )
 
     def set_off(self, channel):
-        """Bir kanalı tamamen kapat (servo gücü kes)."""
+        """Bir kanalı tamamen kapat (servo gücünü serbest bırakır)."""
         self.set_pwm(channel, 0, 0)
 
 
-def _ensure(sda, scl, addr, freq):
-    """I2C ve PCA9685 nesnesini hazır tut (config değiştiyse yeniden başlat)."""
+def _ensure():
+    """I2C ve PCA9685 nesnesini hazır tut (sadece default_cfg değiştiyse yeniden başlat)."""
     global _pca, _cur_cfg
-    cfg = (sda, scl, addr, freq)
+    cfg = _default_cfg
     if _pca is not None and _cur_cfg == cfg:
         return _pca
-    # Pin'lerden I2C kanalını seç (Pico'da SDA pinleri belli I2C bus'larına bağlı)
+    sda, scl, addr, freq = cfg
+    # Pico'da SDA pin'inden I2C bus ID seçimi
     # GP0/1, GP4/5, GP8/9, GP12/13, GP16/17, GP20/21 → I2C0
     # GP2/3, GP6/7, GP10/11, GP14/15, GP18/19, GP26/27 → I2C1
     i2c_id = 0 if (sda % 4) == 0 else 1
@@ -99,6 +103,24 @@ def _ensure(sda, scl, addr, freq):
     _pca.set_pwm_freq(freq)
     _cur_cfg = cfg
     return _pca
+
+
+def init_pca9685(sda=4, scl=5, addr=0x40, freq=50):
+    """PCA9685'i belirli pin/adres/frekans ile başlat (bir kez, başlangıçta çağır).
+
+    Bu fonksiyon modül-level config'i set eder; sonraki servo_v3() çağrıları
+    aynı config'i kullanır.
+
+    Parametreler:
+      sda    : I2C SDA pin numarası (default 4 — Pico'da GP4)
+      scl    : I2C SCL pin numarası (default 5 — Pico'da GP5)
+      addr   : I2C adresi (default 0x40 — Adafruit varsayılan)
+      freq   : PWM frekansı Hz (default 50 — servo standardı)
+    """
+    global _default_cfg
+    _default_cfg = (sda, scl, addr, freq)
+    # Hemen başlat ki ilk servo çağrısı gecikmesin
+    _ensure()
 
 
 def _angle_to_ticks(angle_deg, min_us=500, max_us=2500, freq_hz=50):
@@ -117,21 +139,22 @@ def _angle_to_ticks(angle_deg, min_us=500, max_us=2500, freq_hz=50):
     return ticks
 
 
-def servo_v3(channel, angle, sda=4, scl=5, addr=0x40, freq=50):
-    """PCA9685 üzerindeki bir kanala servo açısı yaz.
+def servo_v3(channel, angle):
+    """PCA9685 kanalına servo açısı yaz.
 
     channel : 0-15
     angle   : 0-180 derece
-    sda/scl : I2C pinleri (default: GP4/GP5 — Pico'da standart I2C0)
-    addr    : I2C adresi (default 0x40 — Adafruit kart varsayılan)
-    freq    : PWM frekansı Hz (default 50 — servo standardı)
+
+    Pin/adres ayarları için önce init_pca9685() çağırın. Çağrılmamışsa
+    default config (SDA=4, SCL=5, 0x40, 50 Hz) otomatik kullanılır.
     """
-    pca = _ensure(sda, scl, addr, freq)
+    pca = _ensure()
+    freq = _default_cfg[3]
     ticks = _angle_to_ticks(angle, freq_hz=freq)
     pca.set_pwm(channel, 0, ticks)
 
 
-def servo_v3_off(channel, sda=4, scl=5, addr=0x40, freq=50):
+def servo_v3_off(channel):
     """Belirli kanalın PWM'ini durdur (servonun gücünü serbest bırakır)."""
-    pca = _ensure(sda, scl, addr, freq)
+    pca = _ensure()
     pca.set_off(channel)

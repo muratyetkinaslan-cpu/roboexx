@@ -162,6 +162,7 @@ export const toolboxXml = `
   </category>
 
   <category name="Servo v3 (PCA9685)" categorystyle="servo_category">
+    <block type="rx_pca9685_init"></block>
     <block type="rx_servo_v3">
       <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
     </block>

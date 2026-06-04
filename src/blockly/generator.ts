@@ -450,33 +450,30 @@ pythonGenerator.forBlock['rx_servo_v2'] = function (block, generator) {
 };
 
 // ---- Servo v3 — PCA9685 I2C 16-kanal sürücü ----
+pythonGenerator.forBlock['rx_pca9685_init'] = function (block, generator) {
+  generator.definitions_['import_pca9685_init'] = 'from pca9685 import init_pca9685';
+  const sda = block.getFieldValue('SDA');
+  const scl = block.getFieldValue('SCL');
+  const addrText = (block.getFieldValue('ADDR') || '40').trim();
+  const addr = parseInt(addrText.replace(/^0x/i, ''), 16) || 0x40;
+  // Default değerlerse parametre vermeden çağır (kod temiz olsun)
+  if (sda === 4 && scl === 5 && addr === 0x40) {
+    return `init_pca9685()\n`;
+  }
+  return `init_pca9685(sda=${sda}, scl=${scl}, addr=0x${addr.toString(16).toUpperCase()})\n`;
+};
+
 pythonGenerator.forBlock['rx_servo_v3'] = function (block, generator) {
   generator.definitions_['import_pca9685'] = 'from pca9685 import servo_v3';
   const channel = block.getFieldValue('CHANNEL');
   const angle = generator.valueToCode(block, 'ANGLE', Order.NONE) || '90';
-  const sda = block.getFieldValue('SDA');
-  const scl = block.getFieldValue('SCL');
-  const addrText = (block.getFieldValue('ADDR') || '40').trim();
-  // Hex parse — kullanıcı 40, 41, 0x40 vs. yazabilir
-  const addr = parseInt(addrText.replace(/^0x/i, ''), 16) || 0x40;
-  // Default değerlerse kısa çağrı yap (üretilen kod temiz olsun)
-  if (sda === 4 && scl === 5 && addr === 0x40) {
-    return `servo_v3(${channel}, ${angle})\n`;
-  }
-  return `servo_v3(${channel}, ${angle}, sda=${sda}, scl=${scl}, addr=0x${addr.toString(16).toUpperCase()})\n`;
+  return `servo_v3(${channel}, ${angle})\n`;
 };
 
 pythonGenerator.forBlock['rx_servo_v3_off'] = function (block, generator) {
   generator.definitions_['import_pca9685_off'] = 'from pca9685 import servo_v3_off';
   const channel = block.getFieldValue('CHANNEL');
-  const sda = block.getFieldValue('SDA');
-  const scl = block.getFieldValue('SCL');
-  const addrText = (block.getFieldValue('ADDR') || '40').trim();
-  const addr = parseInt(addrText.replace(/^0x/i, ''), 16) || 0x40;
-  if (sda === 4 && scl === 5 && addr === 0x40) {
-    return `servo_v3_off(${channel})\n`;
-  }
-  return `servo_v3_off(${channel}, sda=${sda}, scl=${scl}, addr=0x${addr.toString(16).toUpperCase()})\n`;
+  return `servo_v3_off(${channel})\n`;
 };
 
 pythonGenerator.forBlock['rx_dc_motor'] = function (block, generator) {
