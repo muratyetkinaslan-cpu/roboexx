@@ -195,30 +195,56 @@ const FIRMWARE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 saat
 /**
  * micropython.org/download/<BOARD>/ sayfasını çek, en son UF2 URL'ini parse et.
  * Returns: { url, version, date, size } veya null.
+ *
+ * Strateji: sayfada `BOARD-YYYYMMDD-vX.Y.Z.uf2` formatında bir dosya adı ara.
+ * HTML'in kesin formatına (escape, attribute quote tipi, vs) bağımlı değil.
+ * "Releases" en üstte olduğu için ilk match = latest release.
  */
 async function fetchLatestFirmwareInfo(boardId) {
   const pageUrl = `https://micropython.org/download/${boardId}/`;
   const res = await fetch(pageUrl, {
-    headers: { 'User-Agent': 'RoboExx-Firmware-Fetcher/1.0' },
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; RoboExx/1.0)',
+      'Accept': 'text/html,application/xhtml+xml',
+    },
   });
   if (!res.ok) {
     throw new Error(`Sayfa alınamadı: ${pageUrl} (${res.status})`);
   }
   const html = await res.text();
-  // İlk UF2 link'i = latest. URL kalıbı: RPI_PICO_W-YYYYMMDD-vX.Y.Z.uf2
-  const regex = new RegExp(
-    `https:\\/\\/micropython\\.org\\/resources\\/firmware\\/(${boardId}-(\\d{8})-(v[^"]+?))\\.uf2`,
-    'i'
+
+  // Sadece dosya adı pattern'i ara — URL formatından bağımsız.
+  // Örnek match: RPI_PICO_W-20260406-v1.28.0
+  // BOARD ID uzun olanlar (RPI_PICO2_W) önce gelmeli, kısa olan (RPI_PICO) sonra,
+  // ama burada tek board ID arıyoruz, sorun değil.
+  // Version: v1.28.0 veya v1.29.0-preview.345.gabc gibi olabilir.
+  // Önce sadece resmi release pattern'i (preview olmayan): v + sayı.sayı.sayı
+  const releaseRegex = new RegExp(
+    `${boardId}-(\\d{8})-(v\\d+\\.\\d+\\.\\d+)\\.uf2`,
   );
-  const match = html.match(regex);
+  let match = html.match(releaseRegex);
+
+  // Bulunmazsa preview da dahil olsun
   if (!match) {
-    throw new Error(`UF2 link bulunamadı: ${boardId}`);
+    const anyRegex = new RegExp(
+      `${boardId}-(\\d{8})-(v[\\d][\\w.\\-]+?)\\.uf2`,
+    );
+    match = html.match(anyRegex);
   }
+
+  if (!match) {
+    // Debug için sayfa ipucu — sayfada UF2 dosyaları gerçekten var mı?
+    const anyUf2 = html.match(/[A-Z_0-9]+-\d{8}-v[\d.]+\.uf2/);
+    const hint = anyUf2 ? ` (sayfada bulunan örnek: ${anyUf2[0]})` : ' (sayfada hiç UF2 yok)';
+    throw new Error(`UF2 link bulunamadı: ${boardId}${hint}`);
+  }
+
+  const filename = `${boardId}-${match[1]}-${match[2]}.uf2`;
   return {
-    url: `https://micropython.org/resources/firmware/${match[1]}.uf2`,
-    version: match[3],
-    date: match[2],
-    filename: `${match[1]}.uf2`,
+    url: `https://micropython.org/resources/firmware/${filename}`,
+    version: match[2],
+    date: match[1],
+    filename,
   };
 }
 
@@ -228,16 +254,22 @@ async function getFirmwareList(force = false) {
     return firmwareCache.boards;
   }
   const boards = {};
+  let anySuccess = false;
   for (const id of BOARD_IDS) {
     try {
       const info = await fetchLatestFirmwareInfo(id);
       boards[id] = { ...info, name: BOARD_NAMES[id], error: null };
+      anySuccess = true;
     } catch (err) {
       console.error(`[firmware] ${id} parse hatası:`, err.message);
       boards[id] = { name: BOARD_NAMES[id], error: err.message };
     }
   }
-  firmwareCache = { boards, fetchedAt: now };
+  // Yalnızca başarılı sonuçları cache'le — hepsi başarısızsa cache'leme
+  // (sonraki istek tekrar denesin)
+  if (anySuccess) {
+    firmwareCache = { boards, fetchedAt: now };
+  }
   return boards;
 }
 
@@ -255,9 +287,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
   // GET /firmware/list — JSON: hangi kartlar var, en son sürümler
+  // ?refresh=1 query parametresi ile cache atlanır (debug için)
   if (url.pathname === '/firmware/list') {
     try {
-      const boards = await getFirmwareList();
+      const force = url.searchParams.get('refresh') === '1';
+      const boards = await getFirmwareList(force);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ boards }));
     } catch (err) {
