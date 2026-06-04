@@ -170,7 +170,143 @@ function getRoom(name) {
 
 // ─── HTTP + WebSocket server ───
 
-const server = http.createServer((req, res) => {
+/**
+ * MicroPython UF2 firmware proxy.
+ *
+ * micropython.org CORS izin vermiyor — tarayıcı doğrudan fetch yapamıyor.
+ * Bu yüzden sunucumuz proxy görevi görüyor:
+ *   GET /firmware/list           → mevcut kartlar + en son sürüm bilgisi (JSON)
+ *   GET /firmware/download/:board → UF2 binary (CORS header'lı)
+ *
+ * Liste 1 saat in-memory cache'lenir (her istek micropython.org'a gitmesin).
+ */
+
+const BOARD_IDS = ['RPI_PICO', 'RPI_PICO_W', 'RPI_PICO2', 'RPI_PICO2_W'];
+const BOARD_NAMES = {
+  RPI_PICO: 'Raspberry Pi Pico',
+  RPI_PICO_W: 'Raspberry Pi Pico W',
+  RPI_PICO2: 'Raspberry Pi Pico 2',
+  RPI_PICO2_W: 'Raspberry Pi Pico 2 W',
+};
+
+let firmwareCache = { boards: null, fetchedAt: 0 };
+const FIRMWARE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 saat
+
+/**
+ * micropython.org/download/<BOARD>/ sayfasını çek, en son UF2 URL'ini parse et.
+ * Returns: { url, version, date, size } veya null.
+ */
+async function fetchLatestFirmwareInfo(boardId) {
+  const pageUrl = `https://micropython.org/download/${boardId}/`;
+  const res = await fetch(pageUrl, {
+    headers: { 'User-Agent': 'RoboExx-Firmware-Fetcher/1.0' },
+  });
+  if (!res.ok) {
+    throw new Error(`Sayfa alınamadı: ${pageUrl} (${res.status})`);
+  }
+  const html = await res.text();
+  // İlk UF2 link'i = latest. URL kalıbı: RPI_PICO_W-YYYYMMDD-vX.Y.Z.uf2
+  const regex = new RegExp(
+    `https:\\/\\/micropython\\.org\\/resources\\/firmware\\/(${boardId}-(\\d{8})-(v[^"]+?))\\.uf2`,
+    'i'
+  );
+  const match = html.match(regex);
+  if (!match) {
+    throw new Error(`UF2 link bulunamadı: ${boardId}`);
+  }
+  return {
+    url: `https://micropython.org/resources/firmware/${match[1]}.uf2`,
+    version: match[3],
+    date: match[2],
+    filename: `${match[1]}.uf2`,
+  };
+}
+
+async function getFirmwareList(force = false) {
+  const now = Date.now();
+  if (!force && firmwareCache.boards && now - firmwareCache.fetchedAt < FIRMWARE_CACHE_TTL_MS) {
+    return firmwareCache.boards;
+  }
+  const boards = {};
+  for (const id of BOARD_IDS) {
+    try {
+      const info = await fetchLatestFirmwareInfo(id);
+      boards[id] = { ...info, name: BOARD_NAMES[id], error: null };
+    } catch (err) {
+      console.error(`[firmware] ${id} parse hatası:`, err.message);
+      boards[id] = { name: BOARD_NAMES[id], error: err.message };
+    }
+  }
+  firmwareCache = { boards, fetchedAt: now };
+  return boards;
+}
+
+const server = http.createServer(async (req, res) => {
+  // CORS — her route için
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url, 'http://localhost');
+
+  // GET /firmware/list — JSON: hangi kartlar var, en son sürümler
+  if (url.pathname === '/firmware/list') {
+    try {
+      const boards = await getFirmwareList();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ boards }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // GET /firmware/download/:board — UF2 binary proxy
+  const downloadMatch = url.pathname.match(/^\/firmware\/download\/([A-Z0-9_]+)$/i);
+  if (downloadMatch) {
+    const boardId = downloadMatch[1].toUpperCase();
+    if (!BOARD_IDS.includes(boardId)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Geçersiz kart: ' + boardId }));
+      return;
+    }
+    try {
+      const boards = await getFirmwareList();
+      const info = boards[boardId];
+      if (!info || info.error) {
+        throw new Error(info?.error || 'Bilinmeyen hata');
+      }
+      console.log(`[firmware] proxy başladı: ${boardId} ← ${info.url}`);
+      const upstream = await fetch(info.url, {
+        headers: { 'User-Agent': 'RoboExx-Firmware-Fetcher/1.0' },
+      });
+      if (!upstream.ok) {
+        throw new Error(`Upstream ${upstream.status}`);
+      }
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': buf.length,
+        'Content-Disposition': `attachment; filename="${info.filename}"`,
+        'X-Firmware-Version': info.version,
+      });
+      res.end(buf);
+      console.log(`[firmware] proxy tamam: ${boardId} (${buf.length} bytes)`);
+    } catch (err) {
+      console.error(`[firmware] download hatası:`, err.message);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // Default — health check
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('RoboExx Live Share server is running.\n');
 });

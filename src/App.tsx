@@ -10,6 +10,7 @@ import { SerialMonitor, type SerialLine, type LineKind } from './components/Seri
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
 import { SensorDashboard } from './components/SensorDashboard';
+import { FirmwareUploader } from './components/FirmwareUploader';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
 import type { ThemeId } from './themes/types';
@@ -287,6 +288,7 @@ export default function App() {
   const [pressedKeysDisplay, setPressedKeysDisplay] = useState<string>('');
   const [gamepadActive, setGamepadActive] = useState<boolean>(false);
   const [sensorPanelOpen, setSensorPanelOpen] = useState<boolean>(false);
+  const [firmwareUploaderOpen, setFirmwareUploaderOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (bridgeState !== 'connected') {
@@ -1357,6 +1359,7 @@ export default function App() {
           addLine('system', '⚠ Bridge sıfırlandı');
         }}
         onSensorPanel={() => setSensorPanelOpen(true)}
+        onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
         themeId={themeId}
         onToggleLight={toggleLight}
         lastSavedText={lastSavedText}
@@ -1479,6 +1482,11 @@ export default function App() {
       <SensorDashboard
         open={sensorPanelOpen}
         onClose={() => setSensorPanelOpen(false)}
+      />
+
+      <FirmwareUploader
+        open={firmwareUploaderOpen}
+        onClose={() => setFirmwareUploaderOpen(false)}
       />
 
       {/* Klavye / gamepad basılı tuş göstergesi — sağ alt köşede küçük popup */}

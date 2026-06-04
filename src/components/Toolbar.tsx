@@ -37,6 +37,9 @@ interface Props {
   /** Sensör paneli aç — canlı sensör değerleri popup'ı */
   onSensorPanel: () => void;
 
+  /** Pico'ya UF2 firmware (MicroPython) yükle */
+  onFirmwareUpload: () => void;
+
   /** Açık/koyu tema geçişi */
   themeId: ThemeId;
   onToggleLight: () => void;
@@ -174,6 +177,18 @@ export function Toolbar(props: Props) {
 
         {/* GRUP 2: Çalıştırma — modülleri yükle + çalıştır/durdur + yükle */}
         <div className="toolbar-group toolbar-group-actions">
+          {/* Firmware (MicroPython UF2) Yükle — yeni Pico için ilk adım */}
+          <button
+            className="btn btn-ghost btn-icon-only btn-firmware"
+            onClick={props.onFirmwareUpload}
+            data-tooltip="Firmware Yükle"
+            data-tooltip-detail="Pico'ya MicroPython UF2 dosyası yükle (yeni kart için)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" />
+            </svg>
+          </button>
+
           <button
             className="btn btn-ghost btn-icon-only btn-upload-lib"
             onClick={props.onUploadLibrary}
