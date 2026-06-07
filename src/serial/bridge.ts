@@ -390,23 +390,42 @@ export class SerialBridge {
         });
       }
 
-      // 3) Dosyayı kapat ve toplam boyutu doğrula
+      // 3) Dosyayı kapat ve toplam boyutu doğrula + içerik hash'i kontrol et
+      // Pico'da dosyayı oku, SHA-1 hesapla, frontend'in hash'i ile karşılaştır.
+      // Bu, USB serial transit sırasında bayt kaybı/değişimini yakalar.
+      const expectedHash = await sha1Hex(codeBytes);
       const { output, error } = await this._execRaw(
-        `f.close()\nimport os\nprint('__OK__',os.stat('${filename}')[6])\n`
+        `f.close()\n` +
+        `import os, hashlib, binascii\n` +
+        `_sz = os.stat('${filename}')[6]\n` +
+        `_h = hashlib.sha1()\n` +
+        `with open('${filename}','rb') as _g:\n` +
+        `    while True:\n` +
+        `        _b = _g.read(512)\n` +
+        `        if not _b: break\n` +
+        `        _h.update(_b)\n` +
+        `print('__OK__', _sz, binascii.hexlify(_h.digest()).decode())\n`
       );
 
       if (error && error.trim()) {
         throw new Error(error.trim());
       }
-      const sizeMatch = output.match(/__OK__\s+(\d+)/);
-      if (!sizeMatch) {
-        throw new Error('Yazma doğrulaması başarısız (boyut alınamadı)');
+      const okMatch = output.match(/__OK__\s+(\d+)\s+([0-9a-f]+)/i);
+      if (!okMatch) {
+        throw new Error('Yazma doğrulaması başarısız (boyut/hash alınamadı)');
       }
-      const actualSize = parseInt(sizeMatch[1], 10);
+      const actualSize = parseInt(okMatch[1], 10);
+      const actualHash = okMatch[2].toLowerCase();
       if (actualSize !== bytesTotal) {
         throw new Error(
           `Dosya boyutu eşleşmiyor: yazılan ${actualSize} byte, beklenen ${bytesTotal} byte. ` +
-          `Lütfen Pico'yu BOOTSEL ile sıfırlayıp tekrar dene.`
+          `Pico'yu BOOTSEL ile sıfırlayıp tekrar dene.`
+        );
+      }
+      if (actualHash !== expectedHash) {
+        throw new Error(
+          `İçerik bozuk yazıldı (hash eşleşmiyor: ${actualHash.slice(0, 8)} ≠ ${expectedHash.slice(0, 8)}). ` +
+          `USB serial transit hatası olabilir. Lütfen tekrar dene.`
         );
       }
 
@@ -735,3 +754,14 @@ export class SerialBridge {
 }
 
 export const serialBridge = new SerialBridge();
+
+/**
+ * Verilen byte dizisinin SHA-1 hash'ini hex string olarak döndürür.
+ * Pico'daki hashlib.sha1 ile uyumlu — yazılan dosyanın bütünlüğünü doğrulamak için.
+ */
+async function sha1Hex(data: Uint8Array): Promise<string> {
+  const hashBuf = await crypto.subtle.digest('SHA-1', data);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
