@@ -329,26 +329,57 @@ export class SerialBridge {
     // Büyük dosyalar (>4KB) için chunk'lara böl — Pico W'nin sınırlı RAM'i
     // tek seferde 14 KB bytes literal'i parse edemiyor (MemoryError).
     // Her chunk için ayrı bir f.write() raw REPL komutu gönder.
-    const CHUNK_BYTES = 1024;
+    // 512 byte: bytes literal escape ile ~2KB source kod → güvenli RAM payı.
+    const CHUNK_BYTES = 512;
 
     try {
       await this._enterRaw();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
-      // 1) Dosyayı aç (boş)
-      await this._execRaw(`f=open('${filename}','wb')\nprint('__OPEN__')\n`);
+      // 1) Dosyayı aç (boş) + her chunk öncesi GC ile RAM temizle
+      const openResult = await this._execRaw(
+        `import gc\ngc.collect()\nf=open('${filename}','wb')\nprint('__OPEN__')\n`
+      );
+      if (openResult.error && openResult.error.trim()) {
+        throw new Error(`Dosya açılamadı: ${openResult.error.trim()}`);
+      }
+      if (!openResult.output.includes('__OPEN__')) {
+        throw new Error('Dosya açma onayı alınamadı');
+      }
 
-      // 2) Her chunk'ı ayrı yaz
+      // 2) Her chunk'ı ayrı yaz — HER chunk için hata kontrolü yap
       let offset = 0;
+      let chunkIdx = 0;
       while (offset < bytesTotal) {
         const end = Math.min(offset + CHUNK_BYTES, bytesTotal);
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
-        // Tek satır gönder — minimum RAM kullanımı
-        const pyCode = `f.write(${literal})\nprint('__C__')\n`;
-        await this._execRaw(pyCode);
+        // Her chunk öncesi gc.collect → MemoryError ihtimalini azalt
+        // f.write dönen byte sayısını yazdır, doğrulayalım
+        const pyCode = `gc.collect()\n_n=f.write(${literal})\nprint('__C__',_n)\n`;
+        const { output, error } = await this._execRaw(pyCode);
+
+        if (error && error.trim()) {
+          throw new Error(
+            `Chunk ${chunkIdx + 1} (offset ${offset}/${bytesTotal}) yazma hatası: ${error.trim()}`
+          );
+        }
+        // f.write'ın döndürdüğü byte sayısını parse et — beklenen ile eşleşmeli
+        const writeMatch = output.match(/__C__\s+(\d+)/);
+        if (!writeMatch) {
+          throw new Error(
+            `Chunk ${chunkIdx + 1} doğrulama yanıtı eksik (Pico bağlantısı kötü olabilir)`
+          );
+        }
+        const writtenBytes = parseInt(writeMatch[1], 10);
+        if (writtenBytes !== chunk.length) {
+          throw new Error(
+            `Chunk ${chunkIdx + 1} eksik yazıldı: ${writtenBytes}/${chunk.length} byte (offset ${offset})`
+          );
+        }
 
         offset = end;
+        chunkIdx++;
         const elapsed = (Date.now() - start) / 1000;
         const speedKBs = elapsed > 0 ? offset / 1024 / elapsed : 0;
         onProgress?.({
@@ -359,7 +390,7 @@ export class SerialBridge {
         });
       }
 
-      // 3) Dosyayı kapat ve doğrula
+      // 3) Dosyayı kapat ve toplam boyutu doğrula
       const { output, error } = await this._execRaw(
         `f.close()\nimport os\nprint('__OK__',os.stat('${filename}')[6])\n`
       );
@@ -367,8 +398,16 @@ export class SerialBridge {
       if (error && error.trim()) {
         throw new Error(error.trim());
       }
-      if (!output.includes('__OK__')) {
-        throw new Error('Yazma doğrulaması başarısız');
+      const sizeMatch = output.match(/__OK__\s+(\d+)/);
+      if (!sizeMatch) {
+        throw new Error('Yazma doğrulaması başarısız (boyut alınamadı)');
+      }
+      const actualSize = parseInt(sizeMatch[1], 10);
+      if (actualSize !== bytesTotal) {
+        throw new Error(
+          `Dosya boyutu eşleşmiyor: yazılan ${actualSize} byte, beklenen ${bytesTotal} byte. ` +
+          `Lütfen Pico'yu BOOTSEL ile sıfırlayıp tekrar dene.`
+        );
       }
 
       const elapsed = (Date.now() - start) / 1000;
