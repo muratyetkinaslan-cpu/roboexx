@@ -291,8 +291,7 @@ export default function App() {
   const [firmwareUploaderOpen, setFirmwareUploaderOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    // Connected veya busy (kullanıcı kodu çalışırken USB serial 'busy' olur) durumunda aktif
-    if (bridgeState !== 'connected' && bridgeState !== 'busy') {
+    if (bridgeState !== 'connected') {
       setPressedKeysDisplay('');
       return;
     }

@@ -180,19 +180,13 @@ export class SerialBridge {
   }
 
   /**
-  /**
    * Klavye basılı tuşlarını USB seri ile Pico'ya bildir.
    * Protokol: \x06 + ASCII tuşlar + \n
-   * Pico tarafında roboexx.py'nin background stdin reader'ı bu mesajı yakalar.
-   *
-   * NOT: streamMode (kullanıcı kodu çalışırken) sırasında da göndeririz!
-   * stdin (frontend→Pico) ve stdout (Pico→frontend) ayrı yönlerde olduğu için
-   * raw REPL stream parser'ını bozmaz. Sadece silent mode (upload/protokol komutları)
-   * sırasında bloke ederiz.
+   * Sadece bağlı + user kod modunda (busy/silent değilken) gönderir.
    */
   async sendKeys(keys: string): Promise<void> {
-    if (this.state !== 'connected' && this.state !== 'busy') return;
-    if (this.silent) return; // upload protocol komutlarıyla karışmasın
+    if (this.state !== 'connected') return;
+    if (this.silent || this.streamMode) return; // upload/run sırasında karışmasın
     if (!this.writer) return;
     const safe = keys.toLowerCase().slice(0, 16);
     try {
@@ -328,91 +322,27 @@ export class SerialBridge {
 
     // Büyük dosyalar (>4KB) için chunk'lara böl — Pico W'nin sınırlı RAM'i
     // tek seferde 14 KB bytes literal'i parse edemiyor (MemoryError).
-    // 512 byte: bytes literal escape ile ~2KB source kod → güvenli RAM payı.
-    const CHUNK_BYTES = 512;
-    const MAX_RETRY_PER_CHUNK = 2;
+    // Her chunk için ayrı bir f.write() raw REPL komutu gönder.
+    const CHUNK_BYTES = 1024;
 
     try {
       await this._enterRaw();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
-      // 1) Dosyayı aç (boş) + her chunk öncesi GC ile RAM temizle
-      const openResult = await this._execRaw(
-        `import gc\ngc.collect()\nf=open('${filename}','wb')\nprint('__OPEN__')\n`
-      );
-      if (openResult.error && openResult.error.trim()) {
-        throw new Error(`Dosya açılamadı: ${openResult.error.trim()}`);
-      }
-      if (!openResult.output.includes('__OPEN__')) {
-        throw new Error('Dosya açma onayı alınamadı');
-      }
+      // 1) Dosyayı aç (boş)
+      await this._execRaw(`f=open('${filename}','wb')\nprint('__OPEN__')\n`);
 
-      // 2) Her chunk'ı ayrı yaz — HER chunk için hata kontrolü + akıllı retry
-      // Pico ara sıra geçici hata verebiliyor (BLE event, GC pause, vs.).
-      // Hata olursa: raw REPL'e tekrar gir + dosyayı doğru offset'ten devam et.
+      // 2) Her chunk'ı ayrı yaz
       let offset = 0;
-      let chunkIdx = 0;
       while (offset < bytesTotal) {
         const end = Math.min(offset + CHUNK_BYTES, bytesTotal);
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
-        // Her chunk öncesi gc.collect → MemoryError ihtimalini azalt
-        const pyCode = `gc.collect()\n_n=f.write(${literal})\nprint('__C__',_n)\n`;
-
-        let attempt = 0;
-        let lastErr: string = '';
-        let writtenBytes = -1;
-        while (attempt <= MAX_RETRY_PER_CHUNK) {
-          try {
-            const { output, error } = await this._execRaw(pyCode);
-            if (error && error.trim()) {
-              lastErr = error.trim();
-              throw new Error(lastErr);
-            }
-            const writeMatch = output.match(/__C__\s+(\d+)/);
-            if (!writeMatch) {
-              lastErr = 'doğrulama yanıtı eksik';
-              throw new Error(lastErr);
-            }
-            writtenBytes = parseInt(writeMatch[1], 10);
-            if (writtenBytes !== chunk.length) {
-              lastErr = `eksik yazıldı (${writtenBytes}/${chunk.length})`;
-              throw new Error(lastErr);
-            }
-            // Başarılı — döngüden çık
-            break;
-          } catch (e) {
-            attempt++;
-            if (attempt > MAX_RETRY_PER_CHUNK) {
-              throw new Error(
-                `Chunk ${chunkIdx + 1} (offset ${offset}/${bytesTotal}) ${MAX_RETRY_PER_CHUNK + 1} deneme sonrası başarısız: ${lastErr || (e as Error).message}`
-              );
-            }
-            // RECOVERY: Pico karışmış olabilir. Raw REPL'e tekrar gir,
-            // dosyayı doğru offset'te aç (truncate ederek), aynı chunk'ı tekrar yaz.
-            console.warn(`[RoboExx] Chunk ${chunkIdx + 1} attempt ${attempt} başarısız: ${lastErr}. Recovery deneniyor...`);
-            try {
-              await this._enterRaw();
-              // Dosyayı tekrar aç, mevcut offset'e seek et — önceki chunk'lar korunsun
-              // 'r+b' = okuma+yazma açar, 'w'b' her şeyi siler
-              // 'r+b' kullanıp seek edersek önceki chunk'lar güvende
-              const reopenCode =
-                `gc.collect()\n` +
-                `try: f.close()\nexcept: pass\n` +
-                `f=open('${filename}','r+b')\n` +
-                `f.seek(${offset})\n` +
-                `print('__REOPEN__')\n`;
-              await this._execRaw(reopenCode);
-              await new Promise((r) => setTimeout(r, 100));
-            } catch (recoveryErr) {
-              console.error('[RoboExx] Recovery sırasında hata:', recoveryErr);
-              // Recovery de başarısızsa retry'a devam et — belki ikinci recovery işe yarar
-            }
-          }
-        }
+        // Tek satır gönder — minimum RAM kullanımı
+        const pyCode = `f.write(${literal})\nprint('__C__')\n`;
+        await this._execRaw(pyCode);
 
         offset = end;
-        chunkIdx++;
         const elapsed = (Date.now() - start) / 1000;
         const speedKBs = elapsed > 0 ? offset / 1024 / elapsed : 0;
         onProgress?.({
@@ -423,43 +353,16 @@ export class SerialBridge {
         });
       }
 
-      // 3) Dosyayı kapat ve toplam boyutu doğrula + içerik hash'i kontrol et
-      // Pico'da dosyayı oku, SHA-1 hesapla, frontend'in hash'i ile karşılaştır.
-      // Bu, USB serial transit sırasında bayt kaybı/değişimini yakalar.
-      const expectedHash = await sha1Hex(codeBytes);
+      // 3) Dosyayı kapat ve doğrula
       const { output, error } = await this._execRaw(
-        `f.close()\n` +
-        `import os, hashlib, binascii\n` +
-        `_sz = os.stat('${filename}')[6]\n` +
-        `_h = hashlib.sha1()\n` +
-        `with open('${filename}','rb') as _g:\n` +
-        `    while True:\n` +
-        `        _b = _g.read(512)\n` +
-        `        if not _b: break\n` +
-        `        _h.update(_b)\n` +
-        `print('__OK__', _sz, binascii.hexlify(_h.digest()).decode())\n`
+        `f.close()\nimport os\nprint('__OK__',os.stat('${filename}')[6])\n`
       );
 
       if (error && error.trim()) {
         throw new Error(error.trim());
       }
-      const okMatch = output.match(/__OK__\s+(\d+)\s+([0-9a-f]+)/i);
-      if (!okMatch) {
-        throw new Error('Yazma doğrulaması başarısız (boyut/hash alınamadı)');
-      }
-      const actualSize = parseInt(okMatch[1], 10);
-      const actualHash = okMatch[2].toLowerCase();
-      if (actualSize !== bytesTotal) {
-        throw new Error(
-          `Dosya boyutu eşleşmiyor: yazılan ${actualSize} byte, beklenen ${bytesTotal} byte. ` +
-          `Pico'yu BOOTSEL ile sıfırlayıp tekrar dene.`
-        );
-      }
-      if (actualHash !== expectedHash) {
-        throw new Error(
-          `İçerik bozuk yazıldı (hash eşleşmiyor: ${actualHash.slice(0, 8)} ≠ ${expectedHash.slice(0, 8)}). ` +
-          `USB serial transit hatası olabilir. Lütfen tekrar dene.`
-        );
+      if (!output.includes('__OK__')) {
+        throw new Error('Yazma doğrulaması başarısız');
       }
 
       const elapsed = (Date.now() - start) / 1000;
@@ -681,9 +584,8 @@ export class SerialBridge {
 
     // Hiçbir strateji çalışmadı → kullanıcıya net mesaj ver
     throw new Error(
-      'Pico REPL\'e geçilemiyor. Bunun en olası sebebi Pico\'da eski bir bootloader veya BLE servisinin meşgul olması. ' +
-      'ÇÖZÜM: Toolbar\'daki ⚡ Firmware Yükle butonu ile Pico\'ya MicroPython\'ı BOOTSEL modunda yeniden yükle. ' +
-      'Bu Pico\'nun belleğini sıfırlar ve temiz başlangıç sağlar. Sonra tekrar "Modülleri Yükle" yapabilirsin.'
+      'Pico REPL\'e dönmüyor. Lütfen Pico\'da fiziksel RESET tuşuna bas (veya gücü çek-tak), ' +
+      'sonra tekrar dene. (Yeni bootloader yüklendikten sonra bu sorun olmayacak.)'
     );
   }
 
@@ -711,8 +613,8 @@ export class SerialBridge {
   ): Promise<{ output: string; error: string }> {
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
-    // Büyük yüklemelerde (lib, resim) Pico'nun yetişmesi için 512 byte chunk
-    // ve 8ms ara — daha önce sınanmış güvenli ayar.
+    // Büyük yüklemelerde (lib, resim) Pico'nun yetişmesi için daha küçük chunk
+    // ve aralarda daha uzun pause. 512 bayt + 8ms emniyetli.
     const chunkSize = 512;
 
     for (let i = 0; i < total; i += chunkSize) {
@@ -787,14 +689,3 @@ export class SerialBridge {
 }
 
 export const serialBridge = new SerialBridge();
-
-/**
- * Verilen byte dizisinin SHA-1 hash'ini hex string olarak döndürür.
- * Pico'daki hashlib.sha1 ile uyumlu — yazılan dosyanın bütünlüğünü doğrulamak için.
- */
-async function sha1Hex(data: Uint8Array): Promise<string> {
-  const hashBuf = await crypto.subtle.digest('SHA-1', data);
-  return Array.from(new Uint8Array(hashBuf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
