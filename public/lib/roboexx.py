@@ -945,6 +945,7 @@ def set_pressed_keys(keys_str):
 
 def tus_basili(key):
     """Tuş şu anda basılı mı? (basılı tuttuğun sürece True döner)"""
+    _ensure_stdin_reader()
     return key.lower() in _pressed_keys
 
 
@@ -953,8 +954,68 @@ def tus_basildi(key):
     Tuşa son okumadan beri basıldı mı? (Bir kere True döner, sonra reset)
     Tek seferlik tetikleme için — örneğin "Sıçra" gibi anlık komutlar.
     """
+    _ensure_stdin_reader()
     k = key.lower()
     if k in _pressed_once:
         _pressed_once.discard(k)
         return True
     return False
+
+
+# ============================================================
+# USB Serial üzerinden klavye/gamepad mesaj okuyucu (lazy başlatılır)
+# ============================================================
+# Bilgisayar USB serial üzerinden \x06<keys>\n formatında mesaj gönderir.
+# BLE bootloader (main.py) BLE üzerinden zaten yakalıyor; bu thread ise
+# USB modunda kullanıcı kodu çalışırken sys.stdin'i okur ve aynı state'i
+# günceller. Böylece klavye/gamepad hem USB hem BLE modunda çalışır.
+#
+# LAZY init — sadece tus_basili()/tus_basildi() ilk çağrıldığında başlar.
+# Bu sayede BLE bootloader pre-load yaparken thread başlatılmaz (BLE
+# bootloader user_code'u kendi thread'inde çalıştırır, çakışmaz).
+
+_stdin_thread_started = False
+
+def _stdin_key_reader():
+    """sys.stdin'den \\x06<keys>\\n mesajlarını oku, set_pressed_keys çağır."""
+    import sys
+    while True:
+        try:
+            ch = sys.stdin.read(1)
+            if not ch:
+                continue
+            if ch == '\x06':
+                # MSG_KEY başlangıcı — \n'e kadar oku
+                buf = []
+                while True:
+                    c = sys.stdin.read(1)
+                    if not c or c == '\n' or c == '\r':
+                        break
+                    buf.append(c)
+                    if len(buf) > 32:
+                        break  # taşma koruması
+                keys_str = ''.join(buf)
+                set_pressed_keys(keys_str)
+        except Exception:
+            # stdin closed veya başka bir hata — biraz bekle, tekrar dene
+            try:
+                import time as _t
+                _t.sleep_ms(100)
+            except Exception:
+                pass
+
+
+def _ensure_stdin_reader():
+    """Background thread'i bir kez başlat (yoksa)."""
+    global _stdin_thread_started
+    if _stdin_thread_started:
+        return
+    _stdin_thread_started = True  # önce işaretle (tekrar denenmesin)
+    try:
+        import _thread
+        _thread.start_new_thread(_stdin_key_reader, ())
+    except Exception:
+        # _thread yoksa veya core1 zaten dolu (BLE bootloader user_code'u
+        # core1'de çalıştırıyorsa) — sessizce vazgeç. BLE modunda zaten
+        # main.py BLE üzerinden MSG_KEY'i yakalıyor.
+        pass

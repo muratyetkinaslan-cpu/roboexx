@@ -180,13 +180,19 @@ export class SerialBridge {
   }
 
   /**
+  /**
    * Klavye basılı tuşlarını USB seri ile Pico'ya bildir.
    * Protokol: \x06 + ASCII tuşlar + \n
-   * Sadece bağlı + user kod modunda (busy/silent değilken) gönderir.
+   * Pico tarafında roboexx.py'nin background stdin reader'ı bu mesajı yakalar.
+   *
+   * NOT: streamMode (kullanıcı kodu çalışırken) sırasında da göndeririz!
+   * stdin (frontend→Pico) ve stdout (Pico→frontend) ayrı yönlerde olduğu için
+   * raw REPL stream parser'ını bozmaz. Sadece silent mode (upload/protokol komutları)
+   * sırasında bloke ederiz.
    */
   async sendKeys(keys: string): Promise<void> {
-    if (this.state !== 'connected') return;
-    if (this.silent || this.streamMode) return; // upload/run sırasında karışmasın
+    if (this.state !== 'connected' && this.state !== 'busy') return;
+    if (this.silent) return; // upload protocol komutlarıyla karışmasın
     if (!this.writer) return;
     const safe = keys.toLowerCase().slice(0, 16);
     try {
