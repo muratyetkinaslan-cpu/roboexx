@@ -929,11 +929,69 @@ def dc_motor_stop_all():
 _pressed_keys = set()     # şu an basılı olan tuşlar (küçük harf)
 _pressed_once = set()     # son okumadan beri yeni basılanlar
 
+# --- USB seri klavye "pump" altyapısı --------------------------------
+# İki ayrı senaryo var:
+#   1) Bağımsız çalışma (main.py bootloader): core0'daki dinleyici stdin'i
+#      okur, set_pressed_keys() çağırır. Bu durumda pump KAPATILIR
+#      (disable_serial_pump) — çift okuma/race olmasın.
+#   2) Canlı "Çalıştır" (raw REPL exec): bootloader çalışmaz, stdin'i kimse
+#      okumaz. Bu durumda tus_basili/tus_basildi her çağrıldığında pump
+#      stdin'den \x06...\n paketlerini bloklamadan çeker. Böylece tuşlar
+#      tüketilir (REPL'e sızıp "NameError" üretmez) ve state güncellenir.
+# BLE modunda tuşlar MSG_KEY ile gelir; stdin boş olur, pump zararsız.
+_serial_pump_enabled = True
+_kb_in_msg = False
+_kb_buf = ''
+try:
+    import select as _select
+    import sys as _sys
+    _kb_poll = _select.poll()
+    _kb_poll.register(_sys.stdin, _select.POLLIN)
+except Exception:
+    _kb_poll = None
+
+
+def disable_serial_pump():
+    """Bootloader kendi stdin dinleyicisini çalıştırırken çağırır;
+    tus_basili içindeki otomatik stdin okuması kapanır (çift okuma olmaz)."""
+    global _serial_pump_enabled
+    _serial_pump_enabled = False
+
+
+def _pump_serial_keys():
+    """USB seri stdin'inde bekleyen \\x06...\\n klavye paketlerini bloklamadan
+    oku ve state'i güncelle. Veri yoksa anında döner."""
+    global _kb_in_msg, _kb_buf
+    if not _serial_pump_enabled or _kb_poll is None:
+        return
+    # Mevcut tüm baytları boşalt (sızıntı olmasın) — sınırlı döngü
+    for _ in range(256):
+        if not _kb_poll.poll(0):   # 0ms timeout → tamamen bloklamasız
+            break
+        try:
+            ch = _sys.stdin.read(1)
+        except Exception:
+            break
+        if not ch:
+            break
+        if ch == '\x06':
+            _kb_in_msg = True
+            _kb_buf = ''
+        elif _kb_in_msg:
+            if ch == '\n':
+                set_pressed_keys(_kb_buf)
+                _kb_in_msg = False
+                _kb_buf = ''
+            elif len(_kb_buf) < 32:
+                _kb_buf += ch
+        # else: framing dışı bayt — yut (REPL'e sızmasın)
+
+
 def set_pressed_keys(keys_str):
     """
-    main.py bootloader tarafından çağrılır. keys_str = "wa" gibi
-    basılı tuşların concat string'i. Yeni basılan tuşları
-    _pressed_once'a ekler (tek-seferlik tetikleme için).
+    main.py bootloader veya _pump_serial_keys tarafından çağrılır.
+    keys_str = "wa" gibi basılı tuşların concat string'i. Yeni basılan
+    tuşları _pressed_once'a ekler (tek-seferlik tetikleme için).
     """
     global _pressed_keys, _pressed_once
     new_keys = set(keys_str.lower())
@@ -943,8 +1001,15 @@ def set_pressed_keys(keys_str):
     _pressed_keys = new_keys
 
 
+def klavye_guncelle():
+    """Bekleyen USB seri tuşlarını işle. tus_basili/tus_basildi bunu otomatik
+    çağırır; istersen döngünde elle de çağırabilirsin."""
+    _pump_serial_keys()
+
+
 def tus_basili(key):
     """Tuş şu anda basılı mı? (basılı tuttuğun sürece True döner)"""
+    _pump_serial_keys()
     return key.lower() in _pressed_keys
 
 
@@ -953,6 +1018,7 @@ def tus_basildi(key):
     Tuşa son okumadan beri basıldı mı? (Bir kere True döner, sonra reset)
     Tek seferlik tetikleme için — örneğin "Sıçra" gibi anlık komutlar.
     """
+    _pump_serial_keys()
     k = key.lower()
     if k in _pressed_once:
         _pressed_once.discard(k)

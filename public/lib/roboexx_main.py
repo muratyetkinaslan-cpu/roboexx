@@ -728,6 +728,13 @@ if not _skip_user_code:
     # Core0: USB seri stdin'den klavye mesajlarını dinle.
     # Protokol: \x06 + ASCII tuşlar + \n  (örn b"\x06wa\n")
     # Tarayıcı her 50ms gönderir. Diğer baytlar yutulur (REPL karışmasın).
+    # Bu dinleyici stdin'in tek okuyucusu olduğundan roboexx'in kendi
+    # otomatik pump'ını kapat — çift okuma/race olmasın.
+    if _roboexx_ref is not None:
+        try:
+            _roboexx_ref.disable_serial_pump()
+        except Exception:
+            pass
     try:
         import select as _select
         import sys as _sys
