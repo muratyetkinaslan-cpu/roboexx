@@ -101,7 +101,6 @@ export const ICONS = {
   relay:    svgToDataUri(stroke('<rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="7" cy="12" r="1.5" fill="white"/><line x1="7" y1="12" x2="14" y2="9"/><circle cx="14" cy="9" r="1.5" fill="white"/><circle cx="17" cy="15" r="1.5" fill="white"/>')),
   ir:       svgToDataUri(stroke('<rect x="8" y="3" width="8" height="14" rx="3"/><path d="M6 19l2-2M16 17l2 2M12 21v-3"/><circle cx="12" cy="10" r="1.5" fill="white"/>')),
   rainbow:  svgToDataUri(stroke('<path d="M3 18a9 9 0 0118 0"/><path d="M5 18a7 7 0 0114 0" stroke-opacity="0.8"/><path d="M7 18a5 5 0 0110 0" stroke-opacity="0.6"/><path d="M9 18a3 3 0 016 0" stroke-opacity="0.4"/>')),
-  motor:    svgToDataUri(stroke('<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.5" fill="white"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="3" cy="12" r="1" fill="white"/><circle cx="21" cy="12" r="1" fill="white"/>')),
   servoArm: svgToDataUri(stroke('<rect x="6" y="8" width="12" height="10" rx="1.5"/><line x1="12" y1="13" x2="20" y2="6" stroke-width="2"/><circle cx="12" cy="13" r="1.5" fill="white"/><circle cx="20" cy="6" r="1.2" fill="white"/>')),
 
   // ====== Variables / Functions ======
