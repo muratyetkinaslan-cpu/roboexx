@@ -47,6 +47,11 @@ export class SerialBridge {
 
   // Streaming mode: raw REPL exec sırasında çıktıyı canlı yayınla
   private streamMode = false;
+  // Canlı "Çalıştır" (runCode) sürerken true. Bu sırada klavye/gamepad
+  // tuşları seri porta yazılıp çalışan programın sys.stdin'ine gider.
+  // Dosya yükleme (uploadCode/uploadLibrary) sırasında false kalır — o
+  // fazlarda tuş enjekte etmek aktarımı bozabilir.
+  private liveRun = false;
   private streamState: 'stdout' | 'stderr' | 'end' | 'done' = 'stdout';
   private streamStdout = '';
   private streamStderr = '';
@@ -136,6 +141,7 @@ export class SerialBridge {
 
   async disconnect(): Promise<void> {
     this._setState('disconnected');
+    this.liveRun = false;
     try { await this.reader?.cancel(); } catch {}
     try { this.writer?.releaseLock(); } catch {}
     try { await this.port?.close(); } catch {}
@@ -180,14 +186,24 @@ export class SerialBridge {
   }
 
   /**
-   * Klavye basılı tuşlarını USB seri ile Pico'ya bildir.
-   * Protokol: \x06 + ASCII tuşlar + \n
-   * Sadece bağlı + user kod modunda (busy/silent değilken) gönderir.
+   * Klavye / gamepad basılı tuşlarını USB seri ile Pico'ya bildir.
+   * Protokol: \x06 + ASCII tuşlar + \n  (Pico tarafı sys.stdin'den okur)
+   *
+   * Gönderilebilecek durumlar:
+   *   - state 'connected'         → friendly REPL veya yüklenmiş main.py çalışıyor
+   *   - state 'busy' + liveRun    → canlı "Çalıştır" sürüyor, tuşlar programın
+   *                                 sys.stdin'ine akar
+   * Bloklanan durumlar:
+   *   - silent                    → raw REPL el sıkışma/dosya aktarımı (bayt
+   *                                 enjekte etmek protokolü bozar)
+   *   - dosya yükleme (busy ama liveRun=false)
    */
   async sendKeys(keys: string): Promise<void> {
-    if (this.state !== 'connected') return;
-    if (this.silent || this.streamMode) return; // upload/run sırasında karışmasın
     if (!this.writer) return;
+    if (this.silent) return; // raw REPL aktarımı sürüyor — karışma
+    const canSend =
+      this.state === 'connected' || (this.state === 'busy' && this.liveRun);
+    if (!canSend) return;
     const safe = keys.toLowerCase().slice(0, 16);
     try {
       await this._write('\x06' + safe + '\n');
@@ -201,6 +217,7 @@ export class SerialBridge {
     this.silent = false;
     this.silentBuffer = '';
     this.streamMode = false;
+    this.liveRun = false;
     this.streamState = 'stdout';
     this.streamStdout = '';
     this.streamStderr = '';
@@ -217,6 +234,7 @@ export class SerialBridge {
   async runCode(code: string): Promise<void> {
     if (this.state !== 'connected') throw new Error('Bağlı değil');
     this._setState('busy');
+    this.liveRun = true; // tuş enjeksiyonuna izin ver (canlı çalıştırma)
     console.log('[RoboExx] runCode başladı, kod boyutu:', code.length);
     try {
       console.log('[RoboExx] _enterRaw çağrılıyor...');

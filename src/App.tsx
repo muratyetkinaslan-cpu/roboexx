@@ -291,7 +291,9 @@ export default function App() {
   const [firmwareUploaderOpen, setFirmwareUploaderOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    if (bridgeState !== 'connected') {
+    // 'connected' → normal kontrol; 'busy' → USB'de canlı "Çalıştır" sürüyor,
+    // tuşlar programın sys.stdin'ine gitmeli (BLE'de busy kısa sürer, sorunsuz).
+    if (bridgeState !== 'connected' && bridgeState !== 'busy') {
       setPressedKeysDisplay('');
       return;
     }
