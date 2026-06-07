@@ -590,8 +590,9 @@ export class SerialBridge {
 
     // Hiçbir strateji çalışmadı → kullanıcıya net mesaj ver
     throw new Error(
-      'Pico REPL\'e dönmüyor. Lütfen Pico\'da fiziksel RESET tuşuna bas (veya gücü çek-tak), ' +
-      'sonra tekrar dene. (Yeni bootloader yüklendikten sonra bu sorun olmayacak.)'
+      'Pico REPL\'e geçilemiyor. Bunun en olası sebebi Pico\'da eski bir bootloader veya BLE servisinin meşgul olması. ' +
+      'ÇÖZÜM: Toolbar\'daki ⚡ Firmware Yükle butonu ile Pico\'ya MicroPython\'ı BOOTSEL modunda yeniden yükle. ' +
+      'Bu Pico\'nun belleğini sıfırlar ve temiz başlangıç sağlar. Sonra tekrar "Modülleri Yükle" yapabilirsin.'
     );
   }
 
