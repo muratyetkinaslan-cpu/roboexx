@@ -255,8 +255,7 @@ export class SerialBridge {
     const start = Date.now();
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
-    // 256 byte — Pico stdin buffer overflow'a karşı emniyetli
-    const CHUNK_BYTES = 256;
+    const CHUNK_BYTES = 1024;
 
     try {
       await this._enterRaw();
@@ -329,12 +328,9 @@ export class SerialBridge {
 
     // Büyük dosyalar (>4KB) için chunk'lara böl — Pico W'nin sınırlı RAM'i
     // tek seferde 14 KB bytes literal'i parse edemiyor (MemoryError).
-    // Her chunk için ayrı bir f.write() raw REPL komutu gönder.
-    // 256 byte: bytes literal escape ile ~1KB source kod → Pico stdin buffer
-    // (256-512 byte) overflow riskini ortadan kaldırır. UTF-8 multi-byte
-    // (Türkçe karakterler vs.) için her byte 4 karaktere genişlediği için
-    // küçük chunk şart.
-    const CHUNK_BYTES = 256;
+    // 512 byte: bytes literal escape ile ~2KB source kod → güvenli RAM payı.
+    const CHUNK_BYTES = 512;
+    const MAX_RETRY_PER_CHUNK = 2;
 
     try {
       await this._enterRaw();
@@ -351,7 +347,9 @@ export class SerialBridge {
         throw new Error('Dosya açma onayı alınamadı');
       }
 
-      // 2) Her chunk'ı ayrı yaz — HER chunk için hata kontrolü yap
+      // 2) Her chunk'ı ayrı yaz — HER chunk için hata kontrolü + akıllı retry
+      // Pico ara sıra geçici hata verebiliyor (BLE event, GC pause, vs.).
+      // Hata olursa: raw REPL'e tekrar gir + dosyayı doğru offset'ten devam et.
       let offset = 0;
       let chunkIdx = 0;
       while (offset < bytesTotal) {
@@ -359,27 +357,58 @@ export class SerialBridge {
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
         // Her chunk öncesi gc.collect → MemoryError ihtimalini azalt
-        // f.write dönen byte sayısını yazdır, doğrulayalım
         const pyCode = `gc.collect()\n_n=f.write(${literal})\nprint('__C__',_n)\n`;
-        const { output, error } = await this._execRaw(pyCode);
 
-        if (error && error.trim()) {
-          throw new Error(
-            `Chunk ${chunkIdx + 1} (offset ${offset}/${bytesTotal}) yazma hatası: ${error.trim()}`
-          );
-        }
-        // f.write'ın döndürdüğü byte sayısını parse et — beklenen ile eşleşmeli
-        const writeMatch = output.match(/__C__\s+(\d+)/);
-        if (!writeMatch) {
-          throw new Error(
-            `Chunk ${chunkIdx + 1} doğrulama yanıtı eksik (Pico bağlantısı kötü olabilir)`
-          );
-        }
-        const writtenBytes = parseInt(writeMatch[1], 10);
-        if (writtenBytes !== chunk.length) {
-          throw new Error(
-            `Chunk ${chunkIdx + 1} eksik yazıldı: ${writtenBytes}/${chunk.length} byte (offset ${offset})`
-          );
+        let attempt = 0;
+        let lastErr: string = '';
+        let writtenBytes = -1;
+        while (attempt <= MAX_RETRY_PER_CHUNK) {
+          try {
+            const { output, error } = await this._execRaw(pyCode);
+            if (error && error.trim()) {
+              lastErr = error.trim();
+              throw new Error(lastErr);
+            }
+            const writeMatch = output.match(/__C__\s+(\d+)/);
+            if (!writeMatch) {
+              lastErr = 'doğrulama yanıtı eksik';
+              throw new Error(lastErr);
+            }
+            writtenBytes = parseInt(writeMatch[1], 10);
+            if (writtenBytes !== chunk.length) {
+              lastErr = `eksik yazıldı (${writtenBytes}/${chunk.length})`;
+              throw new Error(lastErr);
+            }
+            // Başarılı — döngüden çık
+            break;
+          } catch (e) {
+            attempt++;
+            if (attempt > MAX_RETRY_PER_CHUNK) {
+              throw new Error(
+                `Chunk ${chunkIdx + 1} (offset ${offset}/${bytesTotal}) ${MAX_RETRY_PER_CHUNK + 1} deneme sonrası başarısız: ${lastErr || (e as Error).message}`
+              );
+            }
+            // RECOVERY: Pico karışmış olabilir. Raw REPL'e tekrar gir,
+            // dosyayı doğru offset'te aç (truncate ederek), aynı chunk'ı tekrar yaz.
+            console.warn(`[RoboExx] Chunk ${chunkIdx + 1} attempt ${attempt} başarısız: ${lastErr}. Recovery deneniyor...`);
+            try {
+              await this._enterRaw();
+              // Dosyayı tekrar aç, mevcut offset'e seek et — önceki chunk'lar korunsun
+              // 'r+b' = okuma+yazma açar, 'w'b' her şeyi siler
+              // 'r+b' kullanıp seek edersek önceki chunk'lar güvende
+              const reopenCode =
+                `gc.collect()\n` +
+                `try: f.close()\nexcept: pass\n` +
+                `f=open('${filename}','r+b')\n` +
+                `f.seek(${offset})\n` +
+                `print('__REOPEN__')\n`;
+              await this._execRaw(reopenCode);
+              await new Promise((r) => setTimeout(r, 100));
+            } catch (recoveryErr) {
+              console.error('[RoboExx] Recovery sırasında hata:', recoveryErr);
+              // Recovery de başarısızsa retry'a devam et — belki ikinci recovery işe yarar
+            }
+          }
         }
 
         offset = end;
@@ -682,11 +711,9 @@ export class SerialBridge {
   ): Promise<{ output: string; error: string }> {
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
-    // Büyük yüklemelerde (lib, resim) Pico stdin buffer overflow olmasın diye
-    // küçük chunk + uzun pause. Pico stdin buffer 256-512 byte, eski raw REPL
-    // (flow control yok) modunda byte kaybı = syntax error.
-    // 128 byte + 20 ms emniyetli — yavaş ama güvenli.
-    const chunkSize = 128;
+    // Büyük yüklemelerde (lib, resim) Pico'nun yetişmesi için 512 byte chunk
+    // ve 8ms ara — daha önce sınanmış güvenli ayar.
+    const chunkSize = 512;
 
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
@@ -694,7 +721,7 @@ export class SerialBridge {
       const sent = Math.min(i + chunkSize, total);
       onChunkSent?.(sent, total);
       if (i + chunkSize < total) {
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 8));
       }
     }
 
