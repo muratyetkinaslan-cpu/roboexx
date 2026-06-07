@@ -1,7 +1,7 @@
 {
   "name": "roboexx",
   "private": true,
-  "version": "2.11.4",
+  "version": "2.11.5",
   "type": "module",
   "description": "RoboExx — Pico W tabanlı blok tabanlı programlama uygulaması",
   "scripts": {

@@ -255,7 +255,8 @@ export class SerialBridge {
     const start = Date.now();
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
-    const CHUNK_BYTES = 1024;
+    // 256 byte — Pico stdin buffer overflow'a karşı emniyetli
+    const CHUNK_BYTES = 256;
 
     try {
       await this._enterRaw();
@@ -329,8 +330,11 @@ export class SerialBridge {
     // Büyük dosyalar (>4KB) için chunk'lara böl — Pico W'nin sınırlı RAM'i
     // tek seferde 14 KB bytes literal'i parse edemiyor (MemoryError).
     // Her chunk için ayrı bir f.write() raw REPL komutu gönder.
-    // 512 byte: bytes literal escape ile ~2KB source kod → güvenli RAM payı.
-    const CHUNK_BYTES = 512;
+    // 256 byte: bytes literal escape ile ~1KB source kod → Pico stdin buffer
+    // (256-512 byte) overflow riskini ortadan kaldırır. UTF-8 multi-byte
+    // (Türkçe karakterler vs.) için her byte 4 karaktere genişlediği için
+    // küçük chunk şart.
+    const CHUNK_BYTES = 256;
 
     try {
       await this._enterRaw();
@@ -678,9 +682,11 @@ export class SerialBridge {
   ): Promise<{ output: string; error: string }> {
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
-    // Büyük yüklemelerde (lib, resim) Pico'nun yetişmesi için daha küçük chunk
-    // ve aralarda daha uzun pause. 512 bayt + 8ms emniyetli.
-    const chunkSize = 512;
+    // Büyük yüklemelerde (lib, resim) Pico stdin buffer overflow olmasın diye
+    // küçük chunk + uzun pause. Pico stdin buffer 256-512 byte, eski raw REPL
+    // (flow control yok) modunda byte kaybı = syntax error.
+    // 128 byte + 20 ms emniyetli — yavaş ama güvenli.
+    const chunkSize = 128;
 
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
@@ -688,7 +694,7 @@ export class SerialBridge {
       const sent = Math.min(i + chunkSize, total);
       onChunkSent?.(sent, total);
       if (i + chunkSize < total) {
-        await new Promise((r) => setTimeout(r, 8));
+        await new Promise((r) => setTimeout(r, 20));
       }
     }
 
