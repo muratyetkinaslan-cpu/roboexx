@@ -152,7 +152,6 @@ def servo_v3(channel, angle):
     freq = _default_cfg[3]
     ticks = _angle_to_ticks(angle, freq_hz=freq)
     pca.set_pwm(channel, 0, ticks)
-    print("@SV C%d %d" % (channel, max(0, min(180, int(angle)))))  # simülasyon senkronu
 
 
 def servo_v3_off(channel):
