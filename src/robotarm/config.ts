@@ -41,12 +41,12 @@ export interface ArmConfig {
 }
 
 const STORAGE_KEY = 'roboexx.robotarm.config';
-const GRIPPER_VERSION = 3;
+const GRIPPER_VERSION = 5;
 
-/** Gripper'ı bağlı siyah parçayla birlikte 180° çeviren varsayılan. */
+/** Gripper varsayılanı: çevirme YOK — model orijinal (eski) halinde. */
 const DEFAULT_GRIPPER: ArmConfig['gripper'] = {
-  parts: ['object_id_1', 'object_id_2', 'object_id_3', 'object_id_4', 'Servo (1)'],
-  rot: [180, 0, 0],
+  parts: [],
+  rot: [0, 0, 0],
   pos: [0, 0, 0],
   pivot: [0, 0, 0],
 };

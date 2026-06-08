@@ -152,48 +152,44 @@ const hand=new THREE.Object3D();hand.position.set(midGC[0]-j3wp.x,midGC[1]-j3wp.
 function handPos(){const w=new THREE.Vector3();hand.getWorldPosition(w);return w;}
 
 // ============================================================
-//  GRIPPER MONTAJ GRUBU — gripper + bağlı siyah parça birlikte
-//  çevrilebilir/kaydırılabilir. Jaw aç-kapa ekseni de döner.
+//  APARAT ÇEVİRME — gripper'a DOKUNMA, sadece seçili parçayı
+//  KENDİ merkezinde yerinde döndür. Taşıma/montaj yok.
 // ============================================================
-// Aday parçalar: jaw'lar (finger grupları) + J3 siyah parçaları + el
+// Aday parçalar: yalnızca J3 siyah parçaları (gripper çeneleri hariç)
 const gripCandidates={};
-fingers.forEach(f=>{ gripCandidates[f.name]={obj:f.grp}; });
-byGroup.j3.forEach(m=>{ gripCandidates[m.name]={obj:m}; });
-// Varsayılan: gripper çeneleri + bağlı braket/cıvata + gripper servosu
-let gripPartNames=['object_id_1','object_id_2','object_id_3','object_id_4','Servo (1)'];
-let gripXform={rx:180,ry:0,rz:0,dx:0,dy:0,dz:0,px:0,py:0,pz:0};   // derece + öteleme(cm) + pivot offset(cm)
-const gripAsm=new THREE.Group();J[2].add(gripAsm);
-const gripBaseLocal=new THREE.Vector3();
-function rebuildGripAsm(names){
-  if(Array.isArray(names)) gripPartNames=names.filter(n=>gripCandidates[n]);
-  // önce gripAsm içindekileri J3'e geri ver
-  [...gripAsm.children].forEach(o=>{ J[2].attach(o); });
-  gripAsm.position.set(0,0,0);gripAsm.rotation.set(0,0,0);gripAsm.updateMatrixWorld(true);
-  // pivot = gripper'ın bileğe monte olduğu bölge (gripper merkezi ile J3 ortası)
-  // + kullanıcı pivot ofseti. Böylece 180° flip gripper'ı içeri sokmaz.
-  const baseP=new THREE.Vector3(
-    (midGC[0]+P.j3[0])/2 + (gripXform.px||0),
-    (midGC[1]+P.j3[1])/2 + (gripXform.py||0),
-    (midGC[2]+P.j3[2])/2 + (gripXform.pz||0)
-  );
-  gripBaseLocal.copy(J[2].worldToLocal(baseP));
-  gripAsm.position.copy(gripBaseLocal);gripAsm.updateMatrixWorld(true);
-  // seçili parçaları + el'i gripAsm'e taşı (dünya konumu korunur)
-  gripPartNames.forEach(nm=>{const e=gripCandidates[nm];if(e)gripAsm.attach(e.obj);});
-  gripAsm.attach(hand);
-  applyGripXform();
+byGroup.j3.forEach(m=>{ gripCandidates[m.name]=m; });
+let gripPartNames=[];                        // varsayılan: çevirme YOK (orijinal model)
+let gripRot=[0,0,0];                         // her seçili parçaya uygulanan derece
+const partPivots={};                         // name -> {pivot, obj, home}
+function setPartFlip(name){
+  let e=partPivots[name];
+  if(!e){
+    const obj=gripCandidates[name]; if(!obj) return;
+    const center=new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
+    const home=obj.parent||J[2];
+    const pivot=new THREE.Group();home.add(pivot);
+    pivot.position.copy(home.worldToLocal(center.clone()));pivot.updateMatrixWorld(true);
+    pivot.attach(obj);                        // parça artık kendi merkezi etrafında döner
+    e=partPivots[name]={pivot:pivot,obj:obj,home:home};
+  }
+  e.pivot.rotation.set(deg(gripRot[0]||0),deg(gripRot[1]||0),deg(gripRot[2]||0));
 }
-function applyGripXform(){
-  gripAsm.rotation.set(deg(gripXform.rx||0),deg(gripXform.ry||0),deg(gripXform.rz||0));
-  gripAsm.position.set(gripBaseLocal.x+(gripXform.dx||0),gripBaseLocal.y+(gripXform.dy||0),gripBaseLocal.z+(gripXform.dz||0));
-  gripAsm.updateMatrixWorld(true);
-  // gear eksenini gripAsm-local uzaya çevir (jaw aç-kapa doğru kalsın)
-  GAXlocal.copy(GAX).applyQuaternion(gripAsm.quaternion.clone().invert()).normalize();
-  apply();
+function clearPartFlip(name){
+  const e=partPivots[name];if(!e)return;
+  e.pivot.rotation.set(0,0,0);e.pivot.updateMatrixWorld(true);
+  e.home.attach(e.obj);e.home.remove(e.pivot);   // orijinal yönüne geri dön
+  delete partPivots[name];
 }
-function setGripXform(x){ Object.assign(gripXform,x||{}); applyGripXform(); }
-function getGripState(){ return {xform:Object.assign({},gripXform), parts:gripPartNames.slice(), all:Object.keys(gripCandidates)}; }
-rebuildGripAsm(gripPartNames);   // varsayılanı kur (180° X)
+function applyGrip(names,rot){
+  if(Array.isArray(rot))gripRot=rot.slice();
+  if(Array.isArray(names))gripPartNames=names.filter(n=>gripCandidates[n]);
+  // seçili olmayanları eski hâline getir
+  Object.keys(partPivots).forEach(n=>{ if(gripPartNames.indexOf(n)<0) clearPartFlip(n); });
+  // seçilileri döndür
+  gripPartNames.forEach(n=>setPartFlip(n));
+}
+function getGripState(){ return {parts:gripPartNames.slice(), rot:gripRot.slice(), all:Object.keys(gripCandidates)}; }
+applyGrip(gripPartNames,gripRot);            // varsayılanı kur
 
 // cube sits on a small stand at a graspable height (click "Küp Koy" to position it)
 const CUBE=3.0, GRABY=6.0;                 // GRABY = cube-center height (keeps gripper above floor)
@@ -425,17 +421,12 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     return D.parts.filter(function(p){ return p.group==='grip' || p.group==='j3'; })
       .map(function(p){ return { name:p.name, group:p.group, color:p.color }; });
   }
-  // Panel protokolü → ana-script gripper API'sine köprü
+  // Panel protokolü → aparat çevirme (yerinde, sadece seçili parça)
   function applyGripper(t){
     if(!t) return;
-    var r = t.rot || [0,0,0], p = t.pos || [0,0,0], pv = t.pivot || [0,0,0];
-    Object.assign(gripXform, {
-      rx:r[0]||0, ry:r[1]||0, rz:r[2]||0,
-      dx:p[0]||0, dy:p[1]||0, dz:p[2]||0,
-      px:pv[0]||0, py:pv[1]||0, pz:pv[2]||0
-    });
-    var parts = Array.isArray(t.parts) && t.parts.length ? t.parts : gripPartNames;
-    rebuildGripAsm(parts);   // sonunda applyGripXform çağırır
+    var parts = Array.isArray(t.parts) ? t.parts : gripPartNames;
+    var rot = t.rot || [180,0,0];
+    applyGrip(parts, rot);
   }
 
   // --- Slider hareketi → parent'a (canlı, sim→gerçek) ---
