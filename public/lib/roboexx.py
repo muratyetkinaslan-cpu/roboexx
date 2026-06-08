@@ -429,6 +429,7 @@ def servo_angle(pin, angle):
     a = max(0, min(180, angle))
     duty = int(1638 + (a / 180) * (8192 - 1638))
     _pwm_cache[pin].duty_u16(duty)
+    print("@SV P%d %d" % (pin, a))  # simülasyon senkronu
 
 
 def buzzer_tone(pin, freq, dur_ms):
@@ -878,6 +879,7 @@ def servo_v2(servo_num, angle):
     """
     angle = max(0, min(180, int(angle)))
     _motor_send(servo_num + 2, 0, angle)
+    print("@SV M%d %d" % (servo_num, angle))  # simülasyon senkronu
 
 
 def dc_motor(motor_num, speed, direction):

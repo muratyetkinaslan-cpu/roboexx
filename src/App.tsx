@@ -8,6 +8,8 @@ import { LoginModal, type UserProfile } from './components/LoginModal';
 import { ProjectsPanel } from './components/ProjectsPanel';
 import { SerialMonitor, type SerialLine, type LineKind } from './components/SerialMonitor';
 import { Toolbar } from './components/Toolbar';
+import { RobotArmSim } from './sim/RobotArmSim';
+import { parseServoLine } from './sim/servoBus';
 import { UploadOverlay } from './components/UploadOverlay';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
@@ -171,6 +173,7 @@ export default function App() {
   // Serial monitör varsayılan KAPALI — sadece kullanıcı tıklayınca açılır.
   // localStorage'da açık bırakıldıysa hatırlanır.
   const [monitorOpen, setMonitorOpen] = useState(() => localStorage.getItem(MONITOR_KEY) === 'true');
+  const [simOpen, setSimOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(() => localStorage.getItem(PREVIEW_KEY) !== 'false');
   // Donanım galerisi — varsayılan AÇIK, kullanıcı kapatabilir
   const [lines, setLines] = useState<SerialLine[]>([]);
@@ -252,6 +255,7 @@ export default function App() {
       textBufferRef.current = parts.pop() || '';
       for (const part of parts) {
         if (part.length === 0) continue;
+        if (parseServoLine(part)) continue;   // servo yankısı -> simülasyona, monitöre yazma
         addLine(classifyLine(part), part);
       }
     };
@@ -1363,6 +1367,8 @@ export default function App() {
           addLine('system', '⚠ Bridge sıfırlandı');
         }}
         onSensorPanel={() => setSensorPanelOpen(true)}
+        onRobotArm={() => setSimOpen((v) => !v)}
+        robotArmActive={simOpen}
         onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
         themeId={themeId}
         onToggleLight={toggleLight}
@@ -1423,7 +1429,8 @@ export default function App() {
       )}
 
       <main className="main-content" data-monitor-open={monitorOpen}>
-        <div className="workspace-area">
+        <div className="workspace-area" data-sim-open={simOpen}>
+          <div className="workspace-primary">
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
               <div className="workspace-blocks">
@@ -1467,6 +1474,12 @@ export default function App() {
                 </div>
                 <CodeEditor value={customCode} onChange={handleCodeChange} theme={theme} />
               </div>
+            </div>
+          )}
+          </div>
+          {simOpen && (
+            <div className="workspace-sim">
+              <RobotArmSim />
             </div>
           )}
         </div>

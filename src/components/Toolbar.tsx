@@ -37,6 +37,10 @@ interface Props {
   /** Sensör paneli aç — canlı sensör değerleri popup'ı */
   onSensorPanel: () => void;
 
+  /** Robot kol simülasyonu — ekranı ikiye böler (sol blok, sağ 3B sim) */
+  onRobotArm: () => void;
+  robotArmActive: boolean;
+
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
@@ -215,6 +219,17 @@ export function Toolbar(props: Props) {
             }
           >
             <span style={{ fontSize: 18, lineHeight: 1 }}>🤖</span>
+          </button>
+
+          {/* Robot Kol Simülasyonu — ekranı ikiye böler, blok kodu ile birebir oynar */}
+          <button
+            className={'btn btn-ghost btn-icon-only' + (props.robotArmActive ? ' is-active' : '')}
+            onClick={props.onRobotArm}
+            data-tooltip="Robot Kol Simülasyonu"
+            data-tooltip-detail="Ekranı ikiye böl: solda bloklar, sağda 3B robot kol. Servo blokları ile birebir oynar."
+            aria-pressed={props.robotArmActive}
+          >
+            <span style={{ fontSize: 18, lineHeight: 1 }}>🦾</span>
           </button>
 
           {/* Çalıştır — sadece USB modunda (BLE'de canlı çıktı pratik değil) */}

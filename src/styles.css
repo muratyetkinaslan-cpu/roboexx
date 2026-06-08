@@ -5236,3 +5236,24 @@ g.blocklyDraggable > path:first-of-type {
   background: rgba(0, 0, 0, 0.04);
   color: rgba(0, 0, 0, 0.6);
 }
+
+/* ===== Robot Kol Simülasyonu — bölünmüş ekran + 3B panel ===== */
+.workspace-area[data-sim-open="true"]{display:flex;flex-direction:row;min-width:0}
+.workspace-area:not([data-sim-open="true"]) .workspace-primary{display:contents}
+.workspace-area[data-sim-open="true"] .workspace-primary{flex:1 1 0;min-width:0;height:100%;display:flex;flex-direction:column}
+.workspace-area[data-sim-open="true"] .workspace-primary>*{flex:1 1 auto;min-height:0}
+.workspace-area[data-sim-open="true"] .workspace-sim{flex:1 1 0;min-width:0;height:100%;border-left:1px solid rgba(255,255,255,.08)}
+
+.arm-sim{position:relative;height:100%;width:100%;display:flex;flex-direction:column;background:#0c0f14;overflow:hidden}
+.arm-sim--fs{position:fixed;inset:0;z-index:9999}
+.arm-sim__canvas{flex:1 1 auto;min-height:0;position:relative}
+.arm-sim__canvas canvas{display:block;width:100%;height:100%}
+.arm-sim__panel{flex:0 0 auto;background:rgba(14,18,26,.96);border-top:1px solid rgba(255,255,255,.08);padding:10px 12px;font-size:12px;color:#cdd6e4;display:flex;flex-direction:column;gap:6px}
+.arm-sim__row{display:flex;align-items:center;gap:8px}
+.arm-sim__head{justify-content:space-between;font-weight:600;color:#fff;margin-bottom:2px}
+.arm-sim__lbl{flex:1 1 auto}
+.arm-sim__row select{background:#1b2330;color:#e6edf6;border:1px solid #2c384b;border-radius:6px;padding:3px 6px;flex:0 0 auto}
+.arm-sim__val{width:46px;text-align:right;color:#ff8a3d;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.arm-sim__fs{background:#1b2330;color:#e6edf6;border:1px solid #2c384b;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px}
+.arm-sim__fs:hover{border-color:#ff8a3d}
+.arm-sim__hint{color:#7f8da0;font-size:11px;line-height:1.45}
