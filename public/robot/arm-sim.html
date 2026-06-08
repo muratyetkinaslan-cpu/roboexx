@@ -287,7 +287,7 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   const gotoBtn = document.getElementById('goto');
   function clearGoto(){ if(gotoBtn) gotoBtn.classList.remove('on'); }
   function setGoto(on){
-    stopAll(); setMode('free');
+    stopAll(); setMode('free'); stopRepeat();
     mode = on ? 'goto' : 'free';
     if(gotoBtn) gotoBtn.classList.toggle('on', !!on);
     msg(on ? 'zemine tıkla — kol oraya gider' : '');
@@ -298,7 +298,7 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   // diğer mod butonları goto'yu kapatsın
   ['demo','pick','reset','target','teach','repeat'].forEach(id=>{
     const b = document.getElementById(id);
-    if(b) b.addEventListener('click', clearGoto);
+    if(b) b.addEventListener('click', ()=>{ clearGoto(); stopRepeat(); });
   });
 
   // goto için kendi tıklama takibi (mevcut pointerup'a karışmadan)
@@ -321,6 +321,36 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     moveTo(info.goal, 1.0, ()=>{
       post('rx:ik', { angles: angles.slice(), point: { x:+p.x.toFixed(1), z:+p.z.toFixed(1) }, reach: +info.err.toFixed(1) });
     });
+  }
+
+  // ---- Çoklu nokta tekrarı (pick & place) — gerçek kol dahil ----
+  // Mevcut teach/waypoint altyapısını kullanır; her bacakta rx:ik yayınlar.
+  let _rep=false, _dwell=400;
+  function pointMode(on){
+    stopAll(); stopRepeat(); clearGoto();
+    setMode(on ? 'teach' : 'free');
+    msg(on ? 'zemine tikla — hedef noktalarini ekle' : '');
+  }
+  function startRepeat(dwell){
+    if(waypoints.length<2){ msg('en az 2 nokta sec'); return false; }
+    stopAll(); clearGoto(); setMode('free');
+    _dwell = dwell || 400; _rep = true; repLoop(0);
+    return true;
+  }
+  function stopRepeat(){ _rep=false; }
+  function repLoop(i){
+    if(!_rep || waypoints.length<2) return;
+    var wp = waypoints[i], g = solveIK(wp);
+    moveTo(g, 1.1, function(){
+      post('rx:ik', { angles: angles.slice(), point:{ x:+wp.x.toFixed(1), z:+wp.z.toFixed(1) }, leg:i });
+      if(_rep) setTimeout(function(){ repLoop((i+1) % waypoints.length); }, _dwell);
+    });
+  }
+  // nokta sayisini parent'a bildir (#wpn metni degisince)
+  var _wpn = document.getElementById('wpn');
+  if(_wpn && 'MutationObserver' in window){
+    new MutationObserver(function(){ post('rx:points', { n: waypoints.length }); })
+      .observe(_wpn, { childList:true, characterData:true, subtree:true });
   }
 
   // --- Slider hareketi → parent'a (canlı, sim→gerçek) ---
@@ -353,6 +383,16 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
         break; }
       case 'rx:enableGoto':
         setGoto(!!d.on);
+        break;
+      case 'rx:pointMode':
+        pointMode(!!d.on);
+        break;
+      case 'rx:clearPoints':
+        stopRepeat(); clearWp(); post('rx:repeatState', { on:false });
+        break;
+      case 'rx:repeat':
+        if(d.on){ post('rx:repeatState', { on: startRepeat(d.dwell) }); }
+        else { stopRepeat(); post('rx:repeatState', { on:false }); }
         break;
       case 'rx:ping':
         post('rx:ready', { angles: angles.slice() });

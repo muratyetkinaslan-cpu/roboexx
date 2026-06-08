@@ -5420,3 +5420,21 @@ g.blocklyDraggable > path:first-of-type {
     max-height: 42%;
   }
 }
+
+/* Robot kol — nokta tekrarı kontrolleri */
+.ra-row { display: flex; gap: 6px; align-items: stretch; }
+.ra-field-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ra-field-inline > span { font-size: 11px; color: var(--rx-text-dim); }
+.ra-field-inline input { width: 80px; }
+.btn-danger {
+  background: var(--rx-error);
+  border-color: var(--rx-error);
+  color: #fff;
+}
+.btn-danger:hover { filter: brightness(1.08); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }

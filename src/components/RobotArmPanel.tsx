@@ -47,6 +47,10 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
   const [simReady, setSimReady] = useState(false);
   const [gotoOn, setGotoOn] = useState(false);
+  const [pointModeOn, setPointModeOn] = useState(false);
+  const [pointCount, setPointCount] = useState(0);
+  const [repeating, setRepeating] = useState(false);
+  const [dwell, setDwell] = useState(400);
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
   const liveThrottle = useRef<Record<number, number>>({});
@@ -81,6 +85,12 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       switch (d.type) {
         case 'rx:ready':
           setSimReady(true);
+          break;
+        case 'rx:points':
+          if (typeof d.n === 'number') setPointCount(d.n);
+          break;
+        case 'rx:repeatState':
+          setRepeating(!!d.on);
           break;
         case 'rx:ik': {
           // Sim kol hedefe gitti → aynı açıları gerçek kola gönder
@@ -136,7 +146,30 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const toggleGoto = () => {
     const next = !gotoOn;
     setGotoOn(next);
+    if (next) { setPointModeOn(false); setRepeating(false); }
     postToSim({ type: 'rx:enableGoto', on: next });
+  };
+  const togglePointMode = () => {
+    const next = !pointModeOn;
+    setPointModeOn(next);
+    if (next) { setGotoOn(false); }
+    postToSim({ type: 'rx:pointMode', on: next });
+  };
+  const clearPoints = () => {
+    postToSim({ type: 'rx:clearPoints' });
+    setPointCount(0);
+    setRepeating(false);
+  };
+  const toggleRepeat = () => {
+    if (repeating) {
+      postToSim({ type: 'rx:repeat', on: false });
+      setRepeating(false);
+    } else {
+      // tekrar başlarken nokta ekleme modundan çık
+      setPointModeOn(false);
+      postToSim({ type: 'rx:pointMode', on: false });
+      postToSim({ type: 'rx:repeat', on: true, dwell });
+    }
   };
 
   const updateJoint = (i: number, patch: Partial<ArmConfig['joints'][number]>) => {
@@ -203,6 +236,43 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               {connected && !bootDone && (
                 <button className="btn btn-ghost ra-boot" onClick={ensureBoot}>Modülleri hazırla (import)</button>
               )}
+            </div>
+
+            <div className="ra-section">
+              <h4 className="ra-h">Nokta tekrarı (pick &amp; place)</h4>
+              <div className="ra-actions">
+                <button
+                  className={`btn btn-secondary ${pointModeOn ? 'is-on ra-goto' : ''}`}
+                  onClick={togglePointMode}
+                  disabled={repeating}
+                >
+                  {pointModeOn ? `● Nokta ekle açık (${pointCount})` : 'Nokta ekle'}
+                </button>
+                <div className="ra-row">
+                  <button
+                    className={`btn ${repeating ? 'btn-danger' : 'btn-primary'}`}
+                    onClick={toggleRepeat}
+                    disabled={pointCount < 2}
+                    style={{ flex: 1 }}
+                  >
+                    {repeating ? '■ Durdur' : `▶ Tekrarla (${pointCount} nokta)`}
+                  </button>
+                  <button className="btn btn-ghost" onClick={clearPoints} disabled={repeating}>Temizle</button>
+                </div>
+                <label className="ra-field ra-field-inline">
+                  <span>Bekleme (ms)</span>
+                  <input
+                    type="number" min={0} max={5000} step={50} value={dwell}
+                    onChange={(e) => setDwell(Math.max(0, +e.target.value))}
+                    disabled={repeating}
+                  />
+                </label>
+              </div>
+              <p className="ra-hint">
+                <b>Nokta ekle</b>'yi aç, sahnede zemine sırayla tıklayarak 2+ hedef nokta koy.
+                Sonra <b>Tekrarla</b> ile kol noktalar arasında döngüye girer; bağlıysa gerçek kol da
+                aynı sırayı tekrarlar.
+              </p>
             </div>
 
             <div className="ra-section">
