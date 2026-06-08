@@ -9,6 +9,8 @@ import { ProjectsPanel } from './components/ProjectsPanel';
 import { SerialMonitor, type SerialLine, type LineKind } from './components/SerialMonitor';
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
+import { RobotArmPanel, type RobotArmHandle } from './components/RobotArmPanel';
+import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
 import type { AppMode } from './components/ModeTabs';
@@ -172,6 +174,11 @@ export default function App() {
   // localStorage'da açık bırakıldıysa hatırlanır.
   const [monitorOpen, setMonitorOpen] = useState(() => localStorage.getItem(MONITOR_KEY) === 'true');
   const [previewOpen, setPreviewOpen] = useState(() => localStorage.getItem(PREVIEW_KEY) !== 'false');
+
+  // ====== Robot Kol simülasyonu ======
+  const [robotArmOpen, setRobotArmOpen] = useState(false);
+  const [robotArmFullscreen, setRobotArmFullscreen] = useState(false);
+  const robotArmRef = useRef<RobotArmHandle>(null);
   // Donanım galerisi — varsayılan AÇIK, kullanıcı kapatabilir
   const [lines, setLines] = useState<SerialLine[]>([]);
 
@@ -252,6 +259,12 @@ export default function App() {
       textBufferRef.current = parts.pop() || '';
       for (const part of parts) {
         if (part.length === 0) continue;
+        // Robot kol servo telemetrisi (@SV kod id açı) → simülasyona yansıt, monitöre yazma
+        const tel = parseTelemetry(part);
+        if (tel) {
+          robotArmRef.current?.applyServoTelemetry(tel.code, tel.id, tel.angle);
+          continue;
+        }
         addLine(classifyLine(part), part);
       }
     };
@@ -1039,6 +1052,18 @@ export default function App() {
   /** Aktif bridge — USB veya BLE moduna göre. Tek noktadan abstract. */
   const activeBridge = connectionMode === 'ble' ? bleBridge : serialBridge;
 
+  /**
+   * Robot kol için MicroPython'u REPL'e satır satır gönder (canlı sürüş).
+   * Yalnızca USB/REPL ile çalışır; satırlar Pico'da anında yürütülür.
+   * Pico bağlı değilse sendCommand zaten sessizce döner.
+   */
+  const sendArmCode = (code: string) => {
+    const lines = code.split('\n').map((s) => s.trim()).filter(Boolean);
+    for (const line of lines) {
+      void serialBridge.sendCommand(line);
+    }
+  };
+
   const handleConnect = async () => {
     try {
       await serialBridge.requestAndConnect();
@@ -1364,6 +1389,8 @@ export default function App() {
         }}
         onSensorPanel={() => setSensorPanelOpen(true)}
         onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
+        onRobotArm={() => setRobotArmOpen((o) => !o)}
+        robotArmActive={robotArmOpen}
         themeId={themeId}
         onToggleLight={toggleLight}
         lastSavedText={lastSavedText}
@@ -1423,7 +1450,13 @@ export default function App() {
       )}
 
       <main className="main-content" data-monitor-open={monitorOpen}>
-        <div className="workspace-area">
+        <div
+          className="workspace-area"
+          data-arm-open={robotArmOpen ? 'true' : 'false'}
+          data-arm-full={robotArmOpen && robotArmFullscreen ? 'true' : 'false'}
+        >
+          {!(robotArmOpen && robotArmFullscreen) && (
+          <div className="workspace-main-col">
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
               <div className="workspace-blocks">
@@ -1468,6 +1501,19 @@ export default function App() {
                 <CodeEditor value={customCode} onChange={handleCodeChange} theme={theme} />
               </div>
             </div>
+          )}
+          </div>
+          )}
+
+          {robotArmOpen && (
+            <RobotArmPanel
+              ref={robotArmRef}
+              connected={bridgeState === 'connected'}
+              onSendCode={sendArmCode}
+              fullscreen={robotArmFullscreen}
+              onToggleFullscreen={() => setRobotArmFullscreen((f) => !f)}
+              onClose={() => { setRobotArmOpen(false); setRobotArmFullscreen(false); }}
+            />
           )}
         </div>
 

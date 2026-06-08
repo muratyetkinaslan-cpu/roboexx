@@ -429,6 +429,11 @@ def servo_angle(pin, angle):
     a = max(0, min(180, angle))
     duty = int(1638 + (a / 180) * (8192 - 1638))
     _pwm_cache[pin].duty_u16(duty)
+    # Robot kol simülasyonu telemetrisi: @SV <tip 0=normal> <pin> <açı>
+    try:
+        print('@SV 0 {} {}'.format(pin, int(a)))
+    except Exception:
+        pass
 
 
 def buzzer_tone(pin, freq, dur_ms):
@@ -878,6 +883,11 @@ def servo_v2(servo_num, angle):
     """
     angle = max(0, min(180, int(angle)))
     _motor_send(servo_num + 2, 0, angle)
+    # Robot kol telemetrisi: @SV <tip 1=sürücü> <num> <açı>
+    try:
+        print('@SV 1 {} {}'.format(servo_num, angle))
+    except Exception:
+        pass
 
 
 def dc_motor(motor_num, speed, direction):

@@ -5236,3 +5236,187 @@ g.blocklyDraggable > path:first-of-type {
   background: rgba(0, 0, 0, 0.04);
   color: rgba(0, 0, 0, 0.6);
 }
+
+/* ========================================
+   Robot Kol — ikili görünüm + simülasyon paneli
+   ======================================== */
+
+/* workspace-area normalde tek sütun; robot kol açılınca yatay ikiye böl */
+.workspace-area[data-arm-open="true"] {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+}
+.workspace-main-col {
+  flex: 1 1 50%;
+  min-width: 0;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.robotarm-panel {
+  flex: 1 1 50%;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--rx-bg);
+  border-left: 1px solid var(--rx-border);
+  overflow: hidden;
+}
+.workspace-area[data-arm-full="true"] .robotarm-panel {
+  flex: 1 1 100%;
+  border-left: none;
+}
+
+.robotarm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--rx-surface);
+  border-bottom: 1px solid var(--rx-border);
+  flex: 0 0 auto;
+}
+.robotarm-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--rx-text);
+}
+.robotarm-title svg { color: var(--rx-accent); }
+.robotarm-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--rx-text-muted);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background .2s;
+}
+.robotarm-dot.ok {
+  background: var(--rx-success);
+  box-shadow: 0 0 8px var(--rx-success);
+}
+.robotarm-header-actions { display: inline-flex; gap: 4px; }
+
+.robotarm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+}
+.robotarm-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background: #0a0d11;
+}
+.robotarm-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* Kalibrasyon kenar çubuğu */
+.robotarm-config {
+  flex: 0 0 248px;
+  border-left: 1px solid var(--rx-border);
+  background: var(--rx-surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.robotarm-config-scroll {
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ra-section { display: flex; flex-direction: column; gap: 8px; }
+.ra-h {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--rx-text-muted);
+  font-weight: 700;
+}
+.ra-actions { display: flex; flex-direction: column; gap: 6px; }
+.ra-goto.is-on {
+  background: var(--rx-accent);
+  color: var(--rx-accent-text, #fff);
+  border-color: var(--rx-accent);
+}
+.ra-hint { margin: 0; font-size: 11px; line-height: 1.45; color: var(--rx-text-dim); }
+.ra-warn { margin: 0; font-size: 11px; line-height: 1.4; color: var(--rx-error); }
+.ra-boot { align-self: flex-start; font-size: 12px; }
+
+.ra-joint {
+  border: 1px solid var(--rx-border-soft);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--rx-surface2);
+}
+.ra-joint-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rx-text);
+  margin-bottom: 6px;
+}
+.ra-joint-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+}
+.ra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ra-field > span { font-size: 10px; color: var(--rx-text-muted); }
+.ra-field select,
+.ra-field input[type="number"],
+.ra-field input[type="text"] {
+  background: var(--rx-bg);
+  border: 1px solid var(--rx-border);
+  border-radius: 6px;
+  color: var(--rx-text);
+  font-size: 12px;
+  padding: 4px 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ra-field-narrow { flex: 0 0 56px; }
+.ra-field-check {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 5px;
+}
+.ra-field-check span { font-size: 11px; color: var(--rx-text-dim); }
+
+/* topbar Robot Kol butonu aktif görünümü */
+.btn-robotarm.is-active {
+  color: var(--rx-accent);
+  background: var(--rx-accent-soft);
+}
+
+/* Dar ekranda config'i alta al */
+@media (max-width: 980px) {
+  .robotarm-body { flex-direction: column; }
+  .robotarm-config {
+    flex: 0 0 auto;
+    border-left: none;
+    border-top: 1px solid var(--rx-border);
+    max-height: 42%;
+  }
+}

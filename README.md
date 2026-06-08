@@ -47,3 +47,30 @@ vercel
 ```
 
 Veya GitHub push → Vercel otomatik build. Ayarlar `vercel.json`'da hazır.
+
+## 🦾 Robot Kol (4 eksen) — simülasyon + gerçek senkron
+
+Top bar'daki **🦾 Robot Kol** butonuna tıklayınca ekran ikiye bölünür: solda blok
+tabanlı çalışma alanı, sağda 3B robot kol simülasyonu. Panel başlığındaki genişlet
+ikonu ile tam ekran yapılabilir.
+
+**Çift yönlü haberleşme:**
+- **Bloklar → gerçek → sim:** Blokları çalıştırınca servo komutları Pico'ya gider;
+  firmware her servo hareketinde `@SV` telemetrisi yayınlar, simülasyon kolu da
+  gerçeğiyle birlikte hareket eder.
+- **Sim → gerçek (IK):** Panelde **Tıkla-Git (IK)** açıkken sahnede zemine
+  tıklarsın; ters kinematik çözülür, simülasyon kolu oraya gider ve aynı açılar
+  bağlı gerçek kola gönderilir. Sliderları sürüklemek de gerçek servoyu canlı sürer.
+
+**3 servo tipi** (blok tabanlı uygulamayla aynı), her eklem için ayrı seçilir:
+- **Normal servo** → `servo_angle(pin, açı)` (Pico GPIO)
+- **Sürücü servo** → `servo_v2(no, açı)` (motor sürücü kart, 1–4)
+- **PCA9685** → `servo_v3(kanal, açı)` (I2C 16 kanal; SDA/SCL/adres ayarlanır)
+
+**Kalibrasyon:** Her eklem için pin/no/kanal, **ofset°** ve **ters yön** ayarlanır.
+*Tümü 90° (kalibrasyon)* butonu hem simülasyonu hem gerçek kolu 90°'ye getirir;
+fiziksel kolu da elle 90°'ye hizalayıp ofsetle ince ayar yaparsın — sonra birlikte
+çalışırlar.
+
+> Not: Gerçek kol kontrolü USB (Web Serial / REPL) bağlantısı gerektirir ve önce
+> top bar'dan **Modülleri Yükle** ile `roboexx.py`/`pca9685.py` Pico'ya yazılmalıdır.

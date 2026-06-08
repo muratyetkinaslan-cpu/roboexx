@@ -40,6 +40,11 @@ interface Props {
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
+  /** Robot kol simülasyonunu aç/kapat */
+  onRobotArm: () => void;
+  /** Robot kol paneli açık mı (buton aktif görünümü) */
+  robotArmActive: boolean;
+
   /** Açık/koyu tema geçişi */
   themeId: ThemeId;
   onToggleLight: () => void;
@@ -215,6 +220,19 @@ export function Toolbar(props: Props) {
             }
           >
             <span style={{ fontSize: 18, lineHeight: 1 }}>🤖</span>
+          </button>
+
+          {/* Robot Kol — 3B simülasyon + gerçek kol senkron kontrolü */}
+          <button
+            className={`btn btn-ghost btn-icon-only btn-robotarm ${props.robotArmActive ? 'is-active' : ''}`}
+            onClick={props.onRobotArm}
+            data-tooltip="Robot Kol"
+            data-tooltip-detail="4 eksenli robot kol simülasyonu — IK ile tıkla-git, gerçek kol senkron"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <rect x="9" y="2" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 6v4M7 14l5-4 5 4M5 20h14M7 14v6M17 14v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
 
           {/* Çalıştır — sadece USB modunda (BLE'de canlı çıktı pratik değil) */}
