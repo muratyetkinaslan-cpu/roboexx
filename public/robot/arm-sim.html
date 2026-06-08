@@ -161,7 +161,7 @@ fingers.forEach(f=>{ gripCandidates[f.name]={obj:f.grp}; });
 byGroup.j3.forEach(m=>{ gripCandidates[m.name]={obj:m}; });
 // Varsayılan: gripper çeneleri + bağlı braket/cıvata + gripper servosu
 let gripPartNames=['object_id_1','object_id_2','object_id_3','object_id_4','Servo (1)'];
-let gripXform={rx:180,ry:0,rz:0,dx:0,dy:0,dz:0};   // derece + cm (varsayılan: 180° X çevir)
+let gripXform={rx:180,ry:0,rz:0,dx:0,dy:0,dz:0,px:0,py:0,pz:0};   // derece + öteleme(cm) + pivot offset(cm)
 const gripAsm=new THREE.Group();J[2].add(gripAsm);
 const gripBaseLocal=new THREE.Vector3();
 function rebuildGripAsm(names){
@@ -169,9 +169,14 @@ function rebuildGripAsm(names){
   // önce gripAsm içindekileri J3'e geri ver
   [...gripAsm.children].forEach(o=>{ J[2].attach(o); });
   gripAsm.position.set(0,0,0);gripAsm.rotation.set(0,0,0);gripAsm.updateMatrixWorld(true);
-  // pivot = gripper çene merkezi (midGC) — parçalar geometriye gömülü olduğu
-  // için getWorldPosition güvenilmez; sabit ve doğru olan midGC kullanılır.
-  gripBaseLocal.copy(J[2].worldToLocal(new THREE.Vector3(midGC[0],midGC[1],midGC[2])));
+  // pivot = gripper'ın bileğe monte olduğu bölge (gripper merkezi ile J3 ortası)
+  // + kullanıcı pivot ofseti. Böylece 180° flip gripper'ı içeri sokmaz.
+  const baseP=new THREE.Vector3(
+    (midGC[0]+P.j3[0])/2 + (gripXform.px||0),
+    (midGC[1]+P.j3[1])/2 + (gripXform.py||0),
+    (midGC[2]+P.j3[2])/2 + (gripXform.pz||0)
+  );
+  gripBaseLocal.copy(J[2].worldToLocal(baseP));
   gripAsm.position.copy(gripBaseLocal);gripAsm.updateMatrixWorld(true);
   // seçili parçaları + el'i gripAsm'e taşı (dünya konumu korunur)
   gripPartNames.forEach(nm=>{const e=gripCandidates[nm];if(e)gripAsm.attach(e.obj);});
@@ -423,8 +428,12 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   // Panel protokolü → ana-script gripper API'sine köprü
   function applyGripper(t){
     if(!t) return;
-    var r = t.rot || [0,0,0], p = t.pos || [0,0,0];
-    Object.assign(gripXform, { rx:r[0]||0, ry:r[1]||0, rz:r[2]||0, dx:p[0]||0, dy:p[1]||0, dz:p[2]||0 });
+    var r = t.rot || [0,0,0], p = t.pos || [0,0,0], pv = t.pivot || [0,0,0];
+    Object.assign(gripXform, {
+      rx:r[0]||0, ry:r[1]||0, rz:r[2]||0,
+      dx:p[0]||0, dy:p[1]||0, dz:p[2]||0,
+      px:pv[0]||0, py:pv[1]||0, pz:pv[2]||0
+    });
     var parts = Array.isArray(t.parts) && t.parts.length ? t.parts : gripPartNames;
     rebuildGripAsm(parts);   // sonunda applyGripXform çağırır
   }

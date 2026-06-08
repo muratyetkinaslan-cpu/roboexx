@@ -215,12 +215,21 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     pos[axis] = v;
     setGripper({ pos });
   };
+  const setPivot = (axis: 0 | 1 | 2, v: number) => {
+    const pivot = [...(cfg.gripper.pivot || [0, 0, 0])] as [number, number, number];
+    pivot[axis] = v;
+    setGripper({ pivot });
+  };
   const toggleGripPart = (name: string) => {
     const has = cfg.gripper.parts.includes(name);
     const parts = has ? cfg.gripper.parts.filter((n) => n !== name) : [...cfg.gripper.parts, name];
     setGripper({ parts });
   };
-  const resetGripper = () => setGripper({ parts: [], rot: [0, 0, 0], pos: [0, 0, 0] });
+  // Sıfırla = fabrika çevirme varsayılanına dön (düz değil, 180° flip)
+  const resetGripper = () => setGripper({
+    parts: ['object_id_1', 'object_id_2', 'object_id_3', 'object_id_4', 'Servo (1)'],
+    rot: [180, 0, 0], pos: [0, 0, 0], pivot: [0, 0, 0],
+  });
   const hl = (name: string | null) => postToSim({ type: 'rx:highlight', name });
 
   return (
@@ -431,13 +440,28 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
                 <label className="ra-grip-slider" key={'p' + ax}>
                   <span>Konum {ax}</span>
                   <input
-                    type="range" min={-8} max={8} step={0.1}
+                    type="range" min={-15} max={15} step={0.1}
                     value={cfg.gripper.pos[i as 0 | 1 | 2]}
                     onChange={(e) => setPos(i as 0 | 1 | 2, +e.target.value)}
                   />
                   <b>{cfg.gripper.pos[i as 0 | 1 | 2].toFixed(1)}</b>
                 </label>
               ))}
+              {(['X', 'Y', 'Z'] as const).map((ax, i) => (
+                <label className="ra-grip-slider" key={'pv' + ax}>
+                  <span>Merkez {ax}</span>
+                  <input
+                    type="range" min={-10} max={10} step={0.1}
+                    value={(cfg.gripper.pivot || [0, 0, 0])[i as 0 | 1 | 2]}
+                    onChange={(e) => setPivot(i as 0 | 1 | 2, +e.target.value)}
+                  />
+                  <b>{(cfg.gripper.pivot || [0, 0, 0])[i as 0 | 1 | 2].toFixed(1)}</b>
+                </label>
+              ))}
+              <p className="ra-hint">
+                <b>Merkez X/Y/Z</b> = döndürme merkezini gripper'ın <b>cıvata/montaj</b> noktasına taşır.
+                İçeri kaçıyorsa önce <b>Merkez</b>'i monte deliğine getir, sonra <b>180° çevir</b>, en son <b>Konum</b> ile oturt.
+              </p>
 
               <div className="ra-parts">
                 {partsList.length === 0 && <span className="ra-hint">Parçalar yükleniyor…</span>}

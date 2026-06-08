@@ -34,20 +34,21 @@ export interface ArmConfig {
   joints: [JointConfig, JointConfig, JointConfig, JointConfig];
   /** PCA9685 I2C ayarları (pca tipi kullanılıyorsa) */
   pca: { sda: number; scl: number; addr: number };
-  /** Gripper düzeni: gripper'a dahil parçalar + döndürme/öteleme */
-  gripper: { parts: string[]; rot: [number, number, number]; pos: [number, number, number] };
+  /** Gripper düzeni: parçalar + döndürme/öteleme + döndürme merkezi */
+  gripper: { parts: string[]; rot: [number, number, number]; pos: [number, number, number]; pivot: [number, number, number] };
   /** Gripper varsayılan migrasyon sürümü */
   _gv?: number;
 }
 
 const STORAGE_KEY = 'roboexx.robotarm.config';
-const GRIPPER_VERSION = 2;
+const GRIPPER_VERSION = 3;
 
 /** Gripper'ı bağlı siyah parçayla birlikte 180° çeviren varsayılan. */
 const DEFAULT_GRIPPER: ArmConfig['gripper'] = {
   parts: ['object_id_1', 'object_id_2', 'object_id_3', 'object_id_4', 'Servo (1)'],
   rot: [180, 0, 0],
   pos: [0, 0, 0],
+  pivot: [0, 0, 0],
 };
 
 export const DEFAULT_ARM_CONFIG: ArmConfig = {
@@ -74,6 +75,7 @@ export function loadArmConfig(): ArmConfig {
           p.gripper = structuredClone(DEFAULT_GRIPPER);
           p._gv = GRIPPER_VERSION;
         }
+        if (!Array.isArray(p.gripper.pivot)) p.gripper.pivot = [0, 0, 0];
         return p as ArmConfig;
       }
     }
