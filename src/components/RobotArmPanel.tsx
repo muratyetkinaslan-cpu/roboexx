@@ -51,6 +51,8 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [pointCount, setPointCount] = useState(0);
   const [repeating, setRepeating] = useState(false);
   const [dwell, setDwell] = useState(400);
+  const [tip, setTip] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
+  const [partsList, setPartsList] = useState<{ name: string; group: string; color: number }[]>([]);
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
   const liveThrottle = useRef<Record<number, number>>({});
@@ -85,12 +87,20 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       switch (d.type) {
         case 'rx:ready':
           setSimReady(true);
+          // kaydedilmiş gripper düzenini simülasyona uygula
+          postToSim({ type: 'rx:gripperTransform', ...cfgRef.current.gripper });
+          break;
+        case 'rx:parts':
+          if (Array.isArray(d.parts)) setPartsList(d.parts);
           break;
         case 'rx:points':
           if (typeof d.n === 'number') setPointCount(d.n);
           break;
         case 'rx:repeatState':
           setRepeating(!!d.on);
+          break;
+        case 'rx:tip':
+          if (typeof d.x === 'number') setTip({ x: d.x, y: d.y, z: d.z, r: d.r });
           break;
         case 'rx:ik': {
           // Sim kol hedefe gitti → aynı açıları gerçek kola gönder
@@ -180,6 +190,39 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   };
   const usesPca = cfg.joints.some((j) => j.kind === 'pca');
 
+  // --- gripper düzeni ---
+  const setGripper = (patch: Partial<ArmConfig['gripper']>) => {
+    setCfg((c) => {
+      const gripper = { ...c.gripper, ...patch };
+      postToSim({ type: 'rx:gripperTransform', ...gripper });
+      return { ...c, gripper };
+    });
+  };
+  const flip = (axis: 0 | 1 | 2) => {
+    const rot = [...cfg.gripper.rot] as [number, number, number];
+    let v = (((rot[axis] + 180) % 360) + 360) % 360;
+    if (v > 180) v -= 360;
+    rot[axis] = v;
+    setGripper({ rot });
+  };
+  const setRot = (axis: 0 | 1 | 2, v: number) => {
+    const rot = [...cfg.gripper.rot] as [number, number, number];
+    rot[axis] = v;
+    setGripper({ rot });
+  };
+  const setPos = (axis: 0 | 1 | 2, v: number) => {
+    const pos = [...cfg.gripper.pos] as [number, number, number];
+    pos[axis] = v;
+    setGripper({ pos });
+  };
+  const toggleGripPart = (name: string) => {
+    const has = cfg.gripper.parts.includes(name);
+    const parts = has ? cfg.gripper.parts.filter((n) => n !== name) : [...cfg.gripper.parts, name];
+    setGripper({ parts });
+  };
+  const resetGripper = () => setGripper({ parts: [], rot: [0, 0, 0], pos: [0, 0, 0] });
+  const hl = (name: string | null) => postToSim({ type: 'rx:highlight', name });
+
   return (
     <div className={`robotarm-panel ${fullscreen ? 'is-fullscreen' : ''}`}>
       <div className="robotarm-header">
@@ -190,6 +233,11 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           </svg>
           Robot Kol
           <span className={`robotarm-dot ${simReady ? 'ok' : ''}`} title={simReady ? 'Simülasyon hazır' : 'Yükleniyor…'} />
+          {tip && (
+            <span className="robotarm-tip" title="Gripper ucunun IK konumu (cm)">
+              uç: {tip.x}, {tip.y}, {tip.z} cm · merkeze {tip.r}
+            </span>
+          )}
         </span>
         <div className="robotarm-header-actions">
           <button className="btn btn-ghost btn-icon-only" onClick={onToggleFullscreen} title={fullscreen ? 'İkili görünüm' : 'Tam ekran'}>
@@ -351,6 +399,68 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
                 <p className="ra-hint">PCA tipi eklemler için bir kez init edilir.</p>
               </div>
             )}
+
+            <div className="ra-section">
+              <h4 className="ra-h">Gripper düzeni (çevir / monte et)</h4>
+              <p className="ra-hint">
+                Gripper'la birlikte çevrilecek <b>siyah parçayı</b> aşağıdan seç (üzerine gelince
+                simülasyonda parlar), sonra <b>180° çevir</b> ile ters çevirip ince ayar yap.
+                Çeneler ve uç nokta otomatik dahildir.
+              </p>
+
+              <div className="ra-grip-flips">
+                <span>180° çevir:</span>
+                <button className="btn btn-ghost" onClick={() => flip(0)}>X</button>
+                <button className="btn btn-ghost" onClick={() => flip(1)}>Y</button>
+                <button className="btn btn-ghost" onClick={() => flip(2)}>Z</button>
+                <button className="btn btn-ghost ra-grip-reset" onClick={resetGripper}>Sıfırla</button>
+              </div>
+
+              {(['X', 'Y', 'Z'] as const).map((ax, i) => (
+                <label className="ra-grip-slider" key={'r' + ax}>
+                  <span>Dönüş {ax}</span>
+                  <input
+                    type="range" min={-180} max={180} step={1}
+                    value={cfg.gripper.rot[i as 0 | 1 | 2]}
+                    onChange={(e) => setRot(i as 0 | 1 | 2, +e.target.value)}
+                  />
+                  <b>{Math.round(cfg.gripper.rot[i as 0 | 1 | 2])}°</b>
+                </label>
+              ))}
+              {(['X', 'Y', 'Z'] as const).map((ax, i) => (
+                <label className="ra-grip-slider" key={'p' + ax}>
+                  <span>Konum {ax}</span>
+                  <input
+                    type="range" min={-8} max={8} step={0.1}
+                    value={cfg.gripper.pos[i as 0 | 1 | 2]}
+                    onChange={(e) => setPos(i as 0 | 1 | 2, +e.target.value)}
+                  />
+                  <b>{cfg.gripper.pos[i as 0 | 1 | 2].toFixed(1)}</b>
+                </label>
+              ))}
+
+              <div className="ra-parts">
+                {partsList.length === 0 && <span className="ra-hint">Parçalar yükleniyor…</span>}
+                {partsList
+                  .filter((p) => p.group !== 'grip')
+                  .map((p) => {
+                    const on = cfg.gripper.parts.includes(p.name);
+                    return (
+                      <label
+                        key={p.name}
+                        className={`ra-part ${on ? 'is-on' : ''}`}
+                        onMouseEnter={() => hl(p.name)}
+                        onMouseLeave={() => hl(null)}
+                      >
+                        <input type="checkbox" checked={on} onChange={() => toggleGripPart(p.name)} />
+                        <span className="ra-part-sw" style={{ background: '#' + p.color.toString(16).padStart(6, '0') }} />
+                        <span className="ra-part-name">{p.name}</span>
+                        <span className="ra-part-grp">{p.group}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
           </div>
         </aside>
       </div>

@@ -30,6 +30,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}button.on{background
 #serial{margin-top:13px;padding:9px 11px;background:#0a0d12;border:1px solid var(--line);border-radius:9px;font-size:12px;color:var(--accent2);font-variant-numeric:tabular-nums;letter-spacing:.5px}
 #serial b{color:var(--dim);font-weight:400}
 #status{margin-top:9px;font-size:11px;color:var(--dim);letter-spacing:.3px}#status b{color:var(--accent);font-weight:600}#msg{color:#ff5555;font-weight:600}
+#coords{margin-top:6px;padding-top:6px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);letter-spacing:.3px;font-variant-numeric:tabular-nums}#coords b{color:#5db8ff;font-weight:700}
 #info{right:16px;bottom:16px;width:260px;background:rgba(20,25,34,.94);border:1px solid var(--line);border-radius:14px;padding:15px 16px;backdrop-filter:blur(8px);font-size:12.5px;line-height:1.55;color:var(--dim)}
 #info h3{color:var(--txt);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px}#info b{color:var(--accent)}
 #hint{position:absolute;top:14px;right:18px;font-size:11px;color:var(--dim);text-align:right;line-height:1.6}
@@ -46,7 +47,8 @@ button:hover{border-color:var(--accent);color:var(--accent)}button.on{background
 <div id="serial"><b>Pico &rarr;</b> <span id="ser">S1:90 S2:90 S3:90 S4:90</span></div>
 <div class="btns"><button id="demo">Demo</button><button id="pick">Küpü Tut</button><button id="reset">Sıfırla</button></div>
 <div class="btns"><button id="goto">Hedefe Git</button><button id="target">Küp Koy</button><button id="teach">Öğret</button><button id="repeat">Tekrarla</button></div>
-<div id="status">Mod: <b id="modet">Serbest</b> · Nokta: <b id="wpn">0</b> <span id="msg"></span></div></div>
+<div id="status">Mod: <b id="modet">Serbest</b> · Nokta: <b id="wpn">0</b> <span id="msg"></span></div>
+<div id="coords">Uç (IK): <b id="cx">0.0</b>, <b id="cy">0.0</b>, <b id="cz">0.0</b> cm · merkeze <b id="cr">0.0</b> cm</div></div>
 <div class="ui" id="info"><h3>Eklemler</h3>
 Taban (Y), omuz + dirsek (Z), <b>gripper</b> 4. servoyla açılıp kapanıyor.<br><br>
 <b>Küp Koy</b>: zemine tıkla, küp oraya gider (kol oynamaz). <b>Küpü Tut</b>: kol gidip küpü alır, karşıya bırakır.<br><br>
@@ -122,8 +124,9 @@ byGroup.grip.forEach((m)=>{
  const c=GC[m.name]||[0,0,0];
  const grp=new THREE.Group();grp.position.set(c[0]-j3wp.x,c[1]-j3wp.y,c[2]-j3wp.z);J[2].add(grp);
  grp.attach(m);
- fingers.push({grp:grp,sign:(c[2]>GMID)?1:-1});
+ fingers.push({grp:grp,sign:(c[2]>GMID)?1:-1,name:m.name});
 });
+let GAXlocal=GAX.clone();   // gear ekseni — gripper çevrilince güncellenir
 
 const angles=[90,90,90,82];
 const axis=['y','z','z'];
@@ -132,7 +135,7 @@ function apply(){
  J.forEach((g,i)=>{g.rotation.set(0,0,0);g.rotation[axis[i]]=deg(angles[i]-90);});
  const gt=Math.max(0,Math.min(1,(angles[3]-82)/(150-82)));
  const grot=deg(gt*GMAX);
- fingers.forEach(f=>{f.grp.quaternion.setFromAxisAngle(GAX,f.sign*grot);});
+ fingers.forEach(f=>{f.grp.quaternion.setFromAxisAngle(GAXlocal,f.sign*grot);});
  document.getElementById('ser').textContent=`S1:${angles[0]|0} S2:${angles[1]|0} S3:${angles[2]|0} S4:${angles[3]|0}`;
 }
 apply();
@@ -147,6 +150,45 @@ const clock=new THREE.Clock();
 const midGC=[(GC.object_id_1[0]+GC.object_id_2[0])/2,(GC.object_id_1[1]+GC.object_id_2[1])/2,(GC.object_id_1[2]+GC.object_id_2[2])/2];
 const hand=new THREE.Object3D();hand.position.set(midGC[0]-j3wp.x,midGC[1]-j3wp.y+0.5,midGC[2]-j3wp.z);J[2].add(hand);
 function handPos(){const w=new THREE.Vector3();hand.getWorldPosition(w);return w;}
+
+// ============================================================
+//  GRIPPER MONTAJ GRUBU — gripper + bağlı siyah parça birlikte
+//  çevrilebilir/kaydırılabilir. Jaw aç-kapa ekseni de döner.
+// ============================================================
+// Aday parçalar: jaw'lar (finger grupları) + J3 siyah parçaları + el
+const gripCandidates={};
+fingers.forEach(f=>{ gripCandidates[f.name]={obj:f.grp}; });
+byGroup.j3.forEach(m=>{ gripCandidates[m.name]={obj:m}; });
+// Varsayılan: gripper çeneleri + bağlı braket/cıvata + gripper servosu
+let gripPartNames=['object_id_1','object_id_2','object_id_3','object_id_4','Servo (1)'];
+let gripXform={rx:180,ry:0,rz:0,dx:0,dy:0,dz:0};   // derece + cm (varsayılan: 180° X çevir)
+const gripAsm=new THREE.Group();J[2].add(gripAsm);
+const gripBaseLocal=new THREE.Vector3();
+function rebuildGripAsm(names){
+  if(Array.isArray(names)) gripPartNames=names.filter(n=>gripCandidates[n]);
+  // önce gripAsm içindekileri J3'e geri ver
+  [...gripAsm.children].forEach(o=>{ J[2].attach(o); });
+  gripAsm.position.set(0,0,0);gripAsm.rotation.set(0,0,0);gripAsm.updateMatrixWorld(true);
+  // pivot = gripper çene merkezi (midGC) — parçalar geometriye gömülü olduğu
+  // için getWorldPosition güvenilmez; sabit ve doğru olan midGC kullanılır.
+  gripBaseLocal.copy(J[2].worldToLocal(new THREE.Vector3(midGC[0],midGC[1],midGC[2])));
+  gripAsm.position.copy(gripBaseLocal);gripAsm.updateMatrixWorld(true);
+  // seçili parçaları + el'i gripAsm'e taşı (dünya konumu korunur)
+  gripPartNames.forEach(nm=>{const e=gripCandidates[nm];if(e)gripAsm.attach(e.obj);});
+  gripAsm.attach(hand);
+  applyGripXform();
+}
+function applyGripXform(){
+  gripAsm.rotation.set(deg(gripXform.rx||0),deg(gripXform.ry||0),deg(gripXform.rz||0));
+  gripAsm.position.set(gripBaseLocal.x+(gripXform.dx||0),gripBaseLocal.y+(gripXform.dy||0),gripBaseLocal.z+(gripXform.dz||0));
+  gripAsm.updateMatrixWorld(true);
+  // gear eksenini gripAsm-local uzaya çevir (jaw aç-kapa doğru kalsın)
+  GAXlocal.copy(GAX).applyQuaternion(gripAsm.quaternion.clone().invert()).normalize();
+  apply();
+}
+function setGripXform(x){ Object.assign(gripXform,x||{}); applyGripXform(); }
+function getGripState(){ return {xform:Object.assign({},gripXform), parts:gripPartNames.slice(), all:Object.keys(gripCandidates)}; }
+rebuildGripAsm(gripPartNames);   // varsayılanı kur (180° X)
 
 // cube sits on a small stand at a graspable height (click "Küp Koy" to position it)
 const CUBE=3.0, GRABY=6.0;                 // GRABY = cube-center height (keeps gripper above floor)
@@ -270,7 +312,17 @@ function tick(){requestAnimationFrame(tick);
  if(anim)animTick();
  else if(demoOn){const t=clock.getElapsedTime();setA(0,90+70*Math.sin(t*0.6));setA(1,90+38*Math.sin(t*0.5+1));setA(2,90+45*Math.sin(t*0.7+2));setA(3,116+34*Math.sin(t*1.4+0.5));apply();}
  if(carry||grabbed)cube.position.lerp(handPos(),0.5);
+ updateCoords();
  cam();renderer.render(scene,camera);}
+let _coT=0;
+function updateCoords(){
+ const now=performance.now(); if(now-_coT<80)return; _coT=now;   // ~12 Hz
+ const w=handPos();
+ const r=Math.hypot(w.x,w.z);
+ const cx=document.getElementById('cx'),cy=document.getElementById('cy'),cz=document.getElementById('cz'),cr=document.getElementById('cr');
+ if(cx){cx.textContent=w.x.toFixed(1);cy.textContent=w.y.toFixed(1);cz.textContent=w.z.toFixed(1);cr.textContent=r.toFixed(1);}
+ if(window.__rxPostTip) window.__rxPostTip({x:+w.x.toFixed(1),y:+w.y.toFixed(1),z:+w.z.toFixed(1),r:+r.toFixed(1)});
+}
 tick();
 addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOrtho();});
 
@@ -353,6 +405,30 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
       .observe(_wpn, { childList:true, characterData:true, subtree:true });
   }
 
+  // ---- Parça vurgulama (panelde hover → parça parlasın) ----
+  var _hl=null;
+  function highlight(name){
+    if(_hl && _hl.material){ _hl.material.emissive.setHex(_hl.userData._oe||0); _hl.material.emissiveIntensity=_hl.userData._oi||0; }
+    _hl=null;
+    if(name){ var m=root.getObjectByName(name); if(m && m.material){
+      if(m.userData._oe===undefined){ m.userData._oe=m.material.emissive.getHex(); m.userData._oi=m.material.emissiveIntensity||0; }
+      m.material.emissive.setHex(0xffd24a); m.material.emissiveIntensity=0.95; _hl=m;
+    }}
+  }
+  function partsList(){
+    // sadece gripper'la ilgili parçalar (j3 + çeneler) seçilebilsin
+    return D.parts.filter(function(p){ return p.group==='grip' || p.group==='j3'; })
+      .map(function(p){ return { name:p.name, group:p.group, color:p.color }; });
+  }
+  // Panel protokolü → ana-script gripper API'sine köprü
+  function applyGripper(t){
+    if(!t) return;
+    var r = t.rot || [0,0,0], p = t.pos || [0,0,0];
+    Object.assign(gripXform, { rx:r[0]||0, ry:r[1]||0, rz:r[2]||0, dx:p[0]||0, dy:p[1]||0, dz:p[2]||0 });
+    var parts = Array.isArray(t.parts) && t.parts.length ? t.parts : gripPartNames;
+    rebuildGripAsm(parts);   // sonunda applyGripXform çağırır
+  }
+
   // --- Slider hareketi → parent'a (canlı, sim→gerçek) ---
   // _dragging: aktif sürüklenen eklemler — telemetri yankısı bunları ezmesin.
   const _dragging = {};
@@ -394,6 +470,15 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
         if(d.on){ post('rx:repeatState', { on: startRepeat(d.dwell) }); }
         else { stopRepeat(); post('rx:repeatState', { on:false }); }
         break;
+      case 'rx:gripperTransform':
+        applyGripper(d);
+        break;
+      case 'rx:getParts':
+        post('rx:parts', { parts: partsList() });
+        break;
+      case 'rx:highlight':
+        highlight(d.name || null);
+        break;
       case 'rx:ping':
         post('rx:ready', { angles: angles.slice() });
         break;
@@ -401,5 +486,6 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   });
 
   post('rx:ready', { angles: angles.slice() });
+  post('rx:parts', { parts: partsList() });
 })();
 </script></body></html>

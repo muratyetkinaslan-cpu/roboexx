@@ -5438,3 +5438,53 @@ g.blocklyDraggable > path:first-of-type {
 }
 .btn-danger:hover { filter: brightness(1.08); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* Robot kol — gripper düzeni editörü */
+.ra-grip-flips {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11px; color: var(--rx-text-dim);
+}
+.ra-grip-flips .btn { padding: 3px 10px; min-width: 30px; }
+.ra-grip-reset { margin-left: auto; }
+.ra-grip-slider {
+  display: grid;
+  grid-template-columns: 56px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--rx-text-dim);
+}
+.ra-grip-slider input[type="range"] { width: 100%; }
+.ra-grip-slider b { text-align: right; color: var(--rx-text); font-variant-numeric: tabular-nums; }
+.ra-parts {
+  display: flex; flex-direction: column; gap: 3px;
+  margin-top: 6px;
+  max-height: 190px; overflow-y: auto;
+  border: 1px solid var(--rx-border-soft);
+  border-radius: 8px;
+  padding: 5px;
+  background: var(--rx-bg);
+}
+.ra-part {
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 6px; border-radius: 6px;
+  cursor: pointer; font-size: 12px;
+}
+.ra-part:hover { background: var(--rx-surface2); }
+.ra-part.is-on { background: var(--rx-accent-soft); }
+.ra-part-sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,0.15); }
+.ra-part-name { flex: 1 1 auto; color: var(--rx-text); font-variant-numeric: tabular-nums; }
+.ra-part-grp {
+  flex: 0 0 auto; font-size: 10px; color: var(--rx-text-muted);
+  background: var(--rx-surface2); padding: 1px 6px; border-radius: 999px;
+}
+
+/* Robot kol — canlı uç koordinatı (header) */
+.robotarm-tip {
+  margin-left: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #5db8ff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .2px;
+}

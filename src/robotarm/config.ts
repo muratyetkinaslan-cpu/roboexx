@@ -34,9 +34,21 @@ export interface ArmConfig {
   joints: [JointConfig, JointConfig, JointConfig, JointConfig];
   /** PCA9685 I2C ayarları (pca tipi kullanılıyorsa) */
   pca: { sda: number; scl: number; addr: number };
+  /** Gripper düzeni: gripper'a dahil parçalar + döndürme/öteleme */
+  gripper: { parts: string[]; rot: [number, number, number]; pos: [number, number, number] };
+  /** Gripper varsayılan migrasyon sürümü */
+  _gv?: number;
 }
 
 const STORAGE_KEY = 'roboexx.robotarm.config';
+const GRIPPER_VERSION = 2;
+
+/** Gripper'ı bağlı siyah parçayla birlikte 180° çeviren varsayılan. */
+const DEFAULT_GRIPPER: ArmConfig['gripper'] = {
+  parts: ['object_id_1', 'object_id_2', 'object_id_3', 'object_id_4', 'Servo (1)'],
+  rot: [180, 0, 0],
+  pos: [0, 0, 0],
+};
 
 export const DEFAULT_ARM_CONFIG: ArmConfig = {
   joints: [
@@ -46,6 +58,8 @@ export const DEFAULT_ARM_CONFIG: ArmConfig = {
     { label: 'Gripper (J4)',  kind: 'normal', id: 3, offset: 0, invert: false },
   ],
   pca: { sda: 4, scl: 5, addr: 0x40 },
+  gripper: structuredClone(DEFAULT_GRIPPER),
+  _gv: GRIPPER_VERSION,
 };
 
 export function loadArmConfig(): ArmConfig {
@@ -53,7 +67,15 @@ export function loadArmConfig(): ArmConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      if (p && Array.isArray(p.joints) && p.joints.length === 4) return p as ArmConfig;
+      if (p && Array.isArray(p.joints) && p.joints.length === 4) {
+        if (!p.gripper) p.gripper = structuredClone(DEFAULT_ARM_CONFIG.gripper);
+        // Tek seferlik migrasyon: gripper çevirme varsayılanını uygula
+        if (p._gv !== GRIPPER_VERSION) {
+          p.gripper = structuredClone(DEFAULT_GRIPPER);
+          p._gv = GRIPPER_VERSION;
+        }
+        return p as ArmConfig;
+      }
     }
   } catch {}
   return structuredClone(DEFAULT_ARM_CONFIG);
