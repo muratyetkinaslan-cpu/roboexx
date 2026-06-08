@@ -324,9 +324,14 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   }
 
   // --- Slider hareketi → parent'a (canlı, sim→gerçek) ---
+  // _dragging: aktif sürüklenen eklemler — telemetri yankısı bunları ezmesin.
+  const _dragging = {};
   rows.forEach((el,i)=>{
     const r=el.querySelector('input');
-    if(r) r.addEventListener('input', ()=> post('rx:joint', { joint:i, angle: angles[i] }));
+    if(r){
+      r.addEventListener('input', ()=>{ _dragging[i]=true; post('rx:joint', { joint:i, angle: angles[i] }); });
+      r.addEventListener('change', ()=>{ _dragging[i]=false; });
+    }
   });
 
   // --- Parent → sim komutları (gerçek→sim yansıtma, ev, sıfırla, goto) ---
@@ -335,7 +340,7 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     if(!d || typeof d!=='object' || typeof d.type!=='string' || d.type.indexOf('rx:')!==0) return;
     switch(d.type){
       case 'rx:setJoint':
-        if(typeof d.joint==='number' && typeof d.angle==='number'){ stopAll(); setA(d.joint, d.angle); apply(); }
+        if(typeof d.joint==='number' && typeof d.angle==='number' && !_dragging[d.joint]){ setA(d.joint, d.angle); apply(); }
         break;
       case 'rx:setAll':
         if(Array.isArray(d.angles)){ stopAll(); for(let i=0;i<4 && i<d.angles.length;i++) setA(i, d.angles[i]); apply(); }

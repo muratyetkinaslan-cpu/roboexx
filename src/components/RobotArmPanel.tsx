@@ -50,6 +50,13 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
   const liveThrottle = useRef<Record<number, number>>({});
+  // Echo (geri besleme) bastırma: sim kendi komutunu gönderdiği eklemin
+  // telemetri yankısını kısa süre yok say → slider geri zıplamaz.
+  const drivenAt = useRef<Record<number, number>>({});
+  const markDriven = (joints: number[]) => {
+    const now = performance.now();
+    for (const j of joints) drivenAt.current[j] = now;
+  };
 
   // config her değişiminde kaydet
   useEffect(() => { saveArmConfig(cfg); }, [cfg]);
@@ -79,6 +86,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           // Sim kol hedefe gitti → aynı açıları gerçek kola gönder
           if (Array.isArray(d.angles)) {
             if (!bootDone) ensureBoot();
+            markDriven([0, 1, 2, 3]);
             onSendCode(allJointsCommand(cfgRef.current, d.angles));
           }
           if (typeof d.reach === 'number') setLastReach(d.reach);
@@ -88,6 +96,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           // Slider canlı sürüş → ilgili servoyu gerçek kola yaz (throttle)
           if (typeof d.joint === 'number' && typeof d.angle === 'number') {
             const now = performance.now();
+            markDriven([d.joint]);
             const last = liveThrottle.current[d.joint] || 0;
             if (now - last < 45) break;
             liveThrottle.current[d.joint] = now;
@@ -107,6 +116,9 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     applyServoTelemetry(code: number, id: number, angle: number) {
       const joint = jointForServo(cfgRef.current, code, id);
       if (joint < 0) return;
+      // Sim'in kendi gönderdiği komutun yankısıysa yok say (echo döngüsü kırma).
+      // Blok çalıştırınca gelen telemetri ise (sim göndermedi) normal yansır.
+      if (performance.now() - (drivenAt.current[joint] || 0) < 800) return;
       const logical = physicalToLogical(cfgRef.current.joints[joint], angle);
       postToSim({ type: 'rx:setJoint', joint, angle: logical });
     },
@@ -117,6 +129,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     postToSim({ type: 'rx:home' });
     if (connected) {
       if (!bootDone) ensureBoot();
+      markDriven([0, 1, 2, 3]);
       onSendCode(allJointsCommand(cfgRef.current, [90, 90, 90, 90]));
     }
   };
