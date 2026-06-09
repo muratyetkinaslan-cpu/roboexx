@@ -36,6 +36,8 @@ export interface ArmConfig {
   pca: { sda: number; scl: number; addr: number };
   /** Gripper düzeni: parçalar + döndürme/öteleme + döndürme merkezi */
   gripper: { parts: string[]; rot: [number, number, number]; pos: [number, number, number]; pivot: [number, number, number] };
+  /** Küp alma ayarları: küp kenarı (cm), hedef yükseklik (cm), 180° duruş */
+  pick: { cubeCm: number; heightCm: number; stance180: boolean };
   /** Gripper varsayılan migrasyon sürümü */
   _gv?: number;
 }
@@ -60,6 +62,7 @@ export const DEFAULT_ARM_CONFIG: ArmConfig = {
   ],
   pca: { sda: 4, scl: 5, addr: 0x40 },
   gripper: structuredClone(DEFAULT_GRIPPER),
+  pick: { cubeCm: 3, heightCm: 6, stance180: false },
   _gv: GRIPPER_VERSION,
 };
 
@@ -76,6 +79,7 @@ export function loadArmConfig(): ArmConfig {
           p._gv = GRIPPER_VERSION;
         }
         if (!Array.isArray(p.gripper.pivot)) p.gripper.pivot = [0, 0, 0];
+        if (!p.pick) p.pick = structuredClone(DEFAULT_ARM_CONFIG.pick);
         return p as ArmConfig;
       }
     }

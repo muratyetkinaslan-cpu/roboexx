@@ -5488,3 +5488,17 @@ g.blocklyDraggable > path:first-of-type {
   font-variant-numeric: tabular-nums;
   letter-spacing: .2px;
 }
+
+/* Robot kol — küp alma ayarları + sapma raporu */
+.ra-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--rx-text); cursor: pointer; margin-top: 2px; }
+.ra-check input { width: 15px; height: 15px; }
+.ra-pick-report {
+  margin-top: 8px; padding: 8px 10px;
+  background: var(--rx-surface2); border: 1px solid var(--rx-border-soft);
+  border-radius: 8px; font-size: 12px; line-height: 1.6;
+  font-variant-numeric: tabular-nums; color: var(--rx-text-dim);
+}
+.ra-pick-report b { color: #5db8ff; }
+.ra-pick-ok b { color: var(--rx-success); }
+.ra-pick-bad { color: var(--rx-error); }
+.ra-pick-bad b { color: var(--rx-error); }

@@ -158,6 +158,7 @@ function handPos(){const w=new THREE.Vector3();hand.getWorldPosition(w);return w
 // Aday parçalar: yalnızca J3 siyah parçaları (gripper çeneleri hariç)
 const gripCandidates={};
 byGroup.j3.forEach(m=>{ gripCandidates[m.name]=m; });
+fingers.forEach(f=>{ if(f.name) gripCandidates[f.name]=f.grp; });   // gripper çeneleri de çevrilebilsin
 let gripPartNames=[];                        // varsayılan: çevirme YOK (orijinal model)
 let gripRot=[0,0,0];                         // her seçili parçaya uygulanan derece
 const partPivots={};                         // name -> {pivot, obj, home}
@@ -192,7 +193,9 @@ function getGripState(){ return {parts:gripPartNames.slice(), rot:gripRot.slice(
 applyGrip(gripPartNames,gripRot);            // varsayılanı kur
 
 // cube sits on a small stand at a graspable height (click "Küp Koy" to position it)
-const CUBE=3.0, GRABY=6.0;                 // GRABY = cube-center height (keeps gripper above floor)
+let CUBE=3.0; const GRABY=6.0;            // CUBE = küp kenarı (cm, ayarlanır), GRABY = tutma yüksekliği
+let TGTY=GRABY;                            // tıkla-git hedef yüksekliği (hava) — ayarlanır
+let _stance=false;                         // robot tüm duruşu 180° döndürülsün mü
 const cube=new THREE.Mesh(new THREE.BoxGeometry(CUBE,CUBE,CUBE),new THREE.MeshStandardMaterial({color:0x2fd0e6,metalness:.2,roughness:.4,emissive:0x0b3b44,emissiveIntensity:.55}));
 cube.castShadow=true;scene.add(cube);
 const stand=new THREE.Mesh(new THREE.BoxGeometry(CUBE*1.5,1,CUBE*1.5),new THREE.MeshStandardMaterial({color:0x161d27,roughness:.95}));
@@ -201,6 +204,8 @@ const cubeAt=new THREE.Vector3(0,0,9);     // current cube floor x,z
 const DROP=new THREE.Vector3(-8,0,6);      // where "Küpü Tut" sets it down
 function cubeOnStand(s){cube.position.set(s.x,GRABY,s.z);const h=GRABY-CUBE/2;stand.scale.y=h;stand.position.set(s.x,h/2,s.z);}
 cubeOnStand(cubeAt);
+function setCubeSize(cm){ CUBE=Math.max(0.5,Math.min(15,+cm||3)); cube.geometry.dispose(); cube.geometry=new THREE.BoxGeometry(CUBE,CUBE,CUBE); cubeOnStand(cubeAt); }
+function setStance(on){ _stance=!!on; root.rotation.y=_stance?Math.PI:0; root.updateMatrixWorld(true); }
 const pPick=cubeAt;
 // ---- collision + manual grab (gripper vs cube) ----
 const GR=1.0;
@@ -254,13 +259,19 @@ function stopAll(){demoOn=false;pickOn=false;repeatOn=false;anim=null;carry=fals
  document.getElementById('pick').classList.remove('on');document.getElementById('repeat').classList.remove('on');}
 
 // ---- pick & place via IK ----
-function reachInfo(tgt){const g=solveIK(tgt);const sv=angles.slice();for(let k=0;k<4;k++)angles[k]=g[k];apply();scene.updateMatrixWorld(true);const e=handPos().distanceTo(tgt);for(let k=0;k<4;k++)angles[k]=sv[k];apply();return{err:e,goal:g};}
+function reachInfo(tgt){const g=solveIK(tgt);const sv=angles.slice();for(let k=0;k<4;k++)angles[k]=g[k];apply();scene.updateMatrixWorld(true);const hp=handPos();const e=hp.distanceTo(tgt);const reached=hp.clone();for(let k=0;k<4;k++)angles[k]=sv[k];apply();return{err:e,goal:g,reached:reached};}
 function msg(t){document.getElementById('msg').textContent=t?('· '+t):'';}
 function runPick(){
  const c=cubeAt.clone();
  const grab=new THREE.Vector3(c.x,GRABY,c.z), drop=new THREE.Vector3(DROP.x,GRABY,DROP.z);
  const lift=p=>new THREE.Vector3(p.x,GRABY+6,p.z);
  const rg=reachInfo(grab);
+ // sapma raporu: hedef vs gerçekten ulaşılan (cm)
+ if(window.__rxPostPick) window.__rxPostPick({
+   target:{x:+grab.x.toFixed(1),y:+grab.y.toFixed(1),z:+grab.z.toFixed(1)},
+   reached:{x:+rg.reached.x.toFixed(1),y:+rg.reached.y.toFixed(1),z:+rg.reached.z.toFixed(1)},
+   err:+rg.err.toFixed(2), cube:+CUBE.toFixed(1)
+ });
  if(rg.err>2.5){                                  // cube is out of reach -> don't grab it
   msg('küpe erişemiyor');
   moveTo(rg.goal,1.0,()=>{moveTo([90,90,90,150],1.0,()=>{pickOn=false;document.getElementById('pick').classList.remove('on');});});
@@ -367,12 +378,12 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     _ray.setFromCamera(_ndc, camera);
     const p=new THREE.Vector3();
     if(!_ray.ray.intersectPlane(_floor, p)) return;
-    const tgt=new THREE.Vector3(p.x, GRABY, p.z);
+    const tgt=new THREE.Vector3(p.x, TGTY, p.z);
     const info=reachInfo(tgt);          // IK + ulaşılabilirlik
-    tgtMark.position.set(p.x,0.15,p.z); tgtMark.visible=true;
+    tgtMark.position.set(p.x, Math.max(0.15, TGTY), p.z); tgtMark.visible=true;
     if(info.err>3.0){ msg('erişemiyor'); }
     moveTo(info.goal, 1.0, ()=>{
-      post('rx:ik', { angles: angles.slice(), point: { x:+p.x.toFixed(1), z:+p.z.toFixed(1) }, reach: +info.err.toFixed(1) });
+      post('rx:ik', { angles: angles.slice(), point: { x:+p.x.toFixed(1), y:+TGTY.toFixed(1), z:+p.z.toFixed(1) }, reach: +info.err.toFixed(1) });
     });
   }
 
@@ -473,6 +484,15 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
       case 'rx:gripperTransform':
         applyGripper(d);
         break;
+      case 'rx:setCube':
+        setCubeSize(d.cm); 
+        break;
+      case 'rx:setHeight':
+        if(typeof d.cm==='number') TGTY=Math.max(0, d.cm);
+        break;
+      case 'rx:setStance':
+        setStance(!!d.on);
+        break;
       case 'rx:getParts':
         post('rx:parts', { parts: partsList() });
         break;
@@ -485,6 +505,8 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     }
   });
 
+  window.__rxPostTip = function(t){ post('rx:tip', t); };
+  window.__rxPostPick = function(d){ post('rx:pick', d); };
   post('rx:ready', { angles: angles.slice() });
   post('rx:parts', { parts: partsList() });
 })();

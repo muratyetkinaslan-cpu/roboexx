@@ -52,6 +52,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [repeating, setRepeating] = useState(false);
   const [dwell, setDwell] = useState(400);
   const [tip, setTip] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
+  const [pickReport, setPickReport] = useState<{ target: { x: number; y: number; z: number }; reached: { x: number; y: number; z: number }; err: number; cube: number } | null>(null);
   const [partsList, setPartsList] = useState<{ name: string; group: string; color: number }[]>([]);
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
@@ -87,8 +88,14 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       switch (d.type) {
         case 'rx:ready':
           setSimReady(true);
-          // kaydedilmiş gripper düzenini simülasyona uygula
+          // kaydedilmiş gripper düzenini + küp ayarlarını simülasyona uygula
           postToSim({ type: 'rx:gripperTransform', ...cfgRef.current.gripper });
+          postToSim({ type: 'rx:setCube', cm: cfgRef.current.pick.cubeCm });
+          postToSim({ type: 'rx:setHeight', cm: cfgRef.current.pick.heightCm });
+          postToSim({ type: 'rx:setStance', on: cfgRef.current.pick.stance180 });
+          break;
+        case 'rx:pick':
+          if (d.target) setPickReport({ target: d.target, reached: d.reached, err: d.err, cube: d.cube });
           break;
         case 'rx:parts':
           if (Array.isArray(d.parts)) setPartsList(d.parts);
@@ -216,6 +223,20 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   });
   const hl = (name: string | null) => postToSim({ type: 'rx:highlight', name });
 
+  // --- küp alma ayarları ---
+  const setCubeCm = (cm: number) => {
+    setCfg((c) => ({ ...c, pick: { ...c.pick, cubeCm: cm } }));
+    postToSim({ type: 'rx:setCube', cm });
+  };
+  const setHeightCm = (cm: number) => {
+    setCfg((c) => ({ ...c, pick: { ...c.pick, heightCm: cm } }));
+    postToSim({ type: 'rx:setHeight', cm });
+  };
+  const setStance180 = (on: boolean) => {
+    setCfg((c) => ({ ...c, pick: { ...c.pick, stance180: on } }));
+    postToSim({ type: 'rx:setStance', on });
+  };
+
   return (
     <div className={`robotarm-panel ${fullscreen ? 'is-fullscreen' : ''}`}>
       <div className="robotarm-header">
@@ -317,6 +338,58 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
             </div>
 
             <div className="ra-section">
+              <h4 className="ra-h">Küp alma</h4>
+              <div className="ra-row">
+                <label className="ra-field">
+                  <span>Küp kenarı (cm)</span>
+                  <input
+                    type="number" min={0.5} max={15} step={0.5}
+                    value={cfg.pick.cubeCm}
+                    onChange={(e) => setCubeCm(Math.max(0.5, +e.target.value || 3))}
+                  />
+                </label>
+                <label className="ra-field">
+                  <span>Hedef yükseklik (cm)</span>
+                  <input
+                    type="number" min={0} max={40} step={0.5}
+                    value={cfg.pick.heightCm}
+                    onChange={(e) => setHeightCm(Math.max(0, +e.target.value || 0))}
+                  />
+                </label>
+              </div>
+              <label className="ra-grip-slider">
+                <span>Yükseklik</span>
+                <input
+                  type="range" min={0} max={40} step={0.5}
+                  value={cfg.pick.heightCm}
+                  onChange={(e) => setHeightCm(+e.target.value)}
+                />
+                <b>{cfg.pick.heightCm.toFixed(1)}</b>
+              </label>
+              <label className="ra-check">
+                <input
+                  type="checkbox"
+                  checked={cfg.pick.stance180}
+                  onChange={(e) => setStance180(e.target.checked)}
+                />
+                <span>Robot duruşunu 180° çevir (tüm kol)</span>
+              </label>
+              <p className="ra-hint">
+                <b>Hedef yükseklik</b> ile "Tıkla-Git" artık zemine değil, <b>havada</b> o yükseklikteki
+                noktaya gider — Z/yükseklikte istediğin yere taşı. Küp kenarını gerçek küpüne göre gir.
+              </p>
+              {pickReport && (
+                <div className="ra-pick-report">
+                  <div>Hedef: <b>{pickReport.target.x}, {pickReport.target.y}, {pickReport.target.z}</b> cm</div>
+                  <div>Ulaşılan: <b>{pickReport.reached.x}, {pickReport.reached.y}, {pickReport.reached.z}</b> cm</div>
+                  <div className={pickReport.err > 2.5 ? 'ra-pick-bad' : 'ra-pick-ok'}>
+                    Sapma: <b>{pickReport.err} cm</b>{pickReport.err > 2.5 ? ' — erişemiyor, Z/yükseklik ayarla' : ''}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="ra-section">
               <h4 className="ra-h">Eklem → Servo eşlemesi & kalibrasyon</h4>
               {cfg.joints.map((j, i) => (
                 <div className="ra-joint" key={i}>
@@ -412,7 +485,6 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               <div className="ra-parts">
                 {partsList.length === 0 && <span className="ra-hint">Parçalar yükleniyor…</span>}
                 {partsList
-                  .filter((p) => p.group !== 'grip')
                   .map((p) => {
                     const on = cfg.gripper.parts.includes(p.name);
                     return (
