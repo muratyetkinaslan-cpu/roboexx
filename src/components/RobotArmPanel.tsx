@@ -53,6 +53,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [dwell, setDwell] = useState(400);
   const [tip, setTip] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
   const [pickReport, setPickReport] = useState<{ target: { x: number; y: number; z: number }; reached: { x: number; y: number; z: number }; err: number; cube: number } | null>(null);
+  const [holding, setHolding] = useState(false);
   const [partsList, setPartsList] = useState<{ name: string; group: string; color: number }[]>([]);
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
@@ -96,6 +97,9 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           break;
         case 'rx:pick':
           if (d.target) setPickReport({ target: d.target, reached: d.reached, err: d.err, cube: d.cube });
+          break;
+        case 'rx:holding':
+          setHolding(!!d.on);
           break;
         case 'rx:parts':
           if (Array.isArray(d.parts)) setPartsList(d.parts);
@@ -374,6 +378,24 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
                 />
                 <span>Robot duruşunu 180° çevir (tüm kol)</span>
               </label>
+
+              <div className="ra-actions">
+                <button
+                  className={`btn ${holding ? 'btn-danger' : 'btn-primary'}`}
+                  onClick={() => {
+                    if (holding) { postToSim({ type: 'rx:placeCancel' }); }
+                    else { postToSim({ type: 'rx:pickHold' }); }
+                  }}
+                >
+                  {holding ? '■ Tutmayı bırak (iptal)' : '✊ Küpü Al ve Tut'}
+                </button>
+              </div>
+              {holding && (
+                <p className="ra-hint" style={{ color: 'var(--rx-accent)' }}>
+                  Küp tutuluyor. <b>Bırakmak için simülasyonda hedef noktaya tıkla</b> — kol oraya gider,
+                  küpü bırakır (gerçek kol da aynısını yapar).
+                </p>
+              )}
               <p className="ra-hint">
                 <b>Hedef yükseklik</b> ile "Tıkla-Git" artık zemine değil, <b>havada</b> o yükseklikteki
                 noktaya gider — Z/yükseklikte istediğin yere taşı. Küp kenarını gerçek küpüne göre gir.
@@ -485,6 +507,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               <div className="ra-parts">
                 {partsList.length === 0 && <span className="ra-hint">Parçalar yükleniyor…</span>}
                 {partsList
+                  .filter((p) => p.group !== 'grip')
                   .map((p) => {
                     const on = cfg.gripper.parts.includes(p.name);
                     return (

@@ -51,7 +51,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}button.on{background
 <div id="coords">Uç (IK): <b id="cx">0.0</b>, <b id="cy">0.0</b>, <b id="cz">0.0</b> cm · merkeze <b id="cr">0.0</b> cm</div></div>
 <div class="ui" id="info"><h3>Eklemler</h3>
 Taban (Y), omuz + dirsek (Z), <b>gripper</b> 4. servoyla açılıp kapanıyor.<br><br>
-<b>Küp Koy</b>: zemine tıkla, küp oraya gider (kol oynamaz). <b>Küpü Tut</b>: kol gidip küpü alır, karşıya bırakır.<br><br>
+<b>Küp Koy</b>: zemine tıkla, küp oraya gider (kol oynamaz). <b>Küpü Tut</b>: kol gidip küpü alır ve <b>tutar</b>; sonra bir noktaya tıkla → oraya bırakır.<br><br>
 <b>Öğret</b>: noktalara tıkla (kaydeder). <b>Tekrarla</b>: kol o noktaları gezer. Kol küçük — küpü tabana yakın koy.</div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -157,8 +157,7 @@ function handPos(){const w=new THREE.Vector3();hand.getWorldPosition(w);return w
 // ============================================================
 // Aday parçalar: yalnızca J3 siyah parçaları (gripper çeneleri hariç)
 const gripCandidates={};
-byGroup.j3.forEach(m=>{ gripCandidates[m.name]=m; });
-fingers.forEach(f=>{ if(f.name) gripCandidates[f.name]=f.grp; });   // gripper çeneleri de çevrilebilsin
+byGroup.j3.forEach(m=>{ gripCandidates[m.name]=m; });   // sadece j3 aparatları elle çevrilebilir; gripper motoru otomatik takip eder
 let gripPartNames=[];                        // varsayılan: çevirme YOK (orijinal model)
 let gripRot=[0,0,0];                         // her seçili parçaya uygulanan derece
 const partPivots={};                         // name -> {pivot, obj, home}
@@ -251,20 +250,21 @@ function addWpMark(p,n){const m=new THREE.Mesh(new THREE.SphereGeometry(1.5,16,1
 function clearWp(){waypoints.length=0;wpObjs.forEach(o=>scene.remove(o));wpObjs.length=0;repIdx=0;document.getElementById('wpn').textContent=0;}
 
 // ---- modes / helpers ----
-function setMode(m){mode=m;document.getElementById('modet').textContent=(m==='target'?'Küp Koy':m==='teach'?'Öğret':'Serbest');
+function setMode(m){mode=m;document.getElementById('modet').textContent=(m==='target'?'Küp Koy':m==='teach'?'Öğret':m==='place'?'Bırak':m==='goto'?'Hedefe Git':'Serbest');
  document.getElementById('target').classList.toggle('on',m==='target');
  document.getElementById('teach').classList.toggle('on',m==='teach');}
-function stopAll(){demoOn=false;pickOn=false;repeatOn=false;anim=null;carry=false;
+function stopAll(){demoOn=false;pickOn=false;repeatOn=false;anim=null;carry=false;holding=false;
  const d=document.getElementById('demo');d.classList.remove('on');d.textContent='Demo';
  document.getElementById('pick').classList.remove('on');document.getElementById('repeat').classList.remove('on');}
 
 // ---- pick & place via IK ----
 function reachInfo(tgt){const g=solveIK(tgt);const sv=angles.slice();for(let k=0;k<4;k++)angles[k]=g[k];apply();scene.updateMatrixWorld(true);const hp=handPos();const e=hp.distanceTo(tgt);const reached=hp.clone();for(let k=0;k<4;k++)angles[k]=sv[k];apply();return{err:e,goal:g,reached:reached};}
 function msg(t){document.getElementById('msg').textContent=t?('· '+t):'';}
+function _armSync(){ if(window.__rxPostArm) window.__rxPostArm(); }   // mevcut açıları gerçek kola yolla
+let holding=false;
 function runPick(){
  const c=cubeAt.clone();
- const grab=new THREE.Vector3(c.x,GRABY,c.z), drop=new THREE.Vector3(DROP.x,GRABY,DROP.z);
- const lift=p=>new THREE.Vector3(p.x,GRABY+6,p.z);
+ const grab=new THREE.Vector3(c.x,GRABY,c.z);
  const rg=reachInfo(grab);
  // sapma raporu: hedef vs gerçekten ulaşılan (cm)
  if(window.__rxPostPick) window.__rxPostPick({
@@ -272,22 +272,22 @@ function runPick(){
    reached:{x:+rg.reached.x.toFixed(1),y:+rg.reached.y.toFixed(1),z:+rg.reached.z.toFixed(1)},
    err:+rg.err.toFixed(2), cube:+CUBE.toFixed(1)
  });
- if(rg.err>2.5){                                  // cube is out of reach -> don't grab it
+ if(rg.err>2.5){                                  // küpe erişemiyor -> tutma
   msg('küpe erişemiyor');
-  moveTo(rg.goal,1.0,()=>{moveTo([90,90,90,150],1.0,()=>{pickOn=false;document.getElementById('pick').classList.remove('on');});});
+  moveTo(rg.goal,1.0,()=>{_armSync();pickOn=false;document.getElementById('pick').classList.remove('on');});
   return;
  }
  msg('');
  const chain=[
-  ()=>{setA(3,150);apply();moveTo(rg.goal,1.1,()=>step(1));},          // reach the cube
-  ()=>{setA(3,82);apply();carry=true;setTimeout(()=>step(2),350);},    // close + hold
-  ()=>moveTo(solveIK(lift(c)),0.8,()=>step(3)),                        // lift
-  ()=>moveTo(solveIK(lift(DROP)),1.1,()=>step(4)),                     // over drop
-  ()=>moveTo(solveIK(drop),0.8,()=>step(5)),                           // lower
-  ()=>{setA(3,150);apply();carry=false;cubeAt.copy(DROP);cubeOnStand(cubeAt);setTimeout(()=>step(6),350);},
-  ()=>moveTo([90,90,90,150],1.0,()=>{pickOn=false;document.getElementById('pick').classList.remove('on');})
+  ()=>{setA(3,150);apply();_armSync();moveTo(rg.goal,1.1,()=>{_armSync();step(1);});},   // aç + küpe git (gerçek kol da)
+  ()=>{setA(3,82);apply();carry=true;_armSync();setTimeout(()=>step(2),400);},            // kapat + tut
+  ()=>{                                                                                   // TUT ve bekle (bırakma yok)
+    holding=true; pickOn=false; document.getElementById('pick').classList.remove('on');
+    setMode('place'); msg('küp tutuldu — bırakmak için bir noktaya tıkla');
+    if(window.__rxPostHold) window.__rxPostHold(true);
+  }
  ];
- function step(i){if(!pickOn)return;chain[i]();}
+ function step(i){ if(i<=1 && !pickOn) return; chain[i](); }
  step(0);
 }
 
@@ -371,6 +371,7 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
   _cv.addEventListener('pointerdown', e=>{ _gd=true; _gx=e.clientX; _gy=e.clientY; });
   addEventListener('pointerup', e=>{
     if(mode==='goto' && _gd && Math.hypot(e.clientX-_gx, e.clientY-_gy)<10){ gotoFloorPoint(e); }
+    else if(mode==='place' && _gd && Math.hypot(e.clientX-_gx, e.clientY-_gy)<10){ placeCube(e); }
     _gd=false;
   });
   function gotoFloorPoint(e){
@@ -384,6 +385,27 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     if(info.err>3.0){ msg('erişemiyor'); }
     moveTo(info.goal, 1.0, ()=>{
       post('rx:ik', { angles: angles.slice(), point: { x:+p.x.toFixed(1), y:+TGTY.toFixed(1), z:+p.z.toFixed(1) }, reach: +info.err.toFixed(1) });
+    });
+  }
+  // Küpü tutarken seçilen noktaya taşı + bırak (gerçek kol da)
+  function placeCube(e){
+    if(!holding) return;
+    _ndc.x=(e.clientX/innerWidth)*2-1; _ndc.y=-(e.clientY/innerHeight)*2+1;
+    _ray.setFromCamera(_ndc, camera);
+    const p=new THREE.Vector3();
+    if(!_ray.ray.intersectPlane(_floor, p)) return;
+    const drop=new THREE.Vector3(p.x, TGTY, p.z);
+    const info=reachInfo(drop);
+    tgtMark.position.set(p.x, Math.max(0.15, TGTY), p.z); tgtMark.visible=true;
+    if(info.err>3.0){ msg('oraya erişemiyor — başka nokta seç'); return; }
+    moveTo(info.goal, 1.1, ()=>{
+      post('rx:ik', { angles: angles.slice(), point:{ x:+p.x.toFixed(1), y:+TGTY.toFixed(1), z:+p.z.toFixed(1) }, reach:+info.err.toFixed(1) });
+      setA(3,150); apply();                       // gripper'ı aç → bırak
+      post('rx:ik', { angles: angles.slice() });
+      carry=false; cubeAt.set(p.x,0,p.z); cubeOnStand(cubeAt);
+      holding=false; setMode('free'); tgtMark.visible=false;
+      msg('bırakıldı');
+      if(window.__rxPostHold) window.__rxPostHold(false);
     });
   }
 
@@ -493,6 +515,14 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
       case 'rx:setStance':
         setStance(!!d.on);
         break;
+      case 'rx:pickHold':
+        stopAll(); setMode('free'); pickOn=true;
+        document.getElementById('pick').classList.add('on');
+        carry=false; runPick();
+        break;
+      case 'rx:placeCancel':
+        if(holding){ carry=false; holding=false; setMode('free'); msg(''); if(window.__rxPostHold) window.__rxPostHold(false); }
+        break;
       case 'rx:getParts':
         post('rx:parts', { parts: partsList() });
         break;
@@ -507,6 +537,8 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
 
   window.__rxPostTip = function(t){ post('rx:tip', t); };
   window.__rxPostPick = function(d){ post('rx:pick', d); };
+  window.__rxPostArm = function(){ post('rx:ik', { angles: angles.slice(), pick:true }); };
+  window.__rxPostHold = function(on){ post('rx:holding', { on:!!on }); };
   post('rx:ready', { angles: angles.slice() });
   post('rx:parts', { parts: partsList() });
 })();
