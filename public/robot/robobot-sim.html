@@ -407,9 +407,9 @@ function buildBot(){
     usMeta.push({ name:d.name, group:g, fwdLocal:new THREE.Vector3(Math.sin(d.ang),0,Math.cos(d.ang)) });
   });
 
-  // çizgi sensörleri (alt-ön, sol/sağ)
+  // çizgi sensörleri (alt-ön, sol/sağ) — ultrasonikle aynı yön: sol=+X, sağ=-X
   const lineMeta=[];
-  [['left',-3.2],['right',3.2]].forEach(([nm,xx])=>{
+  [['left',3.2],['right',-3.2]].forEach(([nm,xx])=>{
     const s=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,1.4), new THREE.MeshStandardMaterial({color:0x111,roughness:.4,emissive:0x110000}));
     s.position.set(xx,1.7,ROBOT_R-2.5); bot3d.add(s);
     lineMeta.push({ name:nm, mesh:s });

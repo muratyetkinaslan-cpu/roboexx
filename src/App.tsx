@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityRail } from './components/ActivityRail';
 import { BlocklyWorkspace, type BlocklyWorkspaceHandle } from './components/BlocklyWorkspace';
 import { ClassroomPanel } from './components/ClassroomPanel';
@@ -11,8 +11,6 @@ import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
 import { RobotArmPanel, type RobotArmHandle } from './components/RobotArmPanel';
 import { RoboBotPanel } from './components/RoboBotPanel';
-import * as Blockly from 'blockly';
-import { generateSimCode } from './robobot/sim-generator';
 import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
@@ -185,17 +183,6 @@ export default function App() {
   // ====== RoboBOT (diferansiyel sürüş) simülasyonu ======
   const [roboBotOpen, setRoboBotOpen] = useState(false);
   const [roboBotFullscreen, setRoboBotFullscreen] = useState(false);
-  // Bloklardan üretilen simülasyon JS'i. App seviyesinde tutulur ki tam ekran
-  // modunda blok çalışma alanı unmount olsa bile son üretilen kod korunur.
-  const [roboBotSimCode, setRoboBotSimCode] = useState('');
-  const refreshSimCode = useCallback(() => {
-    try {
-      const ws = Blockly.getMainWorkspace();
-      if (ws) setRoboBotSimCode(generateSimCode(ws as Blockly.Workspace));
-    } catch { /* yoksay */ }
-  }, []);
-  // Panel açıldığında (blok çalışma alanı henüz canlıyken) kodu bir kez üret.
-  useEffect(() => { if (roboBotOpen) refreshSimCode(); }, [roboBotOpen, refreshSimCode]);
   // Tam ekran açılıp kapanınca blok alanı gizlenir/görünür → Blockly'yi yeniden boyutlandır.
   useEffect(() => {
     const id = setTimeout(() => blocklyRef.current?.resize(), 80);
@@ -1487,7 +1474,7 @@ export default function App() {
               <div className="workspace-blocks">
                 <BlocklyWorkspace
                   ref={blocklyRef}
-                  onCodeChange={(py) => { setGeneratedCode(py); if (roboBotOpen) refreshSimCode(); }}
+                  onCodeChange={setGeneratedCode}
                   onUserEdit={handleBlocklyEdit}
                   theme={theme}
                   onCursorMove={currentWorkspaceUserId ? (x, y) => cursorBroadcasterRef.current?.setCursor(x, y) : undefined}
@@ -1542,7 +1529,6 @@ export default function App() {
 
           {roboBotOpen && (
             <RoboBotPanel
-              simCode={roboBotSimCode}
               fullscreen={roboBotFullscreen}
               onToggleFullscreen={() => setRoboBotFullscreen((f) => !f)}
               onClose={() => { setRoboBotOpen(false); setRoboBotFullscreen(false); }}

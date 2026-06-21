@@ -1,14 +1,14 @@
 import {
   useCallback, useEffect, useRef, useState,
 } from 'react';
+import * as Blockly from 'blockly';
+import { generateSimCode } from '../robobot/sim-generator';
 import {
   type RoboBotConfig,
   loadRoboBotConfig, saveRoboBotConfig, configPayload,
 } from '../robobot/config';
 
 interface Props {
-  /** Bloklardan üretilen simülasyon JS'i (App tarafından sağlanır) */
-  simCode: string;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
   onClose: () => void;
@@ -33,7 +33,7 @@ const TRACK_PRESETS: { value: string; label: string }[] = [
   { value: 'none', label: 'Yol yok' },
 ];
 
-export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose }: Props) {
+export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [cfg, setCfg] = useState<RoboBotConfig>(() => loadRoboBotConfig());
   const cfgRef = useRef(cfg);
@@ -98,8 +98,17 @@ export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose 
   // --- çalıştır / durdur ---
   const run = () => {
     setCodeError(null);
-    const code = (simCode || '').trim();
-    if (!code) {
+    let code = '';
+    try {
+      // Blok çalışma alanı her zaman mounted (tam ekranda bile) → o an taze üret.
+      const ws = Blockly.getMainWorkspace();
+      if (!ws) { setCodeError('Blok çalışma alanı bulunamadı.'); return; }
+      code = generateSimCode(ws as Blockly.Workspace);
+    } catch (e) {
+      setCodeError('Kod üretilemedi: ' + (e as Error).message);
+      return;
+    }
+    if (!code.trim()) {
       setCodeError('Önce bloklarla bir program yaz (en az bir motor/hareket bloğu).');
       return;
     }
