@@ -196,6 +196,11 @@ export default function App() {
   }, []);
   // Panel açıldığında (blok çalışma alanı henüz canlıyken) kodu bir kez üret.
   useEffect(() => { if (roboBotOpen) refreshSimCode(); }, [roboBotOpen, refreshSimCode]);
+  // Tam ekran açılıp kapanınca blok alanı gizlenir/görünür → Blockly'yi yeniden boyutlandır.
+  useEffect(() => {
+    const id = setTimeout(() => blocklyRef.current?.resize(), 80);
+    return () => clearTimeout(id);
+  }, [roboBotFullscreen, robotArmFullscreen]);
   // Donanım galerisi — varsayılan AÇIK, kullanıcı kapatabilir
   const [lines, setLines] = useState<SerialLine[]>([]);
 
@@ -1474,7 +1479,8 @@ export default function App() {
           data-arm-open={(robotArmOpen || roboBotOpen) ? 'true' : 'false'}
           data-arm-full={((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) ? 'true' : 'false'}
         >
-          {!((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) && (
+          {/* Blok alanı her zaman mounted kalır; tam ekranda CSS ile gizlenir
+              (unmount edilirse Blockly dispose olur ve bloklar/kod silinir). */}
           <div className="workspace-main-col">
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
@@ -1522,7 +1528,6 @@ export default function App() {
             </div>
           )}
           </div>
-          )}
 
           {robotArmOpen && (
             <RobotArmPanel

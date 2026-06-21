@@ -189,7 +189,7 @@ const WHEEL_R = 3.3;
 const WHEEL_BASE = 22.4;        // tekerlek merkez aralığı
 const MAX_CMS = 28;             // %100 motor ≈ 28 cm/s
 const US_MIN = 2, US_MAX = 400; // HC-SR04 aralığı
-const TRACK_W = 3.2;            // pist çizgisi yarı genişlik*2 (cm)
+let trackW = 4.2;               // pist çizgisi genişliği (cm) — panelden ayarlanır
 const LINE_DARK = 'siyah';      // çizgi rengi
 
 // ---- Yapılandırma (React panelinden gelir; varsayılanlar bloklarla uyumlu) ----
@@ -254,16 +254,16 @@ function rebuildTrack(){
   for(let i=0;i<trackPts.length-1;i++){
     const a=trackPts[i], b=trackPts[i+1];
     const dx=b.x-a.x, dz=b.z-a.z; const len=Math.hypot(dx,dz); if(len<.01) continue;
-    const seg=new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, TRACK_W), trackMat);
+    const seg=new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, trackW), trackMat);
     seg.position.set((a.x+b.x)/2, 0.06, (a.z+b.z)/2);
     seg.rotation.y = -Math.atan2(dz, dx);   // segmenti yönüne hizala
     trackGroup.add(seg);
     // köşe boşluklarını kapat
-    const dot=new THREE.Mesh(new THREE.CylinderGeometry(TRACK_W/2,TRACK_W/2,0.12,16), trackMat);
+    const dot=new THREE.Mesh(new THREE.CylinderGeometry(trackW/2,trackW/2,0.12,16), trackMat);
     dot.position.set(a.x,0.06,a.z); trackGroup.add(dot);
   }
   const last=trackPts[trackPts.length-1];
-  const dot=new THREE.Mesh(new THREE.CylinderGeometry(TRACK_W/2,TRACK_W/2,0.12,16), trackMat);
+  const dot=new THREE.Mesh(new THREE.CylinderGeometry(trackW/2,trackW/2,0.12,16), trackMat);
   dot.position.set(last.x,0.06,last.z); trackGroup.add(dot);
 }
 
@@ -415,7 +415,7 @@ function buildBot(){
     lineMeta.push({ name:nm, mesh:s });
   });
 
-  return { wheels, usMeta, lineMeta };
+  return { wheels, usMeta, lineMeta, deckTop, deckBot };
 }
 const M = buildBot();
 
@@ -459,7 +459,7 @@ function castUS(meta){
 function readLine(meta){
   meta.mesh.getWorldPosition(_v);
   const d = distToTrack(_v.x, _v.z);
-  const onLine = d < TRACK_W/2;
+  const onLine = d < trackW/2;
   return { digital:onLine?1:0, analog: onLine? 62000 : 7000 };
 }
 function updateSensors(){
@@ -743,6 +743,11 @@ window.addEventListener('message',ev=>{
     case 'rx:addObstacle': addObstacle(d.x,d.z); break;
     case 'rx:clearObstacles': clearObstacles(); break;
     case 'rx:setPot': config.potValue=Number(d.value)||0; break;
+    case 'rx:setTrackWidth': trackW=Math.max(1, Math.min(12, Number(d.w)||trackW)); rebuildTrack(); break;
+    case 'rx:setColors':
+      if(d.top) M.deckTop.material.color.set(d.top);
+      if(d.bottom) M.deckBot.material.color.set(d.bottom);
+      break;
   }
 });
 

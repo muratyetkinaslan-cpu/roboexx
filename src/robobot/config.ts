@@ -22,6 +22,12 @@ export interface RoboBotConfig {
   line: { left: number; right: number };
   /** Potansiyometre simülasyon değeri (0-100) */
   potValue: number;
+  /** Pist çizgi genişliği (cm) */
+  trackWidth: number;
+  /** Üst şase rengi (hex) */
+  colorTop: string;
+  /** Alt şase rengi (hex) */
+  colorBottom: string;
 }
 
 export const DEFAULT_CONFIG: RoboBotConfig = {
@@ -34,6 +40,9 @@ export const DEFAULT_CONFIG: RoboBotConfig = {
   },
   line: { left: 26, right: 27 },   // GP26/GP27 = ADC0/ADC1
   potValue: 50,
+  trackWidth: 4.2,
+  colorTop: '#83c265',             // yeşil üst güverte
+  colorBottom: '#caa06a',          // tan alt güverte
 };
 
 const KEY = 'roboexx.robobot.config.v1';

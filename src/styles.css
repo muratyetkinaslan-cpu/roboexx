@@ -5269,6 +5269,8 @@ g.blocklyDraggable > path:first-of-type {
   flex: 1 1 100%;
   border-left: none;
 }
+/* Tam ekranda blok alanı mounted kalır (Blockly dispose olmasın) ama gizlenir. */
+.workspace-area[data-arm-full="true"] .workspace-main-col { display: none; }
 
 .robotarm-header {
   display: flex;
@@ -5553,3 +5555,17 @@ g.blocklyDraggable > path:first-of-type {
 }
 .rb-console-empty { color: var(--rx-text-muted); font-style: italic; }
 .rb-console-line { color: var(--rx-text); white-space: pre-wrap; word-break: break-word; }
+
+/* RoboBOT renk seçici inputları */
+.rb-color {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  background: var(--rx-bg);
+  border: 1px solid var(--rx-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.rb-color::-webkit-color-swatch-wrapper { padding: 0; }
+.rb-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+.rb-color::-moz-color-swatch { border: none; border-radius: 3px; }

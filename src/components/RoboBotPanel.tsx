@@ -74,6 +74,8 @@ export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose 
         case 'rx:ready':
           setSimReady(true);
           postToSim({ type: 'rx:setConfig', config: configPayload(cfgRef.current) });
+          postToSim({ type: 'rx:setTrackWidth', w: cfgRef.current.trackWidth });
+          postToSim({ type: 'rx:setColors', top: cfgRef.current.colorTop, bottom: cfgRef.current.colorBottom });
           break;
         case 'rx:running':
           setRunning(!!d.on);
@@ -260,6 +262,19 @@ export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose 
                   {TRACK_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                 </select>
               </label>
+              <label className="ra-grip-slider">
+                <span>Çizgi kalınlığı</span>
+                <input
+                  type="range" min={1.5} max={10} step={0.2}
+                  value={cfg.trackWidth}
+                  onChange={(e) => {
+                    const w = +e.target.value;
+                    setCfg((c) => ({ ...c, trackWidth: w }));
+                    postToSim({ type: 'rx:setTrackWidth', w });
+                  }}
+                />
+                <b>{cfg.trackWidth.toFixed(1)}</b>
+              </label>
               <div className="ra-actions">
                 <button
                   className={`btn btn-secondary ${drawMode ? 'is-on ra-goto' : ''}`}
@@ -271,7 +286,8 @@ export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose 
               </div>
               <p className="ra-hint">
                 <b>Yol çiz</b>'i aç, zemine sırayla tıklayarak kendi çizgi pistini oluştur.
-                Çizgi sensörleri bu siyah yolu görür.
+                Çizgi sensörleri bu siyah yolu görür. İki sensör çizgiyi ortalayamıyorsa
+                <b> çizgi kalınlığını artır</b>.
               </p>
             </div>
 
@@ -370,6 +386,38 @@ export function RoboBotPanel({ simCode, fullscreen, onToggleFullscreen, onClose 
                 <b>{cfg.potValue}</b>
               </label>
               <p className="ra-hint">Bloktaki <b>Potansiyometre oku</b> bu değeri (0–100) döndürür — hız ayarı denemek için.</p>
+            </div>
+
+            {/* ROBOT RENGİ */}
+            <div className="ra-section">
+              <h4 className="ra-h">Robot rengi</h4>
+              <div className="ra-row">
+                <label className="ra-field">
+                  <span>Üst şase</span>
+                  <input
+                    type="color" className="rb-color"
+                    value={cfg.colorTop}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCfg((c) => ({ ...c, colorTop: v }));
+                      postToSim({ type: 'rx:setColors', top: v });
+                    }}
+                  />
+                </label>
+                <label className="ra-field">
+                  <span>Alt şase</span>
+                  <input
+                    type="color" className="rb-color"
+                    value={cfg.colorBottom}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCfg((c) => ({ ...c, colorBottom: v }));
+                      postToSim({ type: 'rx:setColors', bottom: v });
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="ra-hint">Robotun üst ve alt güverte rengini seç — simülasyonda anında değişir.</p>
             </div>
 
             {/* KONSOL */}
