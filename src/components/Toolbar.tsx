@@ -45,6 +45,11 @@ interface Props {
   /** Robot kol paneli açık mı (buton aktif görünümü) */
   robotArmActive: boolean;
 
+  /** RoboBOT (diferansiyel sürüş) simülasyonunu aç/kapat */
+  onRoboBot: () => void;
+  /** RoboBOT paneli açık mı (buton aktif görünümü) */
+  roboBotActive: boolean;
+
   /** Açık/koyu tema geçişi */
   themeId: ThemeId;
   onToggleLight: () => void;
@@ -232,6 +237,21 @@ export function Toolbar(props: Props) {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <rect x="9" y="2" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.8" />
               <path d="M12 6v4M7 14l5-4 5 4M5 20h14M7 14v6M17 14v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {/* RoboBOT — diferansiyel sürüş robot simülasyonu (çizgi izleme / engelden kaçma) */}
+          <button
+            className={`btn btn-ghost btn-icon-only btn-robobot ${props.roboBotActive ? 'is-active' : ''}`}
+            onClick={props.onRoboBot}
+            data-tooltip="RoboBOT Simülasyonu"
+            data-tooltip-detail="Diferansiyel sürüş robotu — çizgi izleme, engelden kaçma; bloklarla yaz, simülasyonda dene"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <rect x="5" y="8" width="14" height="9" rx="2" stroke="currentColor" strokeWidth="1.8" />
+              <circle cx="9" cy="20" r="2" stroke="currentColor" strokeWidth="1.8" />
+              <circle cx="15" cy="20" r="2" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M9 8V5M15 8V5M8.5 12h.01M15.5 12h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </button>
 

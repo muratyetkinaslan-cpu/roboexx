@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>RoboBOT Simülasyon</title>
+<style>
+  :root{
+    --bg:#0c0f14; --panel:rgba(18,23,32,.86); --panel-solid:#121720;
+    --line:#283246; --txt:#e8eef7; --muted:#8aa0bd;
+    --accent:#ff8a3d; --accent2:#39d3c7; --good:#5fd38a; --bad:#ff5b6e; --warn:#ffcf5b;
+    --rad:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:'Chakra Petch',system-ui,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden;
+    -webkit-user-select:none;user-select:none;touch-action:none;}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+
+  /* ---- Üst HUD (sensör ekranı) ---- */
+  #hud{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:20;
+    display:flex;gap:8px;align-items:stretch;padding:8px;border-radius:var(--rad);
+    background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line);
+    box-shadow:0 8px 28px rgba(0,0,0,.45);max-width:calc(100vw - 20px);flex-wrap:wrap;justify-content:center}
+  .hcard{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 10px;
+    border-radius:9px;background:rgba(255,255,255,.03);border:1px solid var(--line);min-width:62px}
+  .hcard .lbl{font-size:10px;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;white-space:nowrap}
+  .hcard .val{font-size:20px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+  .hcard .unit{font-size:10px;color:var(--muted);margin-top:1px}
+  .hcard.us .val{color:var(--accent2)} .hcard.us.near .val{color:var(--bad)}
+  .hsep{width:1px;background:var(--line);margin:2px 0}
+  .hgrp{display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center;padding:0 2px}
+  .hgrp .gname{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .hgrp .row{display:flex;gap:6px}
+  .pill{display:flex;flex-direction:column;align-items:center;padding:4px 8px;border-radius:8px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);min-width:50px}
+  .pill .lbl{font-size:9px;color:var(--muted)} .pill .val{font-size:15px;font-weight:700}
+  .line-on .val{color:#fff} .line-off .val{color:var(--muted)}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .buzz{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:9px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line)}
+  .buzz.on{background:rgba(255,207,91,.16);border-color:var(--warn)}
+  .runbadge{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:9px;font-weight:700;font-size:12px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--muted)}
+  .runbadge.on{background:rgba(95,211,138,.16);border-color:var(--good);color:var(--good)}
+
+  /* ---- Alt araç çubuğu ---- */
+  #bar{position:fixed;left:10px;bottom:10px;z-index:20;display:flex;gap:6px;align-items:center;
+    padding:8px;border-radius:var(--rad);background:var(--panel);backdrop-filter:blur(8px);
+    border:1px solid var(--line);box-shadow:0 8px 28px rgba(0,0,0,.45);flex-wrap:wrap;max-width:calc(100vw - 20px)}
+  .btn{appearance:none;border:1px solid var(--line);background:#1a212e;color:var(--txt);
+    font:inherit;font-size:13px;font-weight:600;padding:8px 12px;border-radius:9px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;transition:.12s}
+  .btn:hover{border-color:#3a4760;background:#202938}
+  .btn.primary{background:linear-gradient(180deg,#ff9a4f,#ff7a23);border-color:#ff7a23;color:#1a0f04}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.stop{background:linear-gradient(180deg,#ff6675,#ef3b50);border-color:#ef3b50;color:#fff}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:6px 9px;font-size:12px}
+  .btn.on{border-color:var(--accent2);box-shadow:inset 0 0 0 1px var(--accent2)}
+  select{appearance:none;font:inherit;font-size:13px;font-weight:600;color:var(--txt);background:#1a212e;
+    border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer}
+  .vsep{width:1px;align-self:stretch;background:var(--line);margin:0 2px}
+  .barlabel{font-size:11px;color:var(--muted);padding:0 2px}
+
+  /* ---- Kod paneli (yalnız tek-başına modda) ---- */
+  #code{position:fixed;right:10px;top:74px;bottom:74px;width:360px;max-width:42vw;z-index:19;
+    display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:var(--rad);
+    background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line);
+    box-shadow:0 8px 28px rgba(0,0,0,.45)}
+  #code.hidden{display:none}
+  #code h3{margin:0;font-size:13px;color:var(--muted);font-weight:700;letter-spacing:.3px}
+  #code .ex{display:flex;gap:6px;flex-wrap:wrap}
+  #code textarea{flex:1;resize:none;background:#0c1018;color:#cfe0f5;border:1px solid var(--line);
+    border-radius:9px;padding:10px;font-family:'JetBrains Mono',Consolas,monospace;font-size:12.5px;line-height:1.5;tab-size:2}
+  #code .console{height:96px;overflow:auto;background:#0c1018;border:1px solid var(--line);border-radius:9px;
+    padding:8px;font-family:Consolas,monospace;font-size:11.5px;color:#9fb6d6;white-space:pre-wrap}
+  .hint{position:fixed;left:10px;top:74px;z-index:18;max-width:300px;font-size:11.5px;color:var(--muted);
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;line-height:1.5}
+  .hint b{color:var(--txt)}
+  .toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);z-index:30;background:var(--panel-solid);
+    border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- Üst sensör ekranı -->
+<div id="hud">
+  <div class="hgrp">
+    <div class="gname">Mesafe sensörleri (cm)</div>
+    <div class="row">
+      <div class="hcard us" id="us-left"><div class="lbl">◀ Sol</div><div class="val">—</div></div>
+      <div class="hcard us" id="us-front"><div class="lbl">▲ Ön</div><div class="val">—</div></div>
+      <div class="hcard us" id="us-right"><div class="lbl">Sağ ▶</div><div class="val">—</div></div>
+    </div>
+  </div>
+  <div class="hsep"></div>
+  <div class="hgrp">
+    <div class="gname">Çizgi sensörleri</div>
+    <div class="row">
+      <div class="pill line-off" id="line-left"><div class="lbl">Sol</div><div class="val">0</div></div>
+      <div class="pill line-off" id="line-right"><div class="lbl">Sağ</div><div class="val">0</div></div>
+    </div>
+  </div>
+  <div class="hsep"></div>
+  <div class="hgrp">
+    <div class="gname">Motor (hız)</div>
+    <div class="row">
+      <div class="pill" id="mot-left"><div class="lbl">Sol M</div><div class="val">0</div></div>
+      <div class="pill" id="mot-right"><div class="lbl">Sağ M</div><div class="val">0</div></div>
+    </div>
+  </div>
+  <div class="hsep"></div>
+  <div class="hgrp" style="justify-content:center">
+    <div class="buzz" id="buzz"><span class="dot" style="background:#3a4760"></span><span style="font-size:12px;font-weight:700">Buzzer</span></div>
+    <div class="runbadge" id="runbadge"><span class="dot" style="background:#3a4760"></span>Durdu</div>
+  </div>
+</div>
+
+<!-- Alt araç çubuğu -->
+<div id="bar">
+  <button class="btn primary" id="btn-run">▶ Çalıştır</button>
+  <button class="btn stop" id="btn-stop" style="display:none">⏹ Durdur</button>
+  <button class="btn ghost sm" id="btn-reset">↺ Sıfırla</button>
+  <div class="vsep"></div>
+  <span class="barlabel">Pist</span>
+  <select id="sel-track">
+    <option value="oval">Oval</option>
+    <option value="eight">Sekiz (8)</option>
+    <option value="zigzag">Zikzak</option>
+    <option value="straight">Düz</option>
+    <option value="ushape">U dönüş</option>
+    <option value="none">Yok</option>
+  </select>
+  <button class="btn ghost sm" id="btn-draw">✏ Çiz</button>
+  <button class="btn ghost sm" id="btn-cleartrack">Pisti sil</button>
+  <div class="vsep"></div>
+  <button class="btn ghost sm" id="btn-addobs">＋ Engel</button>
+  <button class="btn ghost sm" id="btn-delobs">🗑 Seçili engel</button>
+  <button class="btn ghost sm" id="btn-clearobs">Tüm engeller</button>
+  <div class="vsep"></div>
+  <button class="btn ghost sm" id="btn-turn">⟳ Robotu çevir</button>
+  <button class="btn ghost sm" id="btn-cam">⌂ Kamera</button>
+</div>
+
+<div class="hint" id="hint">
+  <b>Robotu/engeli sürükle.</b> Boşluğu sürükle = kamerayı döndür · tekerlek = yakınlaş.<br>
+  <b>✏ Çiz:</b> zemine tıklayarak siyah çizgi pisti çiz.
+</div>
+
+<!-- Kod paneli (yalnız tek başına açıldığında) -->
+<div id="code">
+  <h3>Kod (bot API'si) — örnekleri dene</h3>
+  <div class="ex">
+    <button class="btn sm" data-ex="line">Çizgi takip</button>
+    <button class="btn sm" data-ex="avoid">Engelden kaç + buzzer</button>
+    <button class="btn sm" data-ex="square">Kare çiz</button>
+  </div>
+  <textarea id="ta" spellcheck="false"></textarea>
+  <div class="console" id="con"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   RoboBOT Simülasyon — RoboExx
+   - Diferansiyel sürüşlü yuvarlak robot (2 DC motor + kaster)
+   - 3 ultrasonik mesafe sensörü (sol/ön/sağ) — raycast
+   - 2 çizgi sensörü (sol/sağ) — pist çizgisine analitik mesafe
+   - Sürüklenebilir engeller (üzerinde cm etiketi) + çizilebilir pist
+   - bot API'si ile async kod çalıştırma + postMessage köprüsü (React paneli)
+   ===================================================================== */
+
+const TAG = 'roboexx-bot';
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+
+// ---- Dünya ölçeği: 1 birim = 1 cm ----
+const ARENA = 240;              // cm (kenar uzunluğu)
+const HALF = ARENA / 2;         // 120
+const WALL_H = 12;
+const ROBOT_R = 9;              // gövde yarıçapı
+const WHEEL_R = 3.3;
+const WHEEL_BASE = 22.4;        // tekerlek merkez aralığı
+const MAX_CMS = 28;             // %100 motor ≈ 28 cm/s
+const US_MIN = 2, US_MAX = 400; // HC-SR04 aralığı
+const TRACK_W = 3.2;            // pist çizgisi yarı genişlik*2 (cm)
+const LINE_DARK = 'siyah';      // çizgi rengi
+
+// ---- Yapılandırma (React panelinden gelir; varsayılanlar bloklarla uyumlu) ----
+let config = {
+  leftMotor: '1', rightMotor: '2',
+  us: { front:{trig:3,echo:2}, left:{trig:7,echo:6}, right:{trig:9,echo:8} },
+  line: { left:26, right:27 },
+  potValue: 50
+};
+
+/* ===================== THREE sahne ===================== */
+const host = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0f14);
+scene.fog = new THREE.Fog(0x0c0f14, ARENA*1.4, ARENA*3.2);
+
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 1, 4000);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+host.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0x9fb6d6, 0x10141c, 0.85));
+const key = new THREE.DirectionalLight(0xffffff, 1.05);
+key.position.set(HALF*0.7, HALF*1.7, HALF*0.5);
+key.castShadow = true;
+key.shadow.mapSize.set(2048,2048);
+const sd = key.shadow.camera; sd.left=-HALF*1.3; sd.right=HALF*1.3; sd.top=HALF*1.3; sd.bottom=-HALF*1.3; sd.near=1; sd.far=HALF*5;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xff8a3d, 0.35); rim.position.set(-HALF, HALF*0.7, -HALF); scene.add(rim);
+
+// Zemin (beyaz mat — siyah pist kontrast olsun)
+const floorMat = new THREE.MeshStandardMaterial({ color:0xdfe6ee, roughness:.96, metalness:0 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA, ARENA), floorMat);
+floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+// Izgara (1cm ince + 10cm kalın)
+const gFine = new THREE.GridHelper(ARENA, ARENA, 0xbcc7d6, 0xc7d1de); gFine.position.y=0.02;
+gFine.material.opacity=.35; gFine.material.transparent=true; scene.add(gFine);
+const gMaj = new THREE.GridHelper(ARENA, ARENA/10, 0x8aa0bd, 0x9fb0c6); gMaj.position.y=0.03;
+gMaj.material.opacity=.5; gMaj.material.transparent=true; scene.add(gMaj);
+
+// Duvarlar
+const wallMat = new THREE.MeshStandardMaterial({ color:0x1a2230, roughness:.9, side:THREE.DoubleSide });
+const walls = [];
+function addWall(w,h,d,x,y,z){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),wallMat);
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; scene.add(m); walls.push(m); }
+addWall(ARENA+4, WALL_H, 4, 0, WALL_H/2, -HALF);
+addWall(ARENA+4, WALL_H, 4, 0, WALL_H/2,  HALF);
+addWall(4, WALL_H, ARENA+4, -HALF, WALL_H/2, 0);
+addWall(4, WALL_H, ARENA+4,  HALF, WALL_H/2, 0);
+
+/* ===================== Pist (çizgi) ===================== */
+let trackPts = [];            // [{x,z}, ...] dünya noktaları
+const trackGroup = new THREE.Group(); scene.add(trackGroup);
+const trackMat = new THREE.MeshBasicMaterial({ color:0x14181f });
+
+function rebuildTrack(){
+  while(trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
+  if(trackPts.length < 2) return;
+  for(let i=0;i<trackPts.length-1;i++){
+    const a=trackPts[i], b=trackPts[i+1];
+    const dx=b.x-a.x, dz=b.z-a.z; const len=Math.hypot(dx,dz); if(len<.01) continue;
+    const seg=new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, TRACK_W), trackMat);
+    seg.position.set((a.x+b.x)/2, 0.06, (a.z+b.z)/2);
+    seg.rotation.y = -Math.atan2(dz, dx);   // segmenti yönüne hizala
+    trackGroup.add(seg);
+    // köşe boşluklarını kapat
+    const dot=new THREE.Mesh(new THREE.CylinderGeometry(TRACK_W/2,TRACK_W/2,0.12,16), trackMat);
+    dot.position.set(a.x,0.06,a.z); trackGroup.add(dot);
+  }
+  const last=trackPts[trackPts.length-1];
+  const dot=new THREE.Mesh(new THREE.CylinderGeometry(TRACK_W/2,TRACK_W/2,0.12,16), trackMat);
+  dot.position.set(last.x,0.06,last.z); trackGroup.add(dot);
+}
+
+function trackPreset(name){
+  trackPts = [];
+  const R=78, cx=0, cz=0, N=64;
+  if(name==='oval'){
+    for(let i=0;i<=N;i++){ const t=i/N*Math.PI*2; trackPts.push({x:cx+Math.cos(t)*R*1.05, z:cz+Math.sin(t)*R*0.78}); }
+  } else if(name==='eight'){
+    // lemniscate (∞) — sekiz
+    for(let i=0;i<=N;i++){ const t=i/N*Math.PI*2; const dn=1+Math.sin(t)*Math.sin(t);
+      trackPts.push({x:cx+Math.cos(t)/dn*R*1.25, z:cz+Math.sin(t)*Math.cos(t)/dn*R*1.25}); }
+  } else if(name==='zigzag'){
+    let x=-95, up=true;
+    for(let i=0;i<8;i++){ trackPts.push({x, z:up?-55:55}); x+=27; up=!up; }
+  } else if(name==='straight'){
+    trackPts=[{x:-95,z:0},{x:95,z:0}];
+  } else if(name==='ushape'){
+    // sol dikey ↓ + yarım daire taban + sağ dikey ↑
+    for(let z=80;z>=-20;z-=8) trackPts.push({x:-60,z});
+    for(let i=1;i<20;i++){ const t=Math.PI - i/20*Math.PI; trackPts.push({x:Math.cos(t)*60, z:-20 - Math.sin(t)*55}); }
+    for(let z=-20;z<=80;z+=8) trackPts.push({x:60,z});
+  } else { /* none */ }
+  rebuildTrack();
+}
+
+// Bir noktanın pist çizgisine olan mesafesi (cm) — çizgi sensörü için
+function distToTrack(px, pz){
+  if(trackPts.length<2) return 1e9;
+  let best=1e9;
+  for(let i=0;i<trackPts.length-1;i++){
+    const a=trackPts[i], b=trackPts[i+1];
+    const abx=b.x-a.x, abz=b.z-a.z; const apx=px-a.x, apz=pz-a.z;
+    const ab2=abx*abx+abz*abz; let t = ab2>0 ? (apx*abx+apz*abz)/ab2 : 0;
+    t=Math.max(0,Math.min(1,t));
+    const cxp=a.x+abx*t, czp=a.z+abz*t;
+    const d=Math.hypot(px-cxp, pz-czp); if(d<best) best=d;
+  }
+  return best;
+}
+
+/* ===================== Engeller ===================== */
+const obstacles = [];           // {mesh,label,canvas,ctx,tex}
+let selectedObs = null;
+const OBS_MAT = ()=> new THREE.MeshStandardMaterial({ color:0xe0584e, roughness:.6, metalness:.05 });
+const OBS_SEL = 0xffcf5b;
+
+function mkLabelSprite(){
+  const c=document.createElement('canvas'); c.width=256; c.height=72;
+  const tex=new THREE.CanvasTexture(c);
+  const mat=new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false, depthWrite:false });
+  const s=new THREE.Sprite(mat); s.scale.set(26,7.3,1);
+  return { sprite:s, canvas:c, ctx:c.getContext('2d'), tex };
+}
+function drawLabel(o, text){
+  const x=o.ctx; x.clearRect(0,0,256,72);
+  x.fillStyle='rgba(12,16,22,.86)'; roundRect(x,4,8,248,56,12); x.fill();
+  x.strokeStyle='#39d3c7'; x.lineWidth=2; roundRect(x,4,8,248,56,12); x.stroke();
+  x.fillStyle='#e8eef7'; x.font='bold 36px Chakra Petch,Arial'; x.textAlign='center'; x.textBaseline='middle';
+  x.fillText(text,128,38); o.tex.needsUpdate=true;
+}
+function roundRect(x,a,b,w,h,r){ x.beginPath(); x.moveTo(a+r,b); x.arcTo(a+w,b,a+w,b+h,r); x.arcTo(a+w,b+h,a,b+h,r);
+  x.arcTo(a,b+h,a,b,r); x.arcTo(a,b,a+w,b,r); x.closePath(); }
+
+function addObstacle(x, z){
+  x = (x===undefined)? (Math.random()*120-60) : x;
+  z = (z===undefined)? (Math.random()*120-60) : z;
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(12,14,12), OBS_MAT());
+  body.position.y=7; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  const o=mkLabelSprite(); o.sprite.position.set(0,22,0); g.add(o.sprite);
+  g.position.set(x,0,z); scene.add(g);
+  const obj={ group:g, body, ...o, half:6 };
+  obstacles.push(obj); selectObs(obj); return obj;
+}
+function selectObs(o){
+  if(selectedObs) selectedObs.body.material.emissive && (selectedObs.body.material.emissive.setHex(0x000000));
+  selectedObs=o;
+  if(o){ o.body.material.emissive = o.body.material.emissive||new THREE.Color(); o.body.material.emissive.setHex(0x3a2a00); }
+}
+function deleteSelected(){
+  if(!selectedObs) return;
+  scene.remove(selectedObs.group);
+  const i=obstacles.indexOf(selectedObs); if(i>=0) obstacles.splice(i,1);
+  selectedObs=null;
+}
+function clearObstacles(){ obstacles.forEach(o=>scene.remove(o.group)); obstacles.length=0; selectedObs=null; }
+
+/* ===================== RoboBOT modeli ===================== */
+const bot3d = new THREE.Group(); scene.add(bot3d);
+const START = { x:-70, z:70, yaw: Math.PI*0.75 };
+
+function buildBot(){
+  // alt güverte
+  const deckBot=new THREE.Mesh(new THREE.CylinderGeometry(ROBOT_R,ROBOT_R,0.7,48),
+    new THREE.MeshStandardMaterial({color:0xcaa06a,roughness:.7})); deckBot.position.y=2.4; deckBot.castShadow=true; bot3d.add(deckBot);
+  // üst güverte (yeşil)
+  const deckTop=new THREE.Mesh(new THREE.CylinderGeometry(ROBOT_R,ROBOT_R,0.7,48),
+    new THREE.MeshStandardMaterial({color:0x83c265,roughness:.6})); deckTop.position.y=7.6; deckTop.castShadow=true; bot3d.add(deckTop);
+  // direkler
+  for(let i=0;i<4;i++){ const a=Math.PI/4 + i*Math.PI/2;
+    const p=new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,5.2,10), new THREE.MeshStandardMaterial({color:0xd98aa0,roughness:.5}));
+    p.position.set(Math.cos(a)*6.5,5,Math.sin(a)*6.5); bot3d.add(p); }
+  // kart (mavi PCB benzeri)
+  const pcb=new THREE.Mesh(new THREE.BoxGeometry(8,0.5,5.5), new THREE.MeshStandardMaterial({color:0x1d6e4a,roughness:.5}));
+  pcb.position.set(0,8.2,0); bot3d.add(pcb);
+  // tekerlekler (X ekseni etrafında döner)
+  const wheels=[];
+  [-1,1].forEach(side=>{
+    const w=new THREE.Group();
+    const tire=new THREE.Mesh(new THREE.CylinderGeometry(WHEEL_R,WHEEL_R,2.4,28),
+      new THREE.MeshStandardMaterial({color:0x20242c,roughness:.85})); tire.rotation.z=Math.PI/2; tire.castShadow=true;
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(1.7,1.7,2.5,18),
+      new THREE.MeshStandardMaterial({color:0xffc83d,roughness:.5})); hub.rotation.z=Math.PI/2;
+    w.add(tire); w.add(hub);
+    w.position.set(side*(ROBOT_R+1.2), WHEEL_R, -1.5);
+    bot3d.add(w); wheels.push(w);
+  });
+  // kaster (ön)
+  const caster=new THREE.Mesh(new THREE.SphereGeometry(1.3,16,12), new THREE.MeshStandardMaterial({color:0x333a45,metalness:.4,roughness:.4}));
+  caster.position.set(0,1.3,ROBOT_R-1.4); caster.castShadow=true; bot3d.add(caster);
+  // yön oku (turuncu)
+  const arrow=new THREE.Mesh(new THREE.ConeGeometry(1.5,3.2,18), new THREE.MeshStandardMaterial({color:0xff8a3d}));
+  arrow.rotation.x=Math.PI/2; arrow.position.set(0,8.9,4.2); bot3d.add(arrow);
+
+  // ultrasonik sensörler (sol/ön/sağ) — ön = +Z
+  const usDefs=[
+    { name:'left',  ang: 0.5 },
+    { name:'front', ang: 0.0 },
+    { name:'right', ang:-0.5 },
+  ];
+  const usMeta=[];
+  usDefs.forEach(d=>{
+    const g=new THREE.Group();
+    const pcb2=new THREE.Mesh(new THREE.BoxGeometry(3.4,2,1), new THREE.MeshStandardMaterial({color:0x2b3340,roughness:.6}));
+    const e1=new THREE.Mesh(new THREE.CylinderGeometry(.8,.8,.7,16), new THREE.MeshStandardMaterial({color:0xb8b0a4,metalness:.3,roughness:.5}));
+    const e2=e1.clone(); e1.rotation.x=Math.PI/2; e2.rotation.x=Math.PI/2; e1.position.set(-.9,0,.6); e2.position.set(.9,0,.6);
+    g.add(pcb2,e1,e2);
+    const px=Math.sin(d.ang)*(ROBOT_R-0.4), pz=Math.cos(d.ang)*(ROBOT_R-0.4);
+    g.position.set(px,4.7,pz); g.rotation.y=d.ang; bot3d.add(g);
+    usMeta.push({ name:d.name, group:g, fwdLocal:new THREE.Vector3(Math.sin(d.ang),0,Math.cos(d.ang)) });
+  });
+
+  // çizgi sensörleri (alt-ön, sol/sağ)
+  const lineMeta=[];
+  [['left',-3.2],['right',3.2]].forEach(([nm,xx])=>{
+    const s=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,1.4), new THREE.MeshStandardMaterial({color:0x111,roughness:.4,emissive:0x110000}));
+    s.position.set(xx,1.7,ROBOT_R-2.5); bot3d.add(s);
+    lineMeta.push({ name:nm, mesh:s });
+  });
+
+  return { wheels, usMeta, lineMeta };
+}
+const M = buildBot();
+
+// Robot durumu
+const bot = {
+  x:START.x, z:START.z, yaw:START.yaw,
+  wheelL:0, wheelR:0,            // hedef cm/s
+  _vL:0, _vR:0,                  // anlık (yumuşatılmış)
+  usDist:{left:US_MAX,front:US_MAX,right:US_MAX},
+  lineVal:{left:0,right:0},      // 0/1
+  lineAnalog:{left:8000,right:8000},
+  buzzUntil:0,
+  // çalıştırma bayrakları
+  _abort:false, _stop:{__stop:true}, _lastYield:0, running:false
+};
+function applyBotTransform(){ bot3d.position.set(bot.x,0,bot.z); bot3d.rotation.y=bot.yaw; }
+function resetRobot(){ bot.x=START.x; bot.z=START.z; bot.yaw=START.yaw; bot.wheelL=bot.wheelR=bot._vL=bot._vR=0;
+  applyBotTransform(); flashToast('Robot sıfırlandı'); }
+applyBotTransform();
+
+/* ===================== Sensör hesabı ===================== */
+const _ray = new THREE.Raycaster(); _ray.far = US_MAX;
+const _v = new THREE.Vector3(), _d = new THREE.Vector3();
+function obstacleMeshes(){ return obstacles.map(o=>o.body).concat(walls); }
+
+function castUS(meta){
+  // sensör dünya konumu + yönü
+  meta.group.getWorldPosition(_v);
+  _d.copy(meta.fwdLocal).applyQuaternion(bot3d.quaternion).normalize();
+  const targets = obstacleMeshes();
+  let best = US_MAX;
+  // küçük yelpaze (3 ışın) — ince kenarları kaçırma
+  for(const off of [-0.06,0,0.06]){
+    const dir=_d.clone().applyAxisAngle(new THREE.Vector3(0,1,0), off);
+    _ray.set(new THREE.Vector3(_v.x,_v.y,_v.z), dir);
+    const hits=_ray.intersectObjects(targets,false);
+    if(hits.length){ const dcm=hits[0].distance; if(dcm<best) best=dcm; }
+  }
+  return Math.max(US_MIN, Math.min(US_MAX, best));
+}
+function readLine(meta){
+  meta.mesh.getWorldPosition(_v);
+  const d = distToTrack(_v.x, _v.z);
+  const onLine = d < TRACK_W/2;
+  return { digital:onLine?1:0, analog: onLine? 62000 : 7000 };
+}
+function updateSensors(){
+  bot.usDist.left  = castUS(M.usMeta[0]);
+  bot.usDist.front = castUS(M.usMeta[1]);
+  bot.usDist.right = castUS(M.usMeta[2]);
+  const l=readLine(M.lineMeta[0]), r=readLine(M.lineMeta[1]);
+  bot.lineVal.left=l.digital; bot.lineVal.right=r.digital;
+  bot.lineAnalog.left=l.analog; bot.lineAnalog.right=r.analog;
+}
+
+/* ===================== Fizik (diferansiyel sürüş) ===================== */
+function circleVsAABB(px,pz,ox,oz,half,r){
+  const nx=Math.max(ox-half,Math.min(px,ox+half));
+  const nz=Math.max(oz-half,Math.min(pz,oz+half));
+  const dx=px-nx, dz=pz-nz; const dist=Math.hypot(dx,dz);
+  if(dist < r){ const pd=(r-dist)||0.001; const ux=(dist>1e-4?dx/dist:1), uz=(dist>1e-4?dz/dist:0);
+    return { x:px+ux*pd, z:pz+uz*pd }; }
+  return null;
+}
+function stepPhysics(dt){
+  // motor hız yumuşatma (ivme hissi)
+  const acc = 120*dt; // cm/s^2 benzeri
+  bot._vL += Math.max(-acc,Math.min(acc, bot.wheelL-bot._vL));
+  bot._vR += Math.max(-acc,Math.min(acc, bot.wheelR-bot._vR));
+  const v=(bot._vL+bot._vR)/2;
+  const omega=(bot._vR-bot._vL)/WHEEL_BASE;
+  bot.yaw += omega*dt;
+  const fx=Math.sin(bot.yaw), fz=Math.cos(bot.yaw);
+  let nx=bot.x + fx*v*dt, nz=bot.z + fz*v*dt;
+  // duvar sınırı
+  const lim=HALF-ROBOT_R-1; nx=Math.max(-lim,Math.min(lim,nx)); nz=Math.max(-lim,Math.min(lim,nz));
+  // engel çarpışması
+  for(const o of obstacles){ const push=circleVsAABB(nx,nz,o.group.position.x,o.group.position.z,o.half,ROBOT_R+0.5);
+    if(push){ nx=push.x; nz=push.z; } }
+  bot.x=nx; bot.z=nz;
+  applyBotTransform();
+  // tekerlek dönüşü
+  M.wheels[0].rotation.x += (bot._vL/WHEEL_R)*dt;
+  M.wheels[1].rotation.x += (bot._vR/WHEEL_R)*dt;
+}
+
+/* ===================== HUD ===================== */
+let hudT=0;
+function fmtCm(v){ return v>=US_MAX-1 ? '∞' : v.toFixed(0); }
+function updateHUD(){
+  setUS('us-left', bot.usDist.left); setUS('us-front', bot.usDist.front); setUS('us-right', bot.usDist.right);
+  setLine('line-left', bot.lineVal.left); setLine('line-right', bot.lineVal.right);
+  setMot('mot-left', Math.round(bot._vL/MAX_CMS*100)); setMot('mot-right', Math.round(bot._vR/MAX_CMS*100));
+  const bz=document.getElementById('buzz'); const on=performance.now()<bot.buzzUntil;
+  bz.classList.toggle('on',on); bz.querySelector('.dot').style.background = on?'#ffcf5b':'#3a4760';
+  const rb=document.getElementById('runbadge'); rb.classList.toggle('on',bot.running);
+  rb.querySelector('.dot').style.background = bot.running?'#5fd38a':'#3a4760';
+  rb.lastChild.textContent = bot.running?'Çalışıyor':'Durdu';
+}
+function setUS(id,v){ const el=document.getElementById(id); el.querySelector('.val').textContent=fmtCm(v);
+  el.classList.toggle('near', v<15); }
+function setLine(id,v){ const el=document.getElementById(id); el.querySelector('.val').textContent=v;
+  el.className='pill '+(v? 'line-on':'line-off'); }
+function setMot(id,v){ document.getElementById(id).querySelector('.val').textContent=(v>0?'+':'')+v; }
+
+// engel etiketleri (robot mesafesi)
+function updateObsLabels(){
+  for(const o of obstacles){
+    const dx=o.group.position.x-bot.x, dz=o.group.position.z-bot.z;
+    const d=Math.max(0, Math.hypot(dx,dz)-o.half); // gövde yüzeyine yaklaşık
+    drawLabel(o, d.toFixed(0)+' cm');
+    o.body.material.color.setHex(o===selectedObs?0xffaf4e:0xe0584e);
+  }
+}
+
+/* ===================== bot API (kod çalıştırma) ===================== */
+async function _yield(){
+  if(bot._abort) throw bot._stop;
+  const now=performance.now();
+  if(now-bot._lastYield > 12){ bot._lastYield=now; await new Promise(r=>requestAnimationFrame(()=>r())); if(bot._abort) throw bot._stop; }
+}
+const api = {
+  async frame(){ if(bot._abort) throw bot._stop; await new Promise(r=>requestAnimationFrame(()=>r())); bot._lastYield=performance.now(); if(bot._abort) throw bot._stop; },
+  async motor(num, speed, dir){
+    const s=Math.max(0,Math.min(100, Number(speed)||0))/100*MAX_CMS*(String(dir)==='backward'?-1:1);
+    if(String(num)===String(config.leftMotor)) bot.wheelL=s;
+    else if(String(num)===String(config.rightMotor)) bot.wheelR=s;
+    await _yield();
+  },
+  async motorStop(num){ if(String(num)===String(config.leftMotor)) bot.wheelL=0; else if(String(num)===String(config.rightMotor)) bot.wheelR=0; await _yield(); },
+  async motorStopAll(){ bot.wheelL=0; bot.wheelR=0; await _yield(); },
+  async wait(ms){ const end=performance.now()+Math.max(0,Number(ms)||0);
+    while(performance.now()<end){ if(bot._abort) throw bot._stop; await new Promise(r=>requestAnimationFrame(()=>r())); }
+    bot._lastYield=performance.now(); },
+  async distance(trig, echo){
+    let nm=null;
+    for(const k of ['front','left','right']){ if(Number(config.us[k].trig)===Number(trig)) { nm=k; break; } }
+    if(!nm){ logOnce('us-'+trig,'⚠ trig='+trig+' pinli ultrasonik sensör tanımlı değil → ∞'); await _yield(); return US_MAX; }
+    await _yield(); return Math.round(bot.usDist[nm]);
+  },
+  async digital(pin){ await _yield(); if(Number(pin)===Number(config.line.left)) return bot.lineVal.left;
+    if(Number(pin)===Number(config.line.right)) return bot.lineVal.right; return 0; },
+  async analog(pin){ await _yield(); if(Number(pin)===Number(config.line.left)) return bot.lineAnalog.left;
+    if(Number(pin)===Number(config.line.right)) return bot.lineAnalog.right; return 0; },
+  async pot(pin){ await _yield(); return config.potValue; },
+  async tone(pin, freq, dur){ playBeep(Number(freq)||440, Number(dur)||200); bot.buzzUntil=performance.now()+(Number(dur)||200); await _yield(); },
+  async toneOff(pin){ stopBeep(); bot.buzzUntil=0; await _yield(); },
+  print(x){ botLog(String(x)); },
+  map(v, fl, fh, tl, th){ const a=Number(v), b=Number(fl), c=Number(fh), d=Number(tl), e=Number(th);
+    if(c===b) return d; return Math.round((a-b)*(e-d)/(c-b)+d); },
+  millis(){ return Math.round(performance.now()); },
+  stopProgram(){ bot._abort=true; throw bot._stop; }
+};
+const logSeen={}; function logOnce(k,m){ if(logSeen[k]) return; logSeen[k]=1; botLog(m); }
+
+async function runProgram(code){
+  if(bot.running){ bot._abort=true; await new Promise(r=>setTimeout(r,40)); }
+  for(const k in logSeen) delete logSeen[k];
+  bot._abort=false; bot._lastYield=performance.now(); bot.running=true;
+  setRunUI(true); post({type:'rx:running', on:true});
+  botLog('▶ Çalışıyor…');
+  let fn;
+  try{ fn = new Function('bot', '"use strict"; return (async()=>{\n'+code+'\n})();'); }
+  catch(e){ botLog('Sözdizimi hatası: '+e.message); finishRun(); return; }
+  try{ await fn(api); botLog('✔ Program bitti.'); }
+  catch(e){ if(e!==bot._stop){ botLog('Hata: '+((e&&e.message)||e)); console.error(e); } else { botLog('⏹ Durduruldu.'); } }
+  finishRun();
+}
+function finishRun(){ bot.wheelL=bot.wheelR=0; bot.running=false; bot._abort=false; stopBeep();
+  setRunUI(false); post({type:'rx:running', on:false}); post({type:'rx:done'}); }
+function stopProgramExt(){ bot._abort=true; }
+
+/* ===================== WebAudio buzzer ===================== */
+let actx=null, osc=null, gain=null;
+function ensureAudio(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function playBeep(freq,dur){ ensureAudio(); if(!actx) return; stopBeep();
+  osc=actx.createOscillator(); gain=actx.createGain(); osc.type='square'; osc.frequency.value=freq;
+  gain.gain.value=.06; osc.connect(gain); gain.connect(actx.destination); osc.start();
+  const o=osc,g=gain; setTimeout(()=>{ try{ g.gain.setTargetAtTime(0,actx.currentTime,.02); o.stop(actx.currentTime+.05); }catch(e){} if(osc===o) osc=null; }, dur); }
+function stopBeep(){ try{ if(osc){ osc.stop(); osc=null; } }catch(e){} }
+
+/* ===================== Kamera (orbit) + fare etkileşimi ===================== */
+const target=new THREE.Vector3(0,0,0);
+let camTheta=Math.PI*0.25, camPhi=0.95, camRad=ARENA*1.15;
+function updateCam(){ const sp=Math.sin(camPhi);
+  camera.position.set(target.x+camRad*sp*Math.cos(camTheta), target.y+camRad*Math.cos(camPhi), target.z+camRad*sp*Math.sin(camTheta));
+  camera.lookAt(target); }
+updateCam();
+function resetCam(){ camTheta=Math.PI*0.25; camPhi=0.95; camRad=ARENA*1.15; target.set(0,0,0); updateCam(); }
+
+const mouse=new THREE.Vector2(); const picker=new THREE.Raycaster();
+let drag=null; // {kind:'orbit'|'obs'|'robot', obj}
+let lastPt={x:0,y:0};
+const floorPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+
+function ndc(ev){ const r=renderer.domElement.getBoundingClientRect();
+  const cx=(ev.touches?ev.touches[0].clientX:ev.clientX), cy=(ev.touches?ev.touches[0].clientY:ev.clientY);
+  mouse.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1); return {cx,cy}; }
+function floorHit(){ picker.setFromCamera(mouse,camera); const p=new THREE.Vector3();
+  return picker.ray.intersectPlane(floorPlane,p)? p : null; }
+
+function onDown(ev){
+  const {cx,cy}=ndc(ev); lastPt={x:cx,y:cy};
+  picker.setFromCamera(mouse,camera);
+  // önce engelleri dene
+  const obsHit=picker.intersectObjects(obstacles.map(o=>o.body),false)[0];
+  if(obsHit){ const o=obstacles.find(o=>o.body===obsHit.object); selectObs(o); drag={kind:'obs',obj:o};
+    document.getElementById('sel-track'); return; }
+  // robot
+  const botHit=picker.intersectObjects(bot3d.children,true)[0];
+  if(botHit && !bot.running){ drag={kind:'robot'}; selectObs(null); return; }
+  // çiz modu
+  if(drawMode){ const p=floorHit(); if(p){ trackPts.push({x:clampF(p.x),z:clampF(p.z)}); rebuildTrack(); } drag={kind:'draw'}; return; }
+  // boşluk → orbit
+  drag={kind:'orbit'};
+}
+function onMove(ev){
+  if(!drag) return; const {cx,cy}=ndc(ev); const dx=cx-lastPt.x, dy=cy-lastPt.y; lastPt={x:cx,y:cy};
+  if(drag.kind==='orbit'){ camTheta-=dx*0.008; camPhi=Math.max(0.18,Math.min(1.4,camPhi-dy*0.006)); updateCam(); }
+  else if(drag.kind==='obs'){ const p=floorHit(); if(p){ drag.obj.group.position.x=clampF(p.x); drag.obj.group.position.z=clampF(p.z); } }
+  else if(drag.kind==='robot'){ const p=floorHit(); if(p){ bot.x=clampF(p.x); bot.z=clampF(p.z); applyBotTransform(); } }
+  else if(drag.kind==='draw'){ const p=floorHit(); if(p){ const last=trackPts[trackPts.length-1];
+    if(!last || Math.hypot(p.x-last.x,p.z-last.z)>6){ trackPts.push({x:clampF(p.x),z:clampF(p.z)}); rebuildTrack(); } } }
+}
+function onUp(){ drag=null; }
+function clampF(v){ return Math.max(-HALF+4,Math.min(HALF-4,v)); }
+
+renderer.domElement.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
+renderer.domElement.addEventListener('touchstart',e=>{onDown(e);},{passive:true});
+window.addEventListener('touchmove',e=>{onMove(e);},{passive:true}); window.addEventListener('touchend',onUp);
+renderer.domElement.addEventListener('wheel',e=>{ e.preventDefault(); camRad=Math.max(60,Math.min(ARENA*2.4, camRad*(1+Math.sign(e.deltaY)*0.08))); updateCam(); },{passive:false});
+
+/* ===================== Çiz modu ===================== */
+let drawMode=false;
+function setDraw(on){ drawMode=on; document.getElementById('btn-draw').classList.toggle('on',on);
+  document.getElementById('hint').style.borderColor = on?'#39d3c7':''; if(on) flashToast('Çiz modu: zemine tıkla'); }
+
+/* ===================== UI bağlama ===================== */
+function setRunUI(on){ document.getElementById('btn-run').style.display=on?'none':'';
+  document.getElementById('btn-stop').style.display=on?'':'none'; }
+document.getElementById('btn-run').onclick=()=>{ ensureAudio(); runProgram(getCode()); };
+document.getElementById('btn-stop').onclick=()=>{ stopProgramExt(); };
+document.getElementById('btn-reset').onclick=()=>{ stopProgramExt(); resetRobot(); };
+document.getElementById('btn-addobs').onclick=()=>addObstacle();
+document.getElementById('btn-delobs').onclick=deleteSelected;
+document.getElementById('btn-clearobs').onclick=clearObstacles;
+document.getElementById('btn-turn').onclick=()=>{ bot.yaw+=Math.PI/4; applyBotTransform(); };
+document.getElementById('btn-cam').onclick=resetCam;
+document.getElementById('btn-draw').onclick=()=>setDraw(!drawMode);
+document.getElementById('btn-cleartrack').onclick=()=>{ trackPts=[]; rebuildTrack(); document.getElementById('sel-track').value='none'; };
+document.getElementById('sel-track').onchange=e=>{ setDraw(false); trackPreset(e.target.value); };
+
+/* ===================== Kod kaynağı (tek başına editör) ===================== */
+function getCode(){ if(EMBED) return externalCode; return document.getElementById('ta').value; }
+let externalCode='';
+function botLog(m){ const c=document.getElementById('con'); if(c){ c.textContent+=m+'\n'; c.scrollTop=c.scrollHeight; }
+  post({type:'rx:log', msg:m}); }
+const EXAMPLES={
+  line:
+`// Çizgi takip — 2 çizgi sensörü (siyah çizgi = 1)
+while(true){
+  let sol = await bot.digital(26);
+  let sag = await bot.digital(27);
+  if(sol===1 && sag===0){          // sola kaçtı → sola dön
+    await bot.motor("1",25,"forward");
+    await bot.motor("2",65,"forward");
+  } else if(sol===0 && sag===1){   // sağa kaçtı → sağa dön
+    await bot.motor("1",65,"forward");
+    await bot.motor("2",25,"forward");
+  } else {                          // düz
+    await bot.motor("1",55,"forward");
+    await bot.motor("2",55,"forward");
+  }
+  await bot.frame();
+}`,
+  avoid:
+`// Engelden kaç + 10 cm'den yakınsa buzzer
+while(true){
+  let d = await bot.distance(3,2);   // ön sensör (trig=3, echo=2)
+  if(d < 12){
+    await bot.motorStopAll();
+    await bot.tone(20, 880, 200);    // buzzer öt
+    await bot.wait(200);
+    await bot.motor("1",55,"backward");
+    await bot.motor("2",55,"backward");
+    await bot.wait(450);
+    await bot.motor("1",60,"forward"); // sağa dön
+    await bot.motor("2",60,"backward");
+    await bot.wait(420);
+  } else {
+    await bot.motor("1",70,"forward");
+    await bot.motor("2",70,"forward");
+  }
+  await bot.frame();
+}`,
+  square:
+`// Kare çiz (ileri + 90° dön ×4)
+for(let i=0;i<4;i++){
+  await bot.motor("1",60,"forward");
+  await bot.motor("2",60,"forward");
+  await bot.wait(900);
+  await bot.motor("1",55,"forward");   // yerinde dön
+  await bot.motor("2",55,"backward");
+  await bot.wait(360);
+}
+await bot.motorStopAll();`
+};
+document.querySelectorAll('[data-ex]').forEach(b=>b.onclick=()=>{ document.getElementById('ta').value=EXAMPLES[b.dataset.ex]; });
+
+/* ===================== postMessage köprüsü ===================== */
+function post(o){ o.source=TAG; parent && parent.postMessage(o,'*'); }
+window.addEventListener('message',ev=>{
+  const d=ev.data; if(!d||typeof d!=='object') return;
+  switch(d.type){
+    case 'rx:run': externalCode=d.code||''; ensureAudio(); runProgram(externalCode); break;
+    case 'rx:stop': stopProgramExt(); break;
+    case 'rx:reset': stopProgramExt(); resetRobot(); break;
+    case 'rx:setConfig': if(d.config){ config=Object.assign({},config,d.config);
+      if(d.config.us) config.us=Object.assign({},config.us,d.config.us);
+      if(d.config.line) config.line=Object.assign({},config.line,d.config.line); } break;
+    case 'rx:setTrack': setDraw(false); trackPreset(d.preset); break;
+    case 'rx:clearTrack': trackPts=[]; rebuildTrack(); break;
+    case 'rx:drawMode': setDraw(!!d.on); break;
+    case 'rx:addObstacle': addObstacle(d.x,d.z); break;
+    case 'rx:clearObstacles': clearObstacles(); break;
+    case 'rx:setPot': config.potValue=Number(d.value)||0; break;
+  }
+});
+
+/* ===================== Toast ===================== */
+let toastT=null;
+function flashToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1400); }
+
+/* ===================== Başlangıç ===================== */
+if(EMBED){ document.getElementById('code').classList.add('hidden');
+  document.getElementById('btn-run').style.display='none';
+  document.getElementById('hint').textContent='Bloklarla kod yaz, panelden ▶ Çalıştır. Robotu/engeli sürükle.'; }
+else { document.getElementById('ta').value=EXAMPLES.line; }
+trackPreset('oval');
+addObstacle(30,20); addObstacle(-10,-40); selectObs(null);
+
+/* ===================== Ana döngü ===================== */
+const clock=new THREE.Clock();
+function loop(){
+  let dt=clock.getDelta(); if(dt>0.05) dt=0.05;
+  stepPhysics(dt);
+  updateSensors();
+  hudT+=dt; if(hudT>0.05){ hudT=0; updateHUD(); updateObsLabels();
+    post({type:'rx:sensors', d:{...bot.usDist}, line:{...bot.lineVal}, lineAnalog:{...bot.lineAnalog},
+      motors:{l:Math.round(bot._vL/MAX_CMS*100), r:Math.round(bot._vR/MAX_CMS*100)}, running:bot.running}); }
+  renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+window.addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+post({type:'rx:ready'});
+loop();
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityRail } from './components/ActivityRail';
 import { BlocklyWorkspace, type BlocklyWorkspaceHandle } from './components/BlocklyWorkspace';
 import { ClassroomPanel } from './components/ClassroomPanel';
@@ -10,6 +10,9 @@ import { SerialMonitor, type SerialLine, type LineKind } from './components/Seri
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
 import { RobotArmPanel, type RobotArmHandle } from './components/RobotArmPanel';
+import { RoboBotPanel } from './components/RoboBotPanel';
+import * as Blockly from 'blockly';
+import { generateSimCode } from './robobot/sim-generator';
 import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
@@ -179,6 +182,20 @@ export default function App() {
   const [robotArmOpen, setRobotArmOpen] = useState(false);
   const [robotArmFullscreen, setRobotArmFullscreen] = useState(false);
   const robotArmRef = useRef<RobotArmHandle>(null);
+  // ====== RoboBOT (diferansiyel sürüş) simülasyonu ======
+  const [roboBotOpen, setRoboBotOpen] = useState(false);
+  const [roboBotFullscreen, setRoboBotFullscreen] = useState(false);
+  // Bloklardan üretilen simülasyon JS'i. App seviyesinde tutulur ki tam ekran
+  // modunda blok çalışma alanı unmount olsa bile son üretilen kod korunur.
+  const [roboBotSimCode, setRoboBotSimCode] = useState('');
+  const refreshSimCode = useCallback(() => {
+    try {
+      const ws = Blockly.getMainWorkspace();
+      if (ws) setRoboBotSimCode(generateSimCode(ws as Blockly.Workspace));
+    } catch { /* yoksay */ }
+  }, []);
+  // Panel açıldığında (blok çalışma alanı henüz canlıyken) kodu bir kez üret.
+  useEffect(() => { if (roboBotOpen) refreshSimCode(); }, [roboBotOpen, refreshSimCode]);
   // Donanım galerisi — varsayılan AÇIK, kullanıcı kapatabilir
   const [lines, setLines] = useState<SerialLine[]>([]);
 
@@ -1389,8 +1406,10 @@ export default function App() {
         }}
         onSensorPanel={() => setSensorPanelOpen(true)}
         onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
-        onRobotArm={() => setRobotArmOpen((o) => !o)}
+        onRobotArm={() => { setRobotArmOpen((o) => !o); setRoboBotOpen(false); setRoboBotFullscreen(false); }}
         robotArmActive={robotArmOpen}
+        onRoboBot={() => { setRoboBotOpen((o) => !o); setRobotArmOpen(false); setRobotArmFullscreen(false); }}
+        roboBotActive={roboBotOpen}
         themeId={themeId}
         onToggleLight={toggleLight}
         lastSavedText={lastSavedText}
@@ -1452,17 +1471,17 @@ export default function App() {
       <main className="main-content" data-monitor-open={monitorOpen}>
         <div
           className="workspace-area"
-          data-arm-open={robotArmOpen ? 'true' : 'false'}
-          data-arm-full={robotArmOpen && robotArmFullscreen ? 'true' : 'false'}
+          data-arm-open={(robotArmOpen || roboBotOpen) ? 'true' : 'false'}
+          data-arm-full={((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) ? 'true' : 'false'}
         >
-          {!(robotArmOpen && robotArmFullscreen) && (
+          {!((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) && (
           <div className="workspace-main-col">
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
               <div className="workspace-blocks">
                 <BlocklyWorkspace
                   ref={blocklyRef}
-                  onCodeChange={setGeneratedCode}
+                  onCodeChange={(py) => { setGeneratedCode(py); if (roboBotOpen) refreshSimCode(); }}
                   onUserEdit={handleBlocklyEdit}
                   theme={theme}
                   onCursorMove={currentWorkspaceUserId ? (x, y) => cursorBroadcasterRef.current?.setCursor(x, y) : undefined}
@@ -1513,6 +1532,15 @@ export default function App() {
               fullscreen={robotArmFullscreen}
               onToggleFullscreen={() => setRobotArmFullscreen((f) => !f)}
               onClose={() => { setRobotArmOpen(false); setRobotArmFullscreen(false); }}
+            />
+          )}
+
+          {roboBotOpen && (
+            <RoboBotPanel
+              simCode={roboBotSimCode}
+              fullscreen={roboBotFullscreen}
+              onToggleFullscreen={() => setRoboBotFullscreen((f) => !f)}
+              onClose={() => { setRoboBotOpen(false); setRoboBotFullscreen(false); }}
             />
           )}
         </div>
