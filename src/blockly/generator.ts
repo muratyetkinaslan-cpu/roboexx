@@ -297,6 +297,11 @@ pythonGenerator.forBlock['rx_map'] = function (block, generator) {
   return [`rx_map(${value}, ${fromLow}, ${fromHigh}, ${toLow}, ${toHigh})`, Order.FUNCTION_CALL];
 };
 
+pythonGenerator.forBlock['rx_abs'] = function (block, generator) {
+  const value = generator.valueToCode(block, 'VALUE', Order.NONE) || '0';
+  return [`abs(${value})`, Order.FUNCTION_CALL];
+};
+
 // ====================================================================
 // OLED KAYAN YAZI + RESİM
 // ====================================================================

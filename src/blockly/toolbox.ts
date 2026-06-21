@@ -74,6 +74,9 @@ export const toolboxXml = `
       <value name="TO_LOW"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
       <value name="TO_HIGH"><shadow type="math_number"><field name="NUM">255</field></shadow></value>
     </block>
+    <block type="rx_abs">
+      <value name="VALUE"><shadow type="math_number"><field name="NUM">-7</field></shadow></value>
+    </block>
   </category>
 
   <category name="Metin" categorystyle="text_category">

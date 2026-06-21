@@ -560,6 +560,18 @@ Blockly.Blocks['rx_map'] = {
   },
 };
 
+Blockly.Blocks['rx_abs'] = {
+  init: function (this: Blockly.Block) {
+    this.appendValueInput('VALUE').setCheck('Number')
+      .appendField(icon(ICONS.abs))
+      .appendField('mutlak değer');
+    this.setStyle('math_blocks');
+    this.setOutput(true, 'Number');
+    this.setInputsInline(true);
+    this.setTooltip('Bir sayının mutlak değerini (işaretsiz, her zaman pozitif hâli) verir. Örn: |-7| = 7. Python abs() fonksiyonu.');
+  },
+};
+
 // ====================================================================
 // OLED EKRAN (SSD1306 128x64 I2C)
 // ====================================================================
