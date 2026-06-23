@@ -42,6 +42,17 @@ const topItems: RailItem[] = [
       </svg>
     ),
   },
+  {
+    id: 'guide',
+    label: 'Montaj Rehberi',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M4 5a2 2 0 012-2h5v18H6a2 2 0 01-2-2V5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M20 5a2 2 0 00-2-2h-5v18h5a2 2 0 002-2V5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M16 8l2 2-2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
 ];
 
 interface Props {

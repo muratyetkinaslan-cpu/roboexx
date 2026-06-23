@@ -11,6 +11,7 @@ import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
 import { RobotArmPanel, type RobotArmHandle } from './components/RobotArmPanel';
 import { RoboBotPanel } from './components/RoboBotPanel';
+import { AssemblyGuide } from './components/AssemblyGuide';
 import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
@@ -180,6 +181,8 @@ export default function App() {
   const [robotArmOpen, setRobotArmOpen] = useState(false);
   const [robotArmFullscreen, setRobotArmFullscreen] = useState(false);
   const robotArmRef = useRef<RobotArmHandle>(null);
+  // ====== Montaj rehberi (doc) ======
+  const [guideOpen, setGuideOpen] = useState(false);
   // ====== RoboBOT (diferansiyel sürüş) simülasyonu ======
   const [roboBotOpen, setRoboBotOpen] = useState(false);
   const [roboBotFullscreen, setRoboBotFullscreen] = useState(false);
@@ -1325,6 +1328,10 @@ export default function App() {
   const handleClearSerial = () => setLines([]);
 
   const handleRailSelect = (id: string) => {
+    if (id === 'guide') {
+      setGuideOpen((o) => !o);
+      return;
+    }
     if (id === 'projects' || id === 'classroom') {
       setActivePanel((p) => (p === id ? null : (id as ActivePanel)));
       return;
@@ -1410,7 +1417,7 @@ export default function App() {
       <ActivityRail
         active={activeRail}
         onSelect={handleRailSelect}
-        highlighted={activePanel ? [activePanel] : []}
+        highlighted={[...(activePanel ? [activePanel] : []), ...(guideOpen ? ['guide'] : [])]}
         badges={{
           projects: projects.length || undefined,
           classroom: liveShareActive ? presenceState.totalCount : undefined,
@@ -1535,6 +1542,18 @@ export default function App() {
             />
           )}
         </div>
+
+        {guideOpen && (
+          <AssemblyGuide
+            onClose={() => setGuideOpen(false)}
+            onOpenSimulation={() => {
+              setGuideOpen(false);
+              setRobotArmOpen(true);
+              setRoboBotOpen(false);
+              setRoboBotFullscreen(false);
+            }}
+          />
+        )}
 
         <SerialMonitor
           open={monitorOpen}
