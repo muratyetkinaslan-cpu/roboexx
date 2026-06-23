@@ -474,55 +474,68 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     }
   });
 
-  // ===== Montaj rehberi modu (assembly) — parçaları sırayla kur + vida yerlerini işaretle =====
+  // ===== Montaj rehberi modu (assembly) — parçaları GERÇEK sırayla kur + vida yerleri =====
+  // Alttan üste gerçek montaj sırası:
+  //  object_id_7 taban · MG90S_v6 taban dönüş motoru(2 vida) · object_id_8 üst kapak
+  //  · MG996R kol motoru(yatay 4 vida) · object_id_6 üst kol · Servo üst MG90S/dirsek(2 vida)
+  //  · object_id_5/3/4 ön kol · Servo (1) gripper motoru(2 vida) · object_id_1/2 kıskaç
   var _rxaMarks=[];
-  var RXA_ORDER=['base','j1','j2','j3','grip'];
-  // Her adım: hangi gruplar görünür (show), hangisi vurgulu (hi), hangi parçaya vida (servo), kamera (view)
+  var RXA_ALL=['object_id_7','MG90S_v6','object_id_8','MG996R','object_id_6','Servo',
+               'object_id_5','object_id_3','object_id_4','Servo (1)','object_id_1','object_id_2'];
+  // upto: bu indekse kadar olan parçalar görünür · hi: vurgulanan parçalar
+  // screw:[parçaAdı, adet] · view: kamera
   var RXA_STEPS={
-    base:     {show:['base','j1'],                  hi:'j1',   servo:'MG996R',    view:'top'},
-    shoulder: {show:['base','j1','j2'],             hi:'j2',   servo:'Servo',     view:'front'},
-    elbow:    {show:['base','j1','j2','j3'],        hi:'j3',   servo:'Servo (1)', view:'iso'},
-    gripper:  {show:['base','j1','j2','j3','grip'], hi:'grip', servo:null,        view:'side'},
-    full:     {show:['base','j1','j2','j3','grip'], hi:null,   servo:null,        view:'iso'}
+    taban:   {upto:1,  hi:['MG90S_v6'],  screw:['MG90S_v6',2],  view:'top'},
+    kapak:   {upto:2,  hi:['object_id_8'],screw:['object_id_8',2],view:'top'},
+    kol:     {upto:3,  hi:['MG996R'],    screw:['MG996R',4],    view:'front'},
+    dirsek:  {upto:5,  hi:['Servo'],     screw:['Servo',2],     view:'iso'},
+    gripper: {upto:11, hi:['Servo (1)','object_id_1','object_id_2'], screw:['Servo (1)',2], view:'side'},
+    full:    {upto:11, hi:[],            screw:null,            view:'all'}
   };
   function _rxaClear(){ _rxaMarks.forEach(function(o){ if(o.parent) o.parent.remove(o); }); _rxaMarks=[]; }
-  function _rxaMark(p,color){
-    var g=new THREE.Group();
-    var s=new THREE.Mesh(new THREE.SphereGeometry(0.46,16,16),
-      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.9,metalness:.2,roughness:.4}));
-    var ring=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.12,10,26),
-      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.55,metalness:.2,roughness:.5}));
+  function _rxaMark(p){
+    var color=0xff3b3b, g=new THREE.Group();
+    var s=new THREE.Mesh(new THREE.SphereGeometry(0.34,16,16),
+      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.95,metalness:.2,roughness:.4}));
+    var ring=new THREE.Mesh(new THREE.TorusGeometry(0.62,0.10,10,26),
+      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.6,metalness:.2,roughness:.5}));
     ring.rotation.x=Math.PI/2;
     g.add(s); g.add(ring); g.position.copy(p);
-    g.renderOrder=10; scene.add(g); _rxaMarks.push(g); return g;
+    g.renderOrder=20; scene.add(g); _rxaMarks.push(g); return g;
   }
-  function _rxaScrewsFor(name,color){
+  // Servonun montaj kulaklarına göre vida işaretleri: 2 = uzun eksen uçları, 4 = köşeler
+  function _rxaScrews(name,count){
     var m=root.getObjectByName(name); if(!m) return;
     var box=new THREE.Box3().setFromObject(m);
-    var pad=0.34, topY=box.max.y-(box.max.y-box.min.y)*0.12;
-    [[box.min.x-pad,box.min.z-pad],[box.max.x+pad,box.min.z-pad],
-     [box.min.x-pad,box.max.z+pad],[box.max.x+pad,box.max.z+pad]].forEach(function(xz){
-      _rxaMark(new THREE.Vector3(xz[0],topY,xz[1]),color);
-    });
+    var dx=box.max.x-box.min.x, dz=box.max.z-box.min.z;
+    var cx=(box.min.x+box.max.x)/2, cz=(box.min.z+box.max.z)/2;
+    var topY=box.max.y-(box.max.y-box.min.y)*0.16, pad=0.22, pts=[];
+    if(count<=2){
+      if(dx>=dz) pts=[[box.min.x-pad,cz],[box.max.x+pad,cz]];
+      else       pts=[[cx,box.min.z-pad],[cx,box.max.z+pad]];
+    } else {
+      pts=[[box.min.x-pad,box.min.z-pad],[box.max.x+pad,box.min.z-pad],
+           [box.min.x-pad,box.max.z+pad],[box.max.x+pad,box.max.z+pad]];
+    }
+    pts.forEach(function(xz){ _rxaMark(new THREE.Vector3(xz[0],topY,xz[1])); });
   }
-  function _rxaGripMarks(color){
-    ['object_id_1','object_id_2'].forEach(function(n){
-      var m=root.getObjectByName(n); if(!m) return;
-      var box=new THREE.Box3().setFromObject(m);
-      _rxaMark(box.getCenter(new THREE.Vector3()),color);
-    });
+  function _rxaView(v,hiName){
+    var cx=0, ty=H*0.5, cz=0, vs=H*1.6;
+    if(hiName){ var m=root.getObjectByName(hiName); if(m){ var b=new THREE.Box3().setFromObject(m);
+      cx=(b.min.x+b.max.x)/2; ty=(b.min.y+b.max.y)/2; cz=(b.min.z+b.max.z)/2;
+      var dmax=Math.max(b.max.x-b.min.x, b.max.y-b.min.y, b.max.z-b.min.z);
+      vs=dmax*2.6; if(vs<7) vs=7;   // parçaya yakınlaş
+    }}
+    target.set(cx,ty,cz);
+    if(v==='top'){      theta=Math.PI/6;  phi=0.42;  }
+    else if(v==='front'){theta=0.0001;     phi=1.26;  }
+    else if(v==='side'){ theta=Math.PI/2;  phi=1.10;  }
+    else if(v==='all'){  theta=Math.PI/4;  phi=0.955; vs=H*1.6; target.set(0,H*0.5,0); }  // tüm kol
+    else {               theta=Math.PI/4;  phi=0.955; }   // iso (parçaya zoom)
+    viewSize=vs; updateOrtho(); cam();
   }
-  function _rxaView(v,step){
-    var ty = (step==='base')? H*0.30 : (step==='shoulder')? H*0.42 : (step==='elbow')? H*0.60 : H*0.66;
-    target.set(0,ty,0);
-    if(v==='top'){ theta=0.0001; phi=0.20; }
-    else if(v==='front'){ theta=0.0001; phi=1.30; }
-    else if(v==='side'){ theta=Math.PI/2; phi=1.18; }
-    else { theta=Math.PI/4; phi=0.955; }   // iso
-    cam();
-  }
-  function rxAssembly(step){
-    var cfg=RXA_STEPS[step]||RXA_STEPS.base;
+  function rxAssembly(stepKey){
+    var cfg=RXA_STEPS[stepKey]||RXA_STEPS.taban;
     document.body.classList.add('rxa');
     demoOn=false; pickOn=false; repeatOn=false;
     try{ stopAll(); }catch(e){}
@@ -530,29 +543,30 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     try{ cube.visible=false; }catch(e){}
     [90,90,90,82].forEach(function(a,i){ setA(i,a); }); apply();
     scene.updateMatrixWorld(true);
-    RXA_ORDER.forEach(function(g){
-      var show=cfg.show.indexOf(g)>=0, hi=(g===cfg.hi), dim=show && cfg.hi!=null && !hi;
-      byGroup[g].forEach(function(mesh){
-        mesh.visible=show;
-        if(mesh.material){
-          mesh.material.transparent=dim; mesh.material.opacity=dim?0.38:1;
-          if(mesh.material.emissive){ mesh.material.emissive.setHex(hi?0xff8a3d:0x000000); mesh.material.emissiveIntensity=hi?0.42:0; }
-        }
-      });
+    var dimOn = cfg.hi && cfg.hi.length>0;
+    RXA_ALL.forEach(function(name,idx){
+      var m=root.getObjectByName(name); if(!m) return;
+      var show=idx<=cfg.upto, hi=cfg.hi && cfg.hi.indexOf(name)>=0;
+      m.visible=show;
+      if(m.material){
+        var dim=show && dimOn && !hi;
+        m.material.transparent=dim; m.material.opacity=dim?0.4:1;
+        if(m.material.emissive){ m.material.emissive.setHex(hi?0xff8a3d:0x000000); m.material.emissiveIntensity=hi?0.45:0; }
+      }
     });
     _rxaClear();
-    if(cfg.servo) _rxaScrewsFor(cfg.servo,0xff3b3b);
-    else if(step==='gripper') _rxaGripMarks(0xff3b3b);
-    _rxaView(cfg.view, step);
+    if(cfg.screw) _rxaScrews(cfg.screw[0],cfg.screw[1]);
+    _rxaView(cfg.view, cfg.hi && cfg.hi[0]);
   }
   function rxAssemblyOff(){
     document.body.classList.remove('rxa');
     _rxaClear();
-    RXA_ORDER.forEach(function(g){ byGroup[g].forEach(function(mesh){
-      mesh.visible=true;
-      if(mesh.material){ mesh.material.transparent=false; mesh.material.opacity=1;
-        if(mesh.material.emissive){ mesh.material.emissive.setHex(0x000000); mesh.material.emissiveIntensity=0; } }
-    }); });
+    RXA_ALL.forEach(function(name){ var m=root.getObjectByName(name); if(!m) return;
+      m.visible=true;
+      if(m.material){ m.material.transparent=false; m.material.opacity=1;
+        if(m.material.emissive){ m.material.emissive.setHex(0x000000); m.material.emissiveIntensity=0; } }
+    });
+    viewSize=H*1.7; updateOrtho();
     try{ cube.visible=true; }catch(e){}
   }
 
