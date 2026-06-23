@@ -35,6 +35,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}button.on{background
 #info h3{color:var(--txt);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px}#info b{color:var(--accent)}
 #hint{position:absolute;top:14px;right:18px;font-size:11px;color:var(--dim);text-align:right;line-height:1.6}
 @media (max-width:780px){#info,#hint{display:none}#panel{left:10px;right:10px;bottom:10px;width:auto}}
+body.rxa .ui{display:none!important}
 </style></head><body><div id="app">
 <div class="ui" id="head"><div class="logo">Robo<span>GPT</span></div>
 <div class="tag">Robot Kol · rig v2 · ~19.0 cm</div></div>
@@ -473,6 +474,88 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     }
   });
 
+  // ===== Montaj rehberi modu (assembly) — parçaları sırayla kur + vida yerlerini işaretle =====
+  var _rxaMarks=[];
+  var RXA_ORDER=['base','j1','j2','j3','grip'];
+  // Her adım: hangi gruplar görünür (show), hangisi vurgulu (hi), hangi parçaya vida (servo), kamera (view)
+  var RXA_STEPS={
+    base:     {show:['base','j1'],                  hi:'j1',   servo:'MG996R',    view:'top'},
+    shoulder: {show:['base','j1','j2'],             hi:'j2',   servo:'Servo',     view:'front'},
+    elbow:    {show:['base','j1','j2','j3'],        hi:'j3',   servo:'Servo (1)', view:'iso'},
+    gripper:  {show:['base','j1','j2','j3','grip'], hi:'grip', servo:null,        view:'side'},
+    full:     {show:['base','j1','j2','j3','grip'], hi:null,   servo:null,        view:'iso'}
+  };
+  function _rxaClear(){ _rxaMarks.forEach(function(o){ if(o.parent) o.parent.remove(o); }); _rxaMarks=[]; }
+  function _rxaMark(p,color){
+    var g=new THREE.Group();
+    var s=new THREE.Mesh(new THREE.SphereGeometry(0.46,16,16),
+      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.9,metalness:.2,roughness:.4}));
+    var ring=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.12,10,26),
+      new THREE.MeshStandardMaterial({color:color,emissive:color,emissiveIntensity:0.55,metalness:.2,roughness:.5}));
+    ring.rotation.x=Math.PI/2;
+    g.add(s); g.add(ring); g.position.copy(p);
+    g.renderOrder=10; scene.add(g); _rxaMarks.push(g); return g;
+  }
+  function _rxaScrewsFor(name,color){
+    var m=root.getObjectByName(name); if(!m) return;
+    var box=new THREE.Box3().setFromObject(m);
+    var pad=0.34, topY=box.max.y-(box.max.y-box.min.y)*0.12;
+    [[box.min.x-pad,box.min.z-pad],[box.max.x+pad,box.min.z-pad],
+     [box.min.x-pad,box.max.z+pad],[box.max.x+pad,box.max.z+pad]].forEach(function(xz){
+      _rxaMark(new THREE.Vector3(xz[0],topY,xz[1]),color);
+    });
+  }
+  function _rxaGripMarks(color){
+    ['object_id_1','object_id_2'].forEach(function(n){
+      var m=root.getObjectByName(n); if(!m) return;
+      var box=new THREE.Box3().setFromObject(m);
+      _rxaMark(box.getCenter(new THREE.Vector3()),color);
+    });
+  }
+  function _rxaView(v,step){
+    var ty = (step==='base')? H*0.30 : (step==='shoulder')? H*0.42 : (step==='elbow')? H*0.60 : H*0.66;
+    target.set(0,ty,0);
+    if(v==='top'){ theta=0.0001; phi=0.20; }
+    else if(v==='front'){ theta=0.0001; phi=1.30; }
+    else if(v==='side'){ theta=Math.PI/2; phi=1.18; }
+    else { theta=Math.PI/4; phi=0.955; }   // iso
+    cam();
+  }
+  function rxAssembly(step){
+    var cfg=RXA_STEPS[step]||RXA_STEPS.base;
+    document.body.classList.add('rxa');
+    demoOn=false; pickOn=false; repeatOn=false;
+    try{ stopAll(); }catch(e){}
+    try{ setMode('free'); }catch(e){}
+    try{ cube.visible=false; }catch(e){}
+    [90,90,90,82].forEach(function(a,i){ setA(i,a); }); apply();
+    scene.updateMatrixWorld(true);
+    RXA_ORDER.forEach(function(g){
+      var show=cfg.show.indexOf(g)>=0, hi=(g===cfg.hi), dim=show && cfg.hi!=null && !hi;
+      byGroup[g].forEach(function(mesh){
+        mesh.visible=show;
+        if(mesh.material){
+          mesh.material.transparent=dim; mesh.material.opacity=dim?0.38:1;
+          if(mesh.material.emissive){ mesh.material.emissive.setHex(hi?0xff8a3d:0x000000); mesh.material.emissiveIntensity=hi?0.42:0; }
+        }
+      });
+    });
+    _rxaClear();
+    if(cfg.servo) _rxaScrewsFor(cfg.servo,0xff3b3b);
+    else if(step==='gripper') _rxaGripMarks(0xff3b3b);
+    _rxaView(cfg.view, step);
+  }
+  function rxAssemblyOff(){
+    document.body.classList.remove('rxa');
+    _rxaClear();
+    RXA_ORDER.forEach(function(g){ byGroup[g].forEach(function(mesh){
+      mesh.visible=true;
+      if(mesh.material){ mesh.material.transparent=false; mesh.material.opacity=1;
+        if(mesh.material.emissive){ mesh.material.emissive.setHex(0x000000); mesh.material.emissiveIntensity=0; } }
+    }); });
+    try{ cube.visible=true; }catch(e){}
+  }
+
   // --- Parent → sim komutları (gerçek→sim yansıtma, ev, sıfırla, goto) ---
   window.addEventListener('message', (ev)=>{
     const d=ev.data;
@@ -528,6 +611,13 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
         break;
       case 'rx:highlight':
         highlight(d.name || null);
+        break;
+      case 'rx:assembly':
+        if(d.off || d.step==='off'){ rxAssemblyOff(); }
+        else { rxAssembly(d.step||'base'); }
+        break;
+      case 'rx:assemblyOff':
+        rxAssemblyOff();
         break;
       case 'rx:ping':
         post('rx:ready', { angles: angles.slice() });

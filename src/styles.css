@@ -5796,6 +5796,60 @@ g.blocklyDraggable > path:first-of-type {
   top: 0;
 }
 .guide-art-wrap svg { width: 100%; height: 100%; max-height: 300px; }
+
+/* 3D model iframe (gerçek montaj görünümü) */
+.guide-art-3d {
+  padding: 0;
+  overflow: hidden;
+  min-height: 340px;
+  background: #0c0f14;
+}
+.guide-sim-iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 340px;
+  border: 0;
+  display: block;
+  border-radius: 13px;
+}
+.guide-sim-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--rx-text-dim);
+  background: #0c0f14;
+  border-radius: 13px;
+}
+.guide-spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--rx-border);
+  border-top-color: var(--rx-accent);
+  border-radius: 50%;
+  animation: guide-spin 0.8s linear infinite;
+}
+@keyframes guide-spin { to { transform: rotate(360deg); } }
+.guide-sim-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--rx-text-dim);
+  background: rgba(12, 15, 20, 0.82);
+  border: 1px solid var(--rx-border);
+  border-radius: 999px;
+  padding: 4px 11px;
+  backdrop-filter: blur(4px);
+}
+.guide-sim-hint svg { color: var(--rx-text-muted); }
 .guide-art-badge {
   position: absolute;
   top: 12px;
