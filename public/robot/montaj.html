@@ -21,7 +21,7 @@ canvas{display:block}
 <div id="app">
   <div id="loading"><div class="spin"></div>3D model yükleniyor…</div>
   <div id="hud"></div>
-  <div id="legend"><span><b style="background:#ff6a1a"></b>takılacak vida/mil</span><span><b style="background:#161616;border:1px solid #555"></b>motor</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
+  <div id="legend"><span><b style="background:#d9a878"></b>takılacak vida/mil</span><span><b style="background:#161616;border:1px solid #555"></b>motor</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
 </div>
 <script src="three.min.js"></script>
 <script>
@@ -153,9 +153,15 @@ canvas{display:block}
       }
       if(isCur) hiItems.push(it);
     });
-    // kamera: bu adımın parçalarına çerçevele (full ise tüm kol)
-    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; }
-    else frame(hiItems, 2.2);
+    // kamera: bu adımın parçalarına çerçevele
+    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; theta=Math.PI*0.24; phi=1.0; }
+    else {
+      frame(hiItems, 2.4);
+      // adıma göre yön: vidanın takılma ekseni ekranda NET (yatay/dikey) görünsün
+      var ax = _anim.length ? _anim[0].axis : null;
+      if(ax && Math.abs(ax.y)>0.5){ theta=Math.PI*0.25; phi=1.14; }   // y (taban): önden, yukarı/aşağı net
+      else { theta=Math.PI*0.46; phi=1.06; }                          // z: yandan, içeri/dışarı yatay net
+    }
     // HUD
     var hud=document.getElementById('hud');
     hud.innerHTML = full ? 'Tüm kol' : ('Adım: <span>'+(STAGE_TR[step]||step)+'</span>');
