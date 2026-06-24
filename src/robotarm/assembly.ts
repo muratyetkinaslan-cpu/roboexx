@@ -3,7 +3,7 @@
  *
  * Adımlar GERÇEK vidalı 3D modele (ROBOARM_v1.3mf → montaj.html) bağlıdır.
  * Viewer her adımda o aşamanın parçalarını gösterir, motorları SİYAH çizer,
- * o adımda takılacak gerçek vidaları KIRMIZI yakar; vidalar yanıp sönerek
+ * o adımda takılacak gerçek vidaları parlayan yakar; vidalar yanıp sönerek
  * ve takılma yönünde girip çıkarak nereye takılacağını gösterir (animasyon).
  *
  * Sıra: taban → döner gövde+ana motor → kol aparatı → dirsek motoru →
@@ -41,7 +41,7 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     steps: [
       'Taban silindirini düz bir masaya koy; 4 köşe kulağından masaya sabitle.',
       'Siyah taban motorunu (MG90S) yuvasına yerleştir.',
-      'KIRMIZI yanıp sönen 2 vidayı, gösterdikleri yere tak.',
+      'parlayan 2 vidayı, gösterdikleri yere tak.',
     ],
     parts: ['Taban', 'Taban motoru (siyah)', '2× kırmızı vida'],
     tip: 'Motoru takmadan önce 90°’ye getir; taban her iki yöne eşit döner.',
@@ -55,7 +55,7 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     steps: [
       'Döner gövdeyi taban motorunun üstüne otur.',
       'Siyah ana motoru (MG996R) gövdeye yerleştir.',
-      'KIRMIZI yanan 4 köşe vidasını tak — ortaya vida gelmez, yalnız 4 köşe.',
+      'parlayan 4 köşe vidasını tak — ortaya vida gelmez, yalnız 4 köşe.',
     ],
     parts: ['Döner gövde', 'Ana motor (siyah)', '4× köşe vidası'],
     tip: 'Sadece 4 köşeyi vidala; merkez deliği boş kalır (oraya kol aparatı gelecek).',
@@ -67,7 +67,7 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     model: 'kol',
     steps: [
       'Kol aparatını ana motorun miline/horn’una geçir; motor 90°’deyken kol dik bakmalı.',
-      'KIRMIZI yanan merkez vidasını aparatın üstünden tak.',
+      'parlayan merkez vidasını aparatın üstünden tak.',
       'Kolu elinle kaldırıp indirerek serbest hareket ettiğini kontrol et.',
     ],
     parts: ['Kol aparatı', '1× merkez vida'],
@@ -80,7 +80,7 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     model: 'dirsek_motor',
     steps: [
       'Siyah dirsek motorunu (MG90S) kolun ucundaki yuvaya yerleştir.',
-      'KIRMIZI yanan vidalarla motoru sabitle.',
+      'parlayan vidalarla motoru sabitle.',
       'Motoru hareket ettirmeden önce 90°’ye getir.',
     ],
     parts: ['Dirsek motoru (siyah)', 'Kırmızı vidalar'],
@@ -93,7 +93,7 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     model: 'dirsek_aparat',
     steps: [
       'Dirsek aparatını (ön kol) motorun horn’una bağla.',
-      'KIRMIZI yanan vidayla aparatı sabitle.',
+      'parlayan vidayla aparatı sabitle.',
       'Dirseği elinle açıp kapatarak takılma olmadığını kontrol et.',
     ],
     parts: ['Dirsek aparatı', 'Kırmızı vida'],
@@ -102,28 +102,28 @@ const ROBOARM_STEPS: AssemblyStep[] = [
   {
     short: 'Gripper Motoru',
     title: 'Gripper motorunu tak',
-    subtitle: 'Önce gripper motorunu gövdesine vidalarıyla tak.',
+    subtitle: 'Gripper motorunu gövdeye 2 vidayla tak; ortadaki yuvarlak yere mil (silindir) girer.',
     model: 'gripper_motor',
     steps: [
-      'Siyah gripper motorunu (MG90S) ön kolun ucundaki gövdeye yerleştir.',
-      'KIRMIZI yanan vidalarla motoru sabitle.',
-      'Motoru 90°’ye getir (kıskaç yarı açık konum).',
+      'Siyah gripper motorunu (MG90S) gövdesine yerleştir.',
+      'Parlayan 2 vidayla motoru sabitle (ortaya vida gelmez).',
+      'Ortadaki yuvarlak yuvaya mili (silindir şaft) tak — burası vida değildir.',
     ],
-    parts: ['Gripper motoru (siyah)', 'Kırmızı vidalar'],
-    tip: 'Bu adımda sadece motor; kıskaç aparatı bir sonraki adımda gelir.',
+    parts: ['Gripper motoru (siyah)', '2× vida', 'Mil (silindir)'],
+    tip: 'Ortadaki yuvarlak boşluğa vida değil, silindir mil girer; kıskaç bir sonraki adımda buraya oturur.',
   },
   {
     short: 'Gripper Kıskacı',
-    title: 'Tutma aparatını (kıskaç) tak',
-    subtitle: 'Motor takıldıktan sonra kıskaç parmaklarını/aparatını tak.',
+    title: 'Kıskacı (aparatı) tak',
+    subtitle: 'Kıskacı motora oturt ve ortasından tek vidayla sabitle.',
     model: 'gripper_aparat',
     steps: [
-      'Kıskaç parmaklarını dişlilere geçir; bir parmak horn’a, diğeri pivota oturur.',
-      'KIRMIZI yanan vidayla kıskacı sabitle.',
+      'Kıskaç parmaklarını/aparatını motorun miline (ortaya) oturt.',
+      'Parlayan merkez vidasını ortadan tak — gripper böylece servoya bağlanır.',
       'Kıskacı elle açıp kapatarak temiz kavradığını kontrol et.',
     ],
-    parts: ['Kıskaç aparatı', 'Kırmızı vida'],
-    tip: '90° = yarı açık; böylece açma/kapama için eşit hareket alanı olur.',
+    parts: ['Kıskaç aparatı', '1× merkez vida'],
+    tip: 'Önce kıskacı mile otur, sonra ortadaki tek vidayı sık.',
   },
   {
     short: 'Hazır — Dene',

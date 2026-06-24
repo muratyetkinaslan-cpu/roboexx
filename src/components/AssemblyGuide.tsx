@@ -94,7 +94,9 @@ function KitSelect({ onPick }: { onPick: (id: string) => void }) {
             onClick={() => !k.comingSoon && onPick(k.id)}
             disabled={k.comingSoon}
           >
-            <div className="guide-kit-art">{k.id === 'roboarm' ? <ArtRoboArmHero /> : <ArtRoboBotHero />}</div>
+            <div className="guide-kit-art">{k.id === 'roboarm'
+              ? <img src="/robot/roboarm.png" alt="RoboARM" className="guide-kit-photo" />
+              : <ArtRoboBotHero />}</div>
             <div className="guide-kit-meta">
               <div className="guide-kit-card-name">{k.name}</div>
               <div className="guide-kit-tag">{k.tagline}</div>

@@ -21,7 +21,7 @@ canvas{display:block}
 <div id="app">
   <div id="loading"><div class="spin"></div>3D model yükleniyor…</div>
   <div id="hud"></div>
-  <div id="legend"><span><b style="background:#ff3b3b"></b>vida yeri</span><span><b style="background:#1a1a1a;border:1px solid #555"></b>motor</span><span><b style="background:#ff8a3d"></b>bu adım</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
+  <div id="legend"><span><b style="background:#ff6a1a"></b>takılacak vida/mil</span><span><b style="background:#161616;border:1px solid #555"></b>motor</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
 </div>
 <script src="three.min.js"></script>
 <script>
@@ -56,7 +56,21 @@ canvas{display:block}
   var MODEL=null, HEIGHT=15;
 
   function buildMesh(p){
-    var home=new THREE.Vector3(0,0,0), positions;
+    var home=new THREE.Vector3(0,0,0), mat, m;
+    if(p.mil){
+      // MİL = silindir şaft (vida değil), kendi ekseninde yönlendirilir
+      home.set(p.c[0],p.c[1],p.c[2]);
+      var gg=new THREE.CylinderGeometry(0.28,0.28,2.0,18);
+      mat=new THREE.MeshStandardMaterial({color:p.color,metalness:0.9,roughness:0.28});
+      m=new THREE.Mesh(gg,mat); m.castShadow=true; m.position.copy(home);
+      var ax=new THREE.Vector3(p.axis?p.axis[0]:0,p.axis?p.axis[1]:1,p.axis?p.axis[2]:0).normalize();
+      var q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),ax);
+      m.quaternion.copy(q); root.add(m);
+      META.push({mesh:m,screw:false,mil:true,motor:false,stage:p.stage,bb:p.bb,baseColor:p.color,mat:mat,
+        home:home,baseQuat:q.clone(),axis:ax});
+      return;
+    }
+    var positions;
     if(p.screw){
       home.set(p.c[0],p.c[1],p.c[2]);
       positions=new Float32Array(p.pos.length);
@@ -66,9 +80,11 @@ canvas{display:block}
     g.setAttribute('position', new THREE.BufferAttribute(positions,3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(p.idx),1));
     g.computeVertexNormals();
-    var mat=new THREE.MeshStandardMaterial({color:p.color, metalness:p.screw?0.7:(p.motor?0.45:0.3), roughness:p.screw?0.35:(p.motor?0.5:0.6)});
-    var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.position.copy(home); root.add(m);
-    META.push({mesh:m, screw:p.screw, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
+    mat=new THREE.MeshStandardMaterial({color:p.color,
+      metalness:p.screw?0.95:(p.motor?0.5:0.35),
+      roughness:p.screw?0.25:(p.motor?0.55:0.6)});
+    m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.position.copy(home); root.add(m);
+    META.push({mesh:m, screw:p.screw, mil:false, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
       home:home, axis:(p.axis? new THREE.Vector3(p.axis[0],p.axis[1],p.axis[2]).normalize() : new THREE.Vector3(0,1,0))});
   }
 
@@ -121,15 +137,18 @@ canvas{display:block}
       var show = si<=cur;
       var isCur = !full && si===cur;
       it.mesh.visible=show;
-      if(it.screw){ it.mesh.position.copy(it.home); it.mesh.quaternion.identity(); }   // animasyon sıfırla
       var mat=it.mesh.material;
-      if(it.screw){
-        if(isCur){ mat.color.setHex(0xff3b3b); mat.emissive.setHex(0xff3b3b); mat.emissiveIntensity=0.85; mat.opacity=1; mat.transparent=false; _anim.push(it); }
-        else { mat.color.setHex(0x70757c); mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.5; mat.transparent=true; }
+      if(it.screw || it.mil){
+        // takılacak parça (vida/mil): yuvasına sıfırla
+        it.mesh.position.copy(it.home);
+        if(it.mil && it.baseQuat) it.mesh.quaternion.copy(it.baseQuat); else it.mesh.quaternion.identity();
+        mat.color.setHex(it.baseColor);   // gerçek çelik rengi
+        if(isCur){ mat.emissive.setHex(0xff6a1a); mat.emissiveIntensity=0.7; mat.opacity=1; mat.transparent=false; _anim.push(it); }
+        else { mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.55; mat.transparent=true; }
       } else {
         mat.color.setHex(it.baseColor);
         if(full){ mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=1; mat.transparent=false; }
-        else if(isCur){ mat.emissive.setHex(0xff8a3d); mat.emissiveIntensity=it.motor?0.16:0.28; mat.opacity=1; mat.transparent=false; }
+        else if(isCur){ mat.emissive.setHex(0xff8a3d); mat.emissiveIntensity=it.motor?0.18:0.3; mat.opacity=1; mat.transparent=false; }
         else { mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.32; mat.transparent=true; }
       }
       if(isCur) hiItems.push(it);
@@ -171,13 +190,12 @@ canvas{display:block}
   (function loop(){
     requestAnimationFrame(loop);
     var t=performance.now()/1000;
-    // vida animasyonu: TEK eksende girip çıkar (taban=yukarı/aşağı, diğerleri=öne/arka),
-    // sıkıyormuş gibi döner ve yanıp söner
+    // takılacak vida/mil: yuvasından DIŞARI çıkıp girer (içeri batmaz), yanıp söner
     for(var i=0;i<_anim.length;i++){
-      var a=_anim[i], s=Math.sin(t*2.2), amp=0.45;
-      a.mesh.position.copy(a.home).addScaledVector(a.axis, s*amp);
-      a.mesh.setRotationFromAxisAngle(a.axis, t*5.0);
-      a.mat.emissiveIntensity = 0.5 + 0.55*(0.5+0.5*Math.sin(t*6.0));
+      var a=_anim[i], outFrac=(0.5+0.5*Math.sin(t*2.4)), amp=0.5;
+      a.mesh.position.copy(a.home).addScaledVector(a.axis, -outFrac*amp);  // - = dışarı
+      if(a.screw) a.mesh.setRotationFromAxisAngle(a.axis, t*3.0);          // vida sıkma dönüşü (mil dönmez)
+      a.mat.emissiveIntensity = 0.45 + 0.5*(0.5+0.5*Math.sin(t*5.0));
     }
     cam(); renderer.render(scene,camera);
   })();
