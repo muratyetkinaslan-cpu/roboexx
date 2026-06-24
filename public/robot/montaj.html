@@ -20,7 +20,7 @@ canvas{display:block}
 <div id="app">
   <div id="loading"><div class="spin"></div>3D model yükleniyor…</div>
   <div id="hud"></div>
-  <div id="legend"><span><b style="background:#ff3b3b"></b>vida yeri</span><span><b style="background:#ff8a3d"></b>bu adım</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
+  <div id="legend"><span><b style="background:#ff3b3b"></b>vida yeri</span><span><b style="background:#1a1a1a;border:1px solid #555"></b>motor</span><span><b style="background:#ff8a3d"></b>bu adım</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
 </div>
 <script src="three.min.js"></script>
 <script>
@@ -56,9 +56,11 @@ canvas{display:block}
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(p.pos),3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(p.idx),1));
     g.computeVertexNormals();
-    var mat=new THREE.MeshStandardMaterial({color:p.color, metalness:p.screw?0.7:0.3, roughness:p.screw?0.35:0.6});
+    var mat=new THREE.MeshStandardMaterial({color:p.color,
+      metalness:p.screw?0.7:(p.motor?0.45:0.3),
+      roughness:p.screw?0.35:(p.motor?0.5:0.6)});
     var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; root.add(m);
-    META.push({mesh:m, screw:p.screw, stage:p.stage, bb:p.bb, baseColor:p.color});
+    META.push({mesh:m, screw:p.screw, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color});
   }
 
   // ---- spherical orbit camera ----
@@ -117,7 +119,7 @@ canvas{display:block}
       } else {
         mat.color.setHex(it.baseColor);
         if(full){ mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=1; mat.transparent=false; }
-        else if(isCur){ mat.emissive.setHex(0xff8a3d); mat.emissiveIntensity=0.28; mat.opacity=1; mat.transparent=false; }
+        else if(isCur){ mat.emissive.setHex(0xff8a3d); mat.emissiveIntensity=it.motor?0.16:0.28; mat.opacity=1; mat.transparent=false; }
         else { mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.32; mat.transparent=true; }
       }
       if(isCur) hiItems.push(it);

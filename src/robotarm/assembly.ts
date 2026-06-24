@@ -32,17 +32,18 @@ export interface AssemblyKit {
 
 const ROBOARM_STEPS: AssemblyStep[] = [
   {
-    short: 'Taban',
-    title: 'Tabanı yerleştir',
-    subtitle: 'Kolun oturacağı tabanı zemine sabitle.',
+    short: 'Taban + Taban Motoru',
+    title: 'Taban ve taban motoru (MG90S)',
+    subtitle: 'Tabanı sabitle, tabanı döndürecek MG90S motoru 2 kırmızı vidayla tak.',
     model: 'taban',
     steps: [
-      'Taban silindirini düz bir masaya koy.',
-      'Tabanın etrafındaki 4 köşe kulağından, deliklerden vida ile masaya/plakaya sabitle.',
+      'Taban silindirini düz bir masaya koy; etrafındaki 4 köşe kulağından masaya/plakaya sabitle.',
+      'Taban motorunu (MG90S, siyah) yuvasına yerleştir.',
+      'Modelde KIRMIZI yanan 2 vidayla motoru tabana sabitle.',
       'Üstteki döner tablanın elinle serbestçe döndüğünü kontrol et.',
     ],
-    parts: ['Taban', 'Döner tabla', '4× köşe vidası'],
-    tip: 'Taban sağlam sabitlenmezse kol hareket ederken sallanır — 4 köşeyi de sıkıştır.',
+    parts: ['Taban', 'Taban motoru (MG90S)', '2× kırmızı vida'],
+    tip: 'Motoru takmadan önce 90°’ye getir; böylece taban her iki yöne eşit döner.',
     warn: 'Vidaları aşırı sıkma; baskılı parça çatlayabilir.',
   },
   {
