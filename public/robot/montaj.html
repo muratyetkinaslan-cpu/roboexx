@@ -76,7 +76,7 @@ canvas{display:block}
   }
 
   // ---- spherical orbit camera ----
-  var radius=34, theta=Math.PI*0.24, phi=1.0, target=new THREE.Vector3(0,7,0);
+  var radius=34, theta=Math.PI*0.78, phi=1.04, target=new THREE.Vector3(0,7,0);
   function cam(){
     camera.position.set(
       target.x+radius*Math.sin(phi)*Math.sin(theta),
@@ -141,10 +141,10 @@ canvas{display:block}
       if(isCur) hiItems.push(it);
     });
     // kamera: bu adımın parçalarına çerçevele — doğal ön-3/4 açı (vidalar gerçek eksende girer)
-    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; theta=Math.PI*0.26; phi=1.02; }
+    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; theta=Math.PI*0.78; phi=1.04; }
     else {
       frame(hiItems, 2.4);
-      theta=Math.PI*0.26; phi=1.02;
+      theta=Math.PI*0.78; phi=1.04;
     }
     // HUD
     var hud=document.getElementById('hud');
@@ -182,7 +182,7 @@ canvas{display:block}
     var t=performance.now()/1000;
     // takılacak vida/mil: yuvasından DIŞARI çıkıp oturur (asla içeri batmaz), yanıp söner. DÖNMEZ.
     for(var i=0;i<_anim.length;i++){
-      var a=_anim[i], outFrac=(0.5+0.5*Math.sin(t*2.4)), amp=0.6;
+      var a=_anim[i], outFrac=(0.5+0.5*Math.sin(t*2.4)), amp=0.38;
       a.mesh.position.copy(a.home).addScaledVector(a.axis, outFrac*amp);   // axis = dışa yön
       a.mat.emissiveIntensity = 0.45 + 0.5*(0.5+0.5*Math.sin(t*5.0));
     }
