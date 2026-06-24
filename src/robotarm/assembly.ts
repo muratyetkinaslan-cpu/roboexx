@@ -1,14 +1,20 @@
 /**
  * RoboARM montaj rehberi verisi — yalnızca MEKANİK montaj (elektronik yok).
  *
- * Adımlar GERÇEK vidalı 3D modele (ROBOT_KOL_v.3mf → montaj.html) bağlıdır.
- * Her adımda viewer o aşamanın parçalarını gösterir, o aşamada takılacak
- * gerçek vidaları KIRMIZI yakar ve kamerayı o bölgeye çerçeveler.
+ * Adımlar GERÇEK vidalı 3D modele (ROBOARM_v1.3mf → montaj.html) bağlıdır.
+ * Viewer her adımda o aşamanın parçalarını gösterir, motorları SİYAH çizer,
+ * o adımda takılacak gerçek vidaları KIRMIZI yakar; vidalar yanıp sönerek
+ * ve takılma yönünde girip çıkarak nereye takılacağını gösterir (animasyon).
  *
- * Sıra (alttan üste): taban → döner gövde + ana motor → kol → dirsek → gripper.
+ * Sıra: taban → döner gövde+ana motor → kol aparatı → dirsek motoru →
+ *       dirsek aparatı → gripper motoru → gripper kıskacı.
  */
 
-export type ArmModelStep = 'taban' | 'govde' | 'kol' | 'dirsek' | 'gripper' | 'full';
+export type ArmModelStep =
+  | 'taban' | 'govde' | 'kol'
+  | 'dirsek_motor' | 'dirsek_aparat'
+  | 'gripper_motor' | 'gripper_aparat'
+  | 'full';
 
 export interface AssemblyStep {
   short: string;
@@ -22,89 +28,110 @@ export interface AssemblyStep {
 }
 
 export interface AssemblyKit {
-  id: string;
-  name: string;
-  tagline: string;
-  description: string;
-  steps: AssemblyStep[];
-  comingSoon?: boolean;
+  id: string; name: string; tagline: string; description: string;
+  steps: AssemblyStep[]; comingSoon?: boolean;
 }
 
 const ROBOARM_STEPS: AssemblyStep[] = [
   {
-    short: 'Taban + Taban Motoru',
+    short: 'Taban + Motor',
     title: 'Taban ve taban motoru (MG90S)',
-    subtitle: 'Tabanı sabitle, tabanı döndürecek MG90S motoru 2 kırmızı vidayla tak.',
+    subtitle: 'Tabanı sabitle, tabanı döndürecek siyah motoru 2 kırmızı vidayla tak.',
     model: 'taban',
     steps: [
-      'Taban silindirini düz bir masaya koy; etrafındaki 4 köşe kulağından masaya/plakaya sabitle.',
-      'Taban motorunu (MG90S, siyah) yuvasına yerleştir.',
-      'Modelde KIRMIZI yanan 2 vidayla motoru tabana sabitle.',
-      'Üstteki döner tablanın elinle serbestçe döndüğünü kontrol et.',
+      'Taban silindirini düz bir masaya koy; 4 köşe kulağından masaya sabitle.',
+      'Siyah taban motorunu (MG90S) yuvasına yerleştir.',
+      'KIRMIZI yanıp sönen 2 vidayı, gösterdikleri yere tak.',
     ],
-    parts: ['Taban', 'Taban motoru (MG90S)', '2× kırmızı vida'],
-    tip: 'Motoru takmadan önce 90°’ye getir; böylece taban her iki yöne eşit döner.',
+    parts: ['Taban', 'Taban motoru (siyah)', '2× kırmızı vida'],
+    tip: 'Motoru takmadan önce 90°’ye getir; taban her iki yöne eşit döner.',
     warn: 'Vidaları aşırı sıkma; baskılı parça çatlayabilir.',
   },
   {
     short: 'Gövde + Ana Motor',
-    title: 'Döner gövde ve ana motor',
-    subtitle: 'Ana servoyu/braketi döner gövdeye kırmızı işaretli vidalarla tak.',
+    title: 'Döner gövde ve ana motor (MG996R)',
+    subtitle: 'Ana motoru döner gövdeye 4 köşe vidasıyla sabitle (ortaya vida yok).',
     model: 'govde',
     steps: [
-      'Servoyu 90°’ye getir (horn’u takmadan önce), sonra braketi döner gövdeye otur.',
-      'Modelde KIRMIZI yanan vidaları sırayla tak — ana motor braketi bu vidalarla tutturulur.',
-      'Servo milinin/horn’un tam oturduğundan emin ol.',
+      'Döner gövdeyi taban motorunun üstüne otur.',
+      'Siyah ana motoru (MG996R) gövdeye yerleştir.',
+      'KIRMIZI yanan 4 köşe vidasını tak — ortaya vida gelmez, yalnız 4 köşe.',
     ],
-    parts: ['Ana motor (servo)', 'Braket', 'Kırmızı vidalar'],
-    tip: 'Kırmızı işaretli her deliğe bir vida gelir; hepsini takmadan sonraki adıma geçme.',
+    parts: ['Döner gövde', 'Ana motor (siyah)', '4× köşe vidası'],
+    tip: 'Sadece 4 köşeyi vidala; merkez deliği boş kalır (oraya kol aparatı gelecek).',
   },
   {
-    short: 'Kol',
-    title: 'Kolu tak',
-    subtitle: 'Kol linkini ana motorun miline/horn’una geçir.',
+    short: 'Kol Aparatı',
+    title: 'Kol aparatını tak',
+    subtitle: 'Kol aparatını ana motorun üstüne otur, ortadan tek vidayla sabitle.',
     model: 'kol',
     steps: [
-      'Kol linkini servo horn’una geçir; servo 90°’deyken kol dik bakmalı.',
-      'Horn’un merkez vidasıyla kolu mile sabitle.',
-      'Kolu elinle hafifçe kaldırıp indirerek serbest hareket ettiğini kontrol et.',
+      'Kol aparatını ana motorun miline/horn’una geçir; motor 90°’deyken kol dik bakmalı.',
+      'KIRMIZI yanan merkez vidasını aparatın üstünden tak.',
+      'Kolu elinle kaldırıp indirerek serbest hareket ettiğini kontrol et.',
     ],
-    parts: ['Kol linki', 'Horn merkez vidası'],
-    tip: 'Kolu 90°’de dik tak; böylece ileri ve geri eşit hareket alanın olur.',
+    parts: ['Kol aparatı', '1× merkez vida'],
+    tip: 'Önce aparatı tam otur, sonra üstündeki tek vidayı sık.',
   },
   {
     short: 'Dirsek Motoru',
     title: 'Dirsek motorunu tak',
-    subtitle: 'Kolun ucundaki dirsek servosunu kırmızı vidalarla sabitle.',
-    model: 'dirsek',
+    subtitle: 'Önce dirsek motorunu yerine vidalarıyla tak.',
+    model: 'dirsek_motor',
     steps: [
-      'Dirsek servosunu kolun ucundaki yuvaya yerleştir.',
-      'Modelde KIRMIZI yanan vidalarla servoyu sabitle.',
-      'Ön kolu dirsek horn’una bağla ve elinle açıp kapatarak takılma olmadığını kontrol et.',
+      'Siyah dirsek motorunu (MG90S) kolun ucundaki yuvaya yerleştir.',
+      'KIRMIZI yanan vidalarla motoru sabitle.',
+      'Motoru hareket ettirmeden önce 90°’ye getir.',
     ],
-    parts: ['Dirsek servosu', 'Kırmızı vidalar', 'Ön kol'],
-    tip: 'Dirsek zorlanıyorsa horn’u bir diş kaydırarak yeniden tak.',
+    parts: ['Dirsek motoru (siyah)', 'Kırmızı vidalar'],
+    tip: 'Bu adımda sadece motor takılır; aparat bir sonraki adımda gelir.',
   },
   {
-    short: 'Gripper',
-    title: 'Gripper ve kıskaç',
-    subtitle: 'Ön kolun ucuna gripper servosunu kırmızı vidalarla tak, kıskacı kur.',
-    model: 'gripper',
+    short: 'Dirsek Aparatı',
+    title: 'Dirsek aparatını tak',
+    subtitle: 'Motor yerine oturduktan sonra dirsek aparatını/ön kolu tak.',
+    model: 'dirsek_aparat',
     steps: [
-      'Gripper servosunu ön kolun ucuna, KIRMIZI yanan vidalarla monte et.',
-      'Kıskaç parmaklarını dişlilere geçir; bir parmak horn’a, diğeri pivot vidasına oturur.',
-      'Servo 90°’deyken kıskaç yarı açık olmalı; horn’u bu konumda tak.',
+      'Dirsek aparatını (ön kol) motorun horn’una bağla.',
+      'KIRMIZI yanan vidayla aparatı sabitle.',
+      'Dirseği elinle açıp kapatarak takılma olmadığını kontrol et.',
     ],
-    parts: ['Gripper servosu', 'Kırmızı vidalar', 'Kıskaç'],
-    tip: '90° = yarı açık takarsan açma/kapama için eşit hareket alanın olur.',
+    parts: ['Dirsek aparatı', 'Kırmızı vida'],
+    tip: 'Aparat zorlanıyorsa horn’u bir diş kaydırarak yeniden tak.',
+  },
+  {
+    short: 'Gripper Motoru',
+    title: 'Gripper motorunu tak',
+    subtitle: 'Önce gripper motorunu gövdesine vidalarıyla tak.',
+    model: 'gripper_motor',
+    steps: [
+      'Siyah gripper motorunu (MG90S) ön kolun ucundaki gövdeye yerleştir.',
+      'KIRMIZI yanan vidalarla motoru sabitle.',
+      'Motoru 90°’ye getir (kıskaç yarı açık konum).',
+    ],
+    parts: ['Gripper motoru (siyah)', 'Kırmızı vidalar'],
+    tip: 'Bu adımda sadece motor; kıskaç aparatı bir sonraki adımda gelir.',
+  },
+  {
+    short: 'Gripper Kıskacı',
+    title: 'Tutma aparatını (kıskaç) tak',
+    subtitle: 'Motor takıldıktan sonra kıskaç parmaklarını/aparatını tak.',
+    model: 'gripper_aparat',
+    steps: [
+      'Kıskaç parmaklarını dişlilere geçir; bir parmak horn’a, diğeri pivota oturur.',
+      'KIRMIZI yanan vidayla kıskacı sabitle.',
+      'Kıskacı elle açıp kapatarak temiz kavradığını kontrol et.',
+    ],
+    parts: ['Kıskaç aparatı', 'Kırmızı vida'],
+    tip: '90° = yarı açık; böylece açma/kapama için eşit hareket alanı olur.',
   },
   {
     short: 'Hazır — Dene',
     title: 'Kol tamam — simülasyona geç',
-    subtitle: 'Montaj bitti. Tüm kolu döndürerek incele, sonra blok/IK ile dene.',
+    subtitle: 'Montaj bitti. Tüm kolu döndürerek incele, sonra dene.',
     model: 'full',
     steps: [
-      'Tüm kolu modelde döndürerek incele — taban, gövde, kol, dirsek, gripper yerinde.',
+      'Tüm kolu modelde döndürerek incele — her parça yerinde.',
       '“Simülasyonu Aç ve Dene” ile kontrol paneline geç.',
       '“Tıkla-Git (IK)” ile bir noktaya tıkla; Pico bağlıysa gerçek kol da gider.',
       'Bloklarla program yaz veya “Küpü Al ve Tut” ile kavrama dene.',
@@ -116,20 +143,15 @@ const ROBOARM_STEPS: AssemblyStep[] = [
 
 export const ASSEMBLY_KITS: AssemblyKit[] = [
   {
-    id: 'roboarm',
-    name: 'RoboARM',
-    tagline: '4 Eksen · Servo Kontrollü',
+    id: 'roboarm', name: 'RoboARM', tagline: '4 Eksen · Servo Kontrollü',
     description:
-      'Taban, gövde, kol, dirsek ve gripper olmak üzere 4 eksenli masaüstü robot kol. Gerçek vidalı 3D model üzerinde sırayla kur, sonra simülasyonla dene.',
+      'Taban, gövde, kol, dirsek ve gripper olmak üzere 4 eksenli masaüstü robot kol. Gerçek vidalı 3D model üzerinde adım adım kur (motorlar siyah, vidalar kırmızı yanıp söner), sonra simülasyonla dene.',
     steps: ROBOARM_STEPS,
   },
   {
-    id: 'robobot',
-    name: 'RoboBOT',
-    tagline: 'Çift Motor · Sürüş',
+    id: 'robobot', name: 'RoboBOT', tagline: 'Çift Motor · Sürüş',
     description: 'Diferansiyel sürüşlü robot araç kiti. Montaj rehberi yakında.',
-    steps: [],
-    comingSoon: true,
+    steps: [], comingSoon: true,
   },
 ];
 

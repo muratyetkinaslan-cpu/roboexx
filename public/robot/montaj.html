@@ -25,8 +25,11 @@ canvas{display:block}
 <script src="three.min.js"></script>
 <script>
 (function(){
-  var ORDER=['taban','govde','kol','dirsek','gripper'];
-  var STAGE_TR={taban:'Taban',govde:'Döner gövde + ana motor',kol:'Kol',dirsek:'Dirsek motoru',gripper:'Gripper'};
+  var ORDER=['taban','govde','kol','dirsek_motor','dirsek_aparat','gripper_motor','gripper_aparat'];
+  var STAGE_TR={taban:'Taban + taban motoru',govde:'Döner gövde + ana motor',kol:'Kol aparatı',
+                dirsek_motor:'Dirsek motoru',dirsek_aparat:'Dirsek aparatı',
+                gripper_motor:'Gripper motoru',gripper_aparat:'Gripper kıskacı'};
+  var _anim=[];   // o adımda animasyonlu (yanıp sönen, girip çıkan) vidalar
   function post(type,extra){ try{ parent.postMessage(Object.assign({type:type,source:'roboexx-arm'},extra||{}),'*'); }catch(e){} }
 
   var scene=new THREE.Scene(); scene.background=new THREE.Color(0x0c0f14);
@@ -60,7 +63,8 @@ canvas{display:block}
       metalness:p.screw?0.7:(p.motor?0.45:0.3),
       roughness:p.screw?0.35:(p.motor?0.5:0.6)});
     var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; root.add(m);
-    META.push({mesh:m, screw:p.screw, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color});
+    META.push({mesh:m, screw:p.screw, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
+      axis: (p.axis? new THREE.Vector3(p.axis[0],p.axis[1],p.axis[2]) : new THREE.Vector3(0,1,0))});
   }
 
   // ---- spherical orbit camera ----
@@ -106,15 +110,16 @@ canvas{display:block}
     var cur = full? ORDER.length-1 : ORDER.indexOf(step);
     if(cur<0) cur=0;
     var hiItems=[];
+    _anim=[];
     META.forEach(function(it){
       var si=ORDER.indexOf(it.stage);
       var show = si<=cur;
       var isCur = !full && si===cur;
       it.mesh.visible=show;
+      if(it.screw) it.mesh.position.set(0,0,0);   // animasyon ofsetini sıfırla
       var mat=it.mesh.material;
       if(it.screw){
-        // bu adımın vidaları kırmızı + parlak; eski vidalar sönük; sonrakiler gizli
-        if(isCur){ mat.color.setHex(0xff3b3b); mat.emissive.setHex(0xff3b3b); mat.emissiveIntensity=0.85; mat.opacity=1; mat.transparent=false; }
+        if(isCur){ mat.color.setHex(0xff3b3b); mat.emissive.setHex(0xff3b3b); mat.emissiveIntensity=0.85; mat.opacity=1; mat.transparent=false; _anim.push(it); }
         else { mat.color.setHex(0x70757c); mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.5; mat.transparent=true; }
       } else {
         mat.color.setHex(it.baseColor);
@@ -144,10 +149,11 @@ canvas{display:block}
   // ---- yükle ----
   fetch('arm3mf.json').then(function(r){return r.json();}).then(function(model){
     MODEL=model;
+    if(model.order) ORDER=model.order;
     model.parts.forEach(buildMesh);
     var allbb=unionBB(META); HEIGHT=allbb[3]-allbb[2];
     document.getElementById('loading').style.display='none';
-    applyStep('taban');
+    applyStep(ORDER[0]);
     post('rx:ready',{});
   }).catch(function(e){
     document.getElementById('loading').textContent='Model yüklenemedi: '+e;
@@ -157,7 +163,17 @@ canvas{display:block}
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(innerWidth,innerHeight);
   });
-  (function loop(){ requestAnimationFrame(loop); cam(); renderer.render(scene,camera); })();
+  (function loop(){
+    requestAnimationFrame(loop);
+    var t=performance.now()/1000;
+    // vida animasyonu: ekseninde girip çıkar + yanıp söner
+    for(var i=0;i<_anim.length;i++){
+      var a=_anim[i], s=Math.sin(t*3.0), amp=0.55;
+      a.mesh.position.set(a.axis.x*s*amp, a.axis.y*s*amp, a.axis.z*s*amp);
+      a.mat.emissiveIntensity = 0.45 + 0.6*(0.5+0.5*Math.sin(t*6.0));
+    }
+    cam(); renderer.render(scene,camera);
+  })();
 })();
 </script>
 </body></html>
