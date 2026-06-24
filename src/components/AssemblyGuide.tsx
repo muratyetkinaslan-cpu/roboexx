@@ -7,7 +7,7 @@ interface Props {
   onOpenSimulation: () => void;
 }
 
-const SIM_URL = '/robot/arm-sim.html';
+const SIM_URL = '/robot/montaj.html';
 
 type View = { kind: 'select' } | { kind: 'steps'; kitId: string; index: number };
 
@@ -202,13 +202,6 @@ function StepView({
               }}
             />
             {!simReady && <div className="guide-sim-loading"><span className="guide-spinner" />3D model yükleniyor…</div>}
-            <span className="guide-sim-hint">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2v3M8 11v3M2 8h3M11 8h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                <circle cx="8" cy="8" r="2.4" stroke="currentColor" strokeWidth="1.4" />
-              </svg>
-              Döndürmek için sürükle · <b style={{ color: '#ff3b3b' }}>●</b> kırmızı = vida yeri
-            </span>
           </div>
 
           <div className="guide-stepbody">

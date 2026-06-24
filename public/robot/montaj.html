@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="tr"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoboARM — Montaj</title>
+<style>
+:root{--bg:#0c0f14;--txt:#e8edf4;--dim:#8b97a8;--accent:#ff8a3d;--red:#ff3b3b;--line:#2a323f;}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);font-family:system-ui,'Segoe UI',sans-serif}
+#app{position:relative;width:100vw;height:100vh}
+canvas{display:block}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--dim);font-size:13px;background:var(--bg);z-index:5}
+.spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+#legend{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;font-size:11px;color:var(--dim);background:rgba(12,15,20,.7);border:1px solid var(--line);border-radius:8px;padding:6px 11px;backdrop-filter:blur(4px);pointer-events:none}
+#legend b{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+#hud{position:absolute;left:14px;top:12px;font-size:12px;color:var(--dim);background:rgba(12,15,20,.7);border:1px solid var(--line);border-radius:8px;padding:5px 11px;backdrop-filter:blur(4px);pointer-events:none}
+#hud span{color:var(--accent);font-weight:700}
+</style></head>
+<body>
+<div id="app">
+  <div id="loading"><div class="spin"></div>3D model yükleniyor…</div>
+  <div id="hud"></div>
+  <div id="legend"><span><b style="background:#ff3b3b"></b>vida yeri</span><span><b style="background:#ff8a3d"></b>bu adım</span><span>Sürükle: döndür · Tekerlek: yakınlaş</span></div>
+</div>
+<script src="three.min.js"></script>
+<script>
+(function(){
+  var ORDER=['taban','govde','kol','dirsek','gripper'];
+  var STAGE_TR={taban:'Taban',govde:'Döner gövde + ana motor',kol:'Kol',dirsek:'Dirsek motoru',gripper:'Gripper'};
+  function post(type,extra){ try{ parent.postMessage(Object.assign({type:type,source:'roboexx-arm'},extra||{}),'*'); }catch(e){} }
+
+  var scene=new THREE.Scene(); scene.background=new THREE.Color(0x0c0f14);
+  var camera=new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 2000);
+  var renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  document.getElementById('app').appendChild(renderer.domElement);
+
+  scene.add(new THREE.HemisphereLight(0x9fb6d6,0x141820,0.85));
+  var key=new THREE.DirectionalLight(0xffffff,1.05); key.position.set(20,34,18);
+  key.castShadow=true; key.shadow.mapSize.set(2048,2048);
+  var d=30; Object.assign(key.shadow.camera,{near:1,far:120,left:-d,right:d,top:d,bottom:-d}); scene.add(key);
+  var rim=new THREE.DirectionalLight(0xff8a3d,0.35); rim.position.set(-20,12,-18); scene.add(rim);
+
+  var floor=new THREE.Mesh(new THREE.PlaneGeometry(200,200),
+    new THREE.MeshStandardMaterial({color:0x1b2430,roughness:1}));
+  floor.rotation.x=-Math.PI/2; floor.position.y=-0.05; floor.receiveShadow=true; scene.add(floor);
+  var grid=new THREE.GridHelper(200,100,0x33405a,0x2a3550); grid.position.y=-0.02; scene.add(grid);
+
+  var root=new THREE.Group(); scene.add(root);
+  var META=[]; // {mesh, screw, stage, bb, baseColor}
+  var MODEL=null, HEIGHT=15;
+
+  function buildMesh(p){
+    var g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(p.pos),3));
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(p.idx),1));
+    g.computeVertexNormals();
+    var mat=new THREE.MeshStandardMaterial({color:p.color, metalness:p.screw?0.7:0.3, roughness:p.screw?0.35:0.6});
+    var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; root.add(m);
+    META.push({mesh:m, screw:p.screw, stage:p.stage, bb:p.bb, baseColor:p.color});
+  }
+
+  // ---- spherical orbit camera ----
+  var radius=34, theta=Math.PI*0.78, phi=1.02, target=new THREE.Vector3(0,7,0);
+  function cam(){
+    camera.position.set(
+      target.x+radius*Math.sin(phi)*Math.sin(theta),
+      target.y+radius*Math.cos(phi),
+      target.z+radius*Math.sin(phi)*Math.cos(theta));
+    camera.lookAt(target);
+  }
+  var el=renderer.domElement, drag=false, px=0, py=0;
+  el.addEventListener('pointerdown',function(e){drag=true;px=e.clientX;py=e.clientY;el.setPointerCapture(e.pointerId);});
+  el.addEventListener('pointerup',function(e){drag=false;});
+  el.addEventListener('pointermove',function(e){
+    if(!drag)return; theta-=(e.clientX-px)*0.01; phi-=(e.clientY-py)*0.01;
+    phi=Math.max(0.12,Math.min(Math.PI-0.12,phi)); px=e.clientX; py=e.clientY;
+  });
+  el.addEventListener('wheel',function(e){e.preventDefault(); radius*=(1+Math.sign(e.deltaY)*0.1); radius=Math.max(8,Math.min(120,radius));},{passive:false});
+
+  function unionBB(items){
+    var b=[1e9,-1e9,1e9,-1e9,1e9,-1e9];
+    items.forEach(function(it){var q=it.bb;
+      b[0]=Math.min(b[0],q[0]);b[1]=Math.max(b[1],q[1]);
+      b[2]=Math.min(b[2],q[2]);b[3]=Math.max(b[3],q[3]);
+      b[4]=Math.min(b[4],q[4]);b[5]=Math.max(b[5],q[5]);});
+    return b;
+  }
+  function frame(items,extra){
+    if(!items.length){ target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.4; return; }
+    var b=unionBB(items);
+    target.set((b[0]+b[1])/2,(b[2]+b[3])/2,(b[4]+b[5])/2);
+    var dx=b[1]-b[0],dy=b[3]-b[2],dz=b[5]-b[4];
+    var dmax=Math.max(dx,dy,dz, 3);
+    var fit=(dmax/2)/Math.tan(camera.fov*Math.PI/360);
+    radius=fit*(extra||2.1);
+    radius=Math.max(7,radius);
+  }
+
+  // ---- montaj adımı uygula ----
+  function applyStep(step){
+    var full=(step==='full' || !step);
+    var cur = full? ORDER.length-1 : ORDER.indexOf(step);
+    if(cur<0) cur=0;
+    var hiItems=[];
+    META.forEach(function(it){
+      var si=ORDER.indexOf(it.stage);
+      var show = si<=cur;
+      var isCur = !full && si===cur;
+      it.mesh.visible=show;
+      var mat=it.mesh.material;
+      if(it.screw){
+        // bu adımın vidaları kırmızı + parlak; eski vidalar sönük; sonrakiler gizli
+        if(isCur){ mat.color.setHex(0xff3b3b); mat.emissive.setHex(0xff3b3b); mat.emissiveIntensity=0.85; mat.opacity=1; mat.transparent=false; }
+        else { mat.color.setHex(0x70757c); mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.5; mat.transparent=true; }
+      } else {
+        mat.color.setHex(it.baseColor);
+        if(full){ mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=1; mat.transparent=false; }
+        else if(isCur){ mat.emissive.setHex(0xff8a3d); mat.emissiveIntensity=0.28; mat.opacity=1; mat.transparent=false; }
+        else { mat.emissive.setHex(0x000000); mat.emissiveIntensity=0; mat.opacity=0.32; mat.transparent=true; }
+      }
+      if(isCur) hiItems.push(it);
+    });
+    // kamera: bu adımın parçalarına çerçevele (full ise tüm kol)
+    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; }
+    else frame(hiItems, 2.2);
+    // HUD
+    var hud=document.getElementById('hud');
+    hud.innerHTML = full ? 'Tüm kol' : ('Adım: <span>'+(STAGE_TR[step]||step)+'</span>');
+  }
+
+  // ---- mesajlar ----
+  window.addEventListener('message',function(ev){
+    var d=ev.data;
+    if(!d||typeof d!=='object'||typeof d.type!=='string') return;
+    if(d.type==='rx:assembly'){ applyStep(d.off?'full':(d.step||'taban')); }
+    else if(d.type==='rx:assemblyOff'){ applyStep('full'); }
+    else if(d.type==='rx:ping'){ post('rx:ready',{}); }
+  });
+
+  // ---- yükle ----
+  fetch('arm3mf.json').then(function(r){return r.json();}).then(function(model){
+    MODEL=model;
+    model.parts.forEach(buildMesh);
+    var allbb=unionBB(META); HEIGHT=allbb[3]-allbb[2];
+    document.getElementById('loading').style.display='none';
+    applyStep('taban');
+    post('rx:ready',{});
+  }).catch(function(e){
+    document.getElementById('loading').textContent='Model yüklenemedi: '+e;
+  });
+
+  addEventListener('resize',function(){
+    camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+  (function loop(){ requestAnimationFrame(loop); cam(); renderer.render(scene,camera); })();
+})();
+</script>
+</body></html>
