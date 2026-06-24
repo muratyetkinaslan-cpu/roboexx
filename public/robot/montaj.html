@@ -56,22 +56,9 @@ canvas{display:block}
   var MODEL=null, HEIGHT=15;
 
   function buildMesh(p){
-    var home=new THREE.Vector3(0,0,0), mat, m;
-    if(p.mil){
-      // MİL = silindir şaft (vida değil), kendi ekseninde yönlendirilir
-      home.set(p.c[0],p.c[1],p.c[2]);
-      var gg=new THREE.CylinderGeometry(0.22,0.22,1.8,18);
-      mat=new THREE.MeshStandardMaterial({color:p.color,metalness:0.9,roughness:0.28});
-      m=new THREE.Mesh(gg,mat); m.castShadow=true; m.position.copy(home);
-      var ax=new THREE.Vector3(p.axis?p.axis[0]:0,p.axis?p.axis[1]:1,p.axis?p.axis[2]:0).normalize();
-      var q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),ax);
-      m.quaternion.copy(q); root.add(m);
-      META.push({mesh:m,screw:false,mil:true,motor:false,stage:p.stage,bb:p.bb,baseColor:p.color,mat:mat,
-        home:home,baseQuat:q.clone(),axis:ax});
-      return;
-    }
-    var positions;
-    if(p.screw){
+    var home=new THREE.Vector3(0,0,0), positions;
+    var recenter = p.screw || p.mil;   // vida ve mil: kendi merkezine al (temiz öteleme için)
+    if(recenter){
       home.set(p.c[0],p.c[1],p.c[2]);
       positions=new Float32Array(p.pos.length);
       for(var k=0;k<p.pos.length;k+=3){ positions[k]=p.pos[k]-p.c[0]; positions[k+1]=p.pos[k+1]-p.c[1]; positions[k+2]=p.pos[k+2]-p.c[2]; }
@@ -80,11 +67,11 @@ canvas{display:block}
     g.setAttribute('position', new THREE.BufferAttribute(positions,3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(p.idx),1));
     g.computeVertexNormals();
-    mat=new THREE.MeshStandardMaterial({color:p.color,
-      metalness:p.screw?0.95:(p.motor?0.5:0.35),
-      roughness:p.screw?0.25:(p.motor?0.55:0.6)});
-    m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.position.copy(home); root.add(m);
-    META.push({mesh:m, screw:p.screw, mil:false, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
+    var mat=new THREE.MeshStandardMaterial({color:p.color,
+      metalness:recenter?0.9:(p.motor?0.5:0.35),
+      roughness:recenter?0.3:(p.motor?0.55:0.6)});
+    var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.position.copy(home); root.add(m);
+    META.push({mesh:m, screw:p.screw, mil:!!p.mil, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
       home:home, axis:(p.axis? new THREE.Vector3(p.axis[0],p.axis[1],p.axis[2]).normalize() : new THREE.Vector3(0,1,0))});
   }
 
@@ -153,14 +140,11 @@ canvas{display:block}
       }
       if(isCur) hiItems.push(it);
     });
-    // kamera: bu adımın parçalarına çerçevele
-    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; theta=Math.PI*0.24; phi=1.0; }
+    // kamera: bu adımın parçalarına çerçevele — doğal ön-3/4 açı (vidalar gerçek eksende girer)
+    if(full){ frame([], 1); target.set(0,HEIGHT*0.45,0); radius=HEIGHT*2.5; theta=Math.PI*0.26; phi=1.02; }
     else {
       frame(hiItems, 2.4);
-      // adıma göre yön: vidanın takılma ekseni ekranda NET (yatay/dikey) görünsün
-      var ax = _anim.length ? _anim[0].axis : null;
-      if(ax && Math.abs(ax.y)>0.5){ theta=Math.PI*0.25; phi=1.14; }   // y (taban): önden, yukarı/aşağı net
-      else { theta=Math.PI*0.46; phi=1.06; }                          // z: yandan, içeri/dışarı yatay net
+      theta=Math.PI*0.26; phi=1.02;
     }
     // HUD
     var hud=document.getElementById('hud');

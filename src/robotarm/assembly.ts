@@ -13,7 +13,7 @@
 export type ArmModelStep =
   | 'taban' | 'govde' | 'kol'
   | 'dirsek_motor' | 'dirsek_aparat'
-  | 'gripper_motor' | 'gripper_aparat'
+  | 'gripper_motor' | 'gripper_aparat' | 'gripper_mil'
   | 'full';
 
 export interface AssemblyStep {
@@ -113,17 +113,30 @@ const ROBOARM_STEPS: AssemblyStep[] = [
     tip: 'Bu adımda sadece motoru sabitleyen 2 yan vida takılır.',
   },
   {
-    short: 'Çarklar + Kıskaç',
-    title: 'Çarkları tak (mil + merkez vida)',
-    subtitle: 'Her iki çarkın ortasına: birine mil (silindir), diğerine merkez vida.',
+    short: 'Çarklar (Kıskaç)',
+    title: 'Çarkları tak (merkez vidaları)',
+    subtitle: 'İki kıskaç çarkını birbirine geçir, her birini ortasından bir vidayla sabitle.',
     model: 'gripper_aparat',
     steps: [
       'İki kıskaç çarkını birbirine geçir (dişliler kavraşsın).',
-      'Arka çarkın ortasına mili (silindir şaft) tak.',
-      'Ön çarkın ortasına parlayan merkez vidasını tak — kıskaç böylece tamamlanır.',
+      'Her çarkın tam ortasına (dönme merkezine) parlayan vidayı tak.',
+      'Vidalar çarkları döner şekilde sabitler.',
     ],
-    parts: ['Kıskaç çarkları', 'Mil (silindir)', '1× merkez vida'],
-    tip: 'Mil ve vida her çarkın tam ortasına (dönme merkezine) gelir.',
+    parts: ['Kıskaç çarkları', '2× merkez vida'],
+    tip: 'Vidalar çarkların tam ortasına (eğik girer) gelir; çark serbest dönebilmeli.',
+  },
+  {
+    short: 'Mil (Bileğe Bağla)',
+    title: 'Mili tak — gripper’ı bileğe bağla',
+    subtitle: 'Silindir mili, gripper ile bir önceki bilek parçasının arasına geçir.',
+    model: 'gripper_mil',
+    steps: [
+      'Parlayan silindir mili, gripper gövdesi ile bilek (wrist) parçasının birleştiği yere getir.',
+      'Mili iki parçanın ortak deliğinden geçir — gripper’ı bileğe bağlar.',
+      'Mil yerine oturunca gripper bileğe sabitlenir.',
+    ],
+    parts: ['Mil (silindir şaft)'],
+    tip: 'Mil, gripper aparatını bir önceki bilek parçasına birleştiren bağlantı şaftıdır.',
   },
   {
     short: 'Hazır — Dene',
