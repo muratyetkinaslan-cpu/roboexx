@@ -11,6 +11,7 @@ canvas{display:block}
 #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--dim);font-size:13px;background:var(--bg);z-index:5}
 .spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
+#hud{display:none}
 #legend{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;font-size:11px;color:var(--dim);background:rgba(12,15,20,.7);border:1px solid var(--line);border-radius:8px;padding:6px 11px;backdrop-filter:blur(4px);pointer-events:none}
 #legend b{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
 #hud{position:absolute;left:14px;top:12px;font-size:12px;color:var(--dim);background:rgba(12,15,20,.7);border:1px solid var(--line);border-radius:8px;padding:5px 11px;backdrop-filter:blur(4px);pointer-events:none}
@@ -55,16 +56,20 @@ canvas{display:block}
   var MODEL=null, HEIGHT=15;
 
   function buildMesh(p){
+    var home=new THREE.Vector3(0,0,0), positions;
+    if(p.screw){
+      home.set(p.c[0],p.c[1],p.c[2]);
+      positions=new Float32Array(p.pos.length);
+      for(var k=0;k<p.pos.length;k+=3){ positions[k]=p.pos[k]-p.c[0]; positions[k+1]=p.pos[k+1]-p.c[1]; positions[k+2]=p.pos[k+2]-p.c[2]; }
+    } else { positions=new Float32Array(p.pos); }
     var g=new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(p.pos),3));
+    g.setAttribute('position', new THREE.BufferAttribute(positions,3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(p.idx),1));
     g.computeVertexNormals();
-    var mat=new THREE.MeshStandardMaterial({color:p.color,
-      metalness:p.screw?0.7:(p.motor?0.45:0.3),
-      roughness:p.screw?0.35:(p.motor?0.5:0.6)});
-    var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; root.add(m);
+    var mat=new THREE.MeshStandardMaterial({color:p.color, metalness:p.screw?0.7:(p.motor?0.45:0.3), roughness:p.screw?0.35:(p.motor?0.5:0.6)});
+    var m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.position.copy(home); root.add(m);
     META.push({mesh:m, screw:p.screw, motor:!!p.motor, stage:p.stage, bb:p.bb, baseColor:p.color, mat:mat,
-      axis: (p.axis? new THREE.Vector3(p.axis[0],p.axis[1],p.axis[2]) : new THREE.Vector3(0,1,0))});
+      home:home, axis:(p.axis? new THREE.Vector3(p.axis[0],p.axis[1],p.axis[2]).normalize() : new THREE.Vector3(0,1,0))});
   }
 
   // ---- spherical orbit camera ----
@@ -116,7 +121,7 @@ canvas{display:block}
       var show = si<=cur;
       var isCur = !full && si===cur;
       it.mesh.visible=show;
-      if(it.screw) it.mesh.position.set(0,0,0);   // animasyon ofsetini sıfırla
+      if(it.screw){ it.mesh.position.copy(it.home); it.mesh.quaternion.identity(); }   // animasyon sıfırla
       var mat=it.mesh.material;
       if(it.screw){
         if(isCur){ mat.color.setHex(0xff3b3b); mat.emissive.setHex(0xff3b3b); mat.emissiveIntensity=0.85; mat.opacity=1; mat.transparent=false; _anim.push(it); }
@@ -166,11 +171,13 @@ canvas{display:block}
   (function loop(){
     requestAnimationFrame(loop);
     var t=performance.now()/1000;
-    // vida animasyonu: ekseninde girip çıkar + yanıp söner
+    // vida animasyonu: TEK eksende girip çıkar (taban=yukarı/aşağı, diğerleri=öne/arka),
+    // sıkıyormuş gibi döner ve yanıp söner
     for(var i=0;i<_anim.length;i++){
-      var a=_anim[i], s=Math.sin(t*3.0), amp=0.55;
-      a.mesh.position.set(a.axis.x*s*amp, a.axis.y*s*amp, a.axis.z*s*amp);
-      a.mat.emissiveIntensity = 0.45 + 0.6*(0.5+0.5*Math.sin(t*6.0));
+      var a=_anim[i], s=Math.sin(t*2.2), amp=0.45;
+      a.mesh.position.copy(a.home).addScaledVector(a.axis, s*amp);
+      a.mesh.setRotationFromAxisAngle(a.axis, t*5.0);
+      a.mat.emissiveIntensity = 0.5 + 0.55*(0.5+0.5*Math.sin(t*6.0));
     }
     cam(); renderer.render(scene,camera);
   })();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ASSEMBLY_KITS, getKit, type AssemblyStep, type ArmModelStep } from '../robotarm/assembly';
 
 interface Props {
@@ -118,7 +118,7 @@ function KitSelect({ onPick }: { onPick: (id: string) => void }) {
 }
 
 /* ============================================================
-   Adım görünümü (3D model)
+   Adım görünümü — 3D baskın, az yazı (çocuk dostu)
    ============================================================ */
 function StepView({
   kit, index, onJump, onPrev, onNext, onOpenSimulation,
@@ -134,7 +134,6 @@ function StepView({
   const step = steps[index];
   const total = steps.length;
   const isLast = index === total - 1;
-  const pct = useMemo(() => Math.round(((index + 1) / total) * 100), [index, total]);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [simReady, setSimReady] = useState(false);
@@ -143,131 +142,74 @@ function StepView({
     iframeRef.current?.contentWindow?.postMessage({ type: 'rx:assembly', step: model }, '*');
   };
 
-  // Sim hazır olunca dinle (yalnızca bu iframe'den gelen mesaj)
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
       if (ev.source !== iframeRef.current?.contentWindow) return;
       const d = ev.data;
-      if (d && typeof d === 'object' && d.source === 'roboexx-arm' && d.type === 'rx:ready') {
-        setSimReady(true);
-      }
+      if (d && typeof d === 'object' && d.source === 'roboexx-arm' && d.type === 'rx:ready') setSimReady(true);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
-  // Adım değişince (veya sim hazır olunca) modele gönder
   useEffect(() => {
     if (simReady) postStep(step.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step.model, simReady]);
 
   return (
-    <div className="guide-steps">
-      <nav className="guide-stepnav">
-        <div className="guide-stepnav-head">Adımlar</div>
-        <ol className="guide-stepnav-list">
-          {steps.map((s, i) => {
-            const state = i < index ? 'done' : i === index ? 'active' : 'todo';
-            return (
-              <li key={i}>
-                <button className={`guide-stepnav-item is-${state}`} onClick={() => onJump(i)}>
-                  <span className="guide-stepnav-num">
-                    {state === 'done' ? (
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                        <path d="M3 8.5l3.5 3.5L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    ) : i + 1}
-                  </span>
-                  <span className="guide-stepnav-label">{s.short}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
+    <div className="guide-kid">
+      {/* BÜYÜK 3D model */}
+      <div className="guide-kid-stage">
+        <iframe
+          ref={iframeRef}
+          src={SIM_URL}
+          title="RoboARM 3D montaj"
+          className="guide-kid-iframe"
+          onLoad={() => iframeRef.current?.contentWindow?.postMessage({ type: 'rx:ping' }, '*')}
+        />
+        {!simReady && <div className="guide-sim-loading"><span className="guide-spinner" />3D model yükleniyor…</div>}
 
-      <div className="guide-stepmain">
-        <div className="guide-stepmain-scroll">
-          <div className="guide-art-wrap guide-art-3d">
-            <span className="guide-art-badge">Adım {index + 1}/{total}</span>
-            <iframe
-              ref={iframeRef}
-              src={SIM_URL}
-              title="RoboARM 3D montaj"
-              className="guide-sim-iframe"
-              onLoad={() => {
-                // ready mesajını kaçırma ihtimaline karşı ping at → sim rx:ready döndürür
-                iframeRef.current?.contentWindow?.postMessage({ type: 'rx:ping' }, '*');
-              }}
-            />
-            {!simReady && <div className="guide-sim-loading"><span className="guide-spinner" />3D model yükleniyor…</div>}
-          </div>
-
-          <div className="guide-stepbody">
-            <h2 className="guide-step-title">{step.title}</h2>
-            <p className="guide-step-subtitle">{step.subtitle}</p>
-
-            {step.parts && step.parts.length > 0 && (
-              <div className="guide-parts">
-                {step.parts.map((p) => <span key={p} className="guide-part-chip">{p}</span>)}
-              </div>
-            )}
-
-            <ol className="guide-instr">
-              {step.steps.map((s, i) => (
-                <li key={i}><span className="guide-instr-num">{i + 1}</span><span>{s}</span></li>
-              ))}
-            </ol>
-
-            {step.tip && (
-              <div className="guide-callout is-tip">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 1.5a4.5 4.5 0 00-2.6 8.2c.4.3.6.7.6 1.1v.7h4v-.7c0-.4.2-.8.6-1.1A4.5 4.5 0 008 1.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-                  <path d="M6 14h4M6.5 12.2h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                </svg>
-                <span><b>İpucu:</b> {step.tip}</span>
-              </div>
-            )}
-            {step.warn && (
-              <div className="guide-callout is-warn">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 2l6.5 11.5h-13L8 2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-                  <path d="M8 6.5v3.2M8 11.8v.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-                <span><b>Dikkat:</b> {step.warn}</span>
-              </div>
-            )}
-          </div>
+        {/* üstte küçük adım rozeti + başlık */}
+        <div className="guide-kid-titlebar">
+          <span className="guide-kid-num">{index + 1}/{total}</span>
+          <span className="guide-kid-title">{step.title}</span>
         </div>
 
-        <footer className="guide-stepfoot">
-          <div className="guide-progress">
-            <div className="guide-progress-bar"><span style={{ width: `${pct}%` }} /></div>
-            <span className="guide-progress-text">%{pct}</span>
-          </div>
-          <div className="guide-nav-btns">
-            <button className="btn btn-ghost" onClick={onPrev} disabled={index === 0}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Geri
-            </button>
-            {isLast ? (
-              <button className="btn btn-primary" onClick={onOpenSimulation}>
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 3l9 5-9 5V3z" fill="currentColor" /></svg>
-                Simülasyonu Aç ve Dene
-              </button>
-            ) : (
-              <button className="btn btn-primary" onClick={onNext}>
-                İleri
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </footer>
+        {/* geri / ileri büyük oklar */}
+        <button className="guide-kid-arrow left" onClick={onPrev} disabled={index === 0} aria-label="Geri">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+        {isLast ? (
+          <button className="guide-kid-arrow right play" onClick={onOpenSimulation} aria-label="Simülasyonu aç">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M7 5l12 7-12 7V5z" fill="currentColor" /></svg>
+          </button>
+        ) : (
+          <button className="guide-kid-arrow right" onClick={onNext} aria-label="İleri">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+        )}
+      </div>
+
+      {/* altta: tek satır talimat + nokta göstergeleri */}
+      <div className="guide-kid-foot">
+        <p className="guide-kid-sub">{step.subtitle}</p>
+        <div className="guide-kid-dots">
+          {steps.map((s, i) => (
+            <button
+              key={i}
+              className={`guide-kid-dot ${i === index ? 'is-active' : i < index ? 'is-done' : ''}`}
+              onClick={() => onJump(i)}
+              title={s.short}
+            />
+          ))}
+        </div>
+        {isLast && (
+          <button className="btn btn-primary guide-kid-simbtn" onClick={onOpenSimulation}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 3l9 5-9 5V3z" fill="currentColor" /></svg>
+            Simülasyonu Aç ve Dene
+          </button>
+        )}
       </div>
     </div>
   );

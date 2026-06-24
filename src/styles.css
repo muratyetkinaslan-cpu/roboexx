@@ -5591,8 +5591,8 @@ g.blocklyDraggable > path:first-of-type {
 @keyframes guide-fade { from { opacity: 0; } to { opacity: 1; } }
 .guide-shell {
   position: relative;
-  width: min(1080px, 100%);
-  height: min(680px, 100%);
+  width: min(1280px, 97vw);
+  height: min(860px, 94vh);
   display: flex;
   flex-direction: column;
   background: var(--rx-surface);
@@ -5975,4 +5975,85 @@ g.blocklyDraggable > path:first-of-type {
   .guide-stepnav { display: none; }
   .guide-stepmain-scroll { grid-template-columns: 1fr; }
   .guide-art-wrap { position: relative; min-height: 200px; }
+}
+
+/* ========================================
+   Montaj Rehberi — çocuk dostu büyük ekran
+   ======================================== */
+.guide-kid { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.guide-kid-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #0c0f14;
+  overflow: hidden;
+}
+.guide-kid-iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+.guide-kid-titlebar {
+  position: absolute;
+  top: 16px; left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 10px;
+  max-width: 90%;
+  background: rgba(12, 15, 20, 0.82);
+  border: 1px solid var(--rx-border);
+  border-radius: 999px;
+  padding: 8px 18px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+.guide-kid-num {
+  font-family: var(--font-mono); font-weight: 800; font-size: 14px;
+  color: var(--rx-accent-text); background: var(--rx-accent);
+  border-radius: 999px; padding: 2px 10px;
+}
+.guide-kid-title { font-size: 17px; font-weight: 700; color: var(--rx-text); }
+
+/* büyük geri/ileri okları kenarlarda */
+.guide-kid-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 56px; height: 56px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(20, 26, 34, 0.78);
+  border: 1px solid var(--rx-border);
+  color: var(--rx-text);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: all 0.15s var(--ease-out);
+}
+.guide-kid-arrow:hover:not(:disabled) { background: var(--rx-accent); color: var(--rx-accent-text); border-color: var(--rx-accent); transform: translateY(-50%) scale(1.08); }
+.guide-kid-arrow:disabled { opacity: 0.28; cursor: default; }
+.guide-kid-arrow.left { left: 18px; }
+.guide-kid-arrow.right { right: 18px; }
+.guide-kid-arrow.play { background: var(--rx-accent); color: var(--rx-accent-text); border-color: var(--rx-accent); }
+.guide-kid-arrow.play:hover { filter: brightness(1.1); }
+
+/* alt şerit: tek satır talimat + nokta göstergeleri */
+.guide-kid-foot {
+  flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 16px 24px 18px;
+  border-top: 1px solid var(--rx-border);
+  background: var(--rx-surface);
+}
+.guide-kid-sub {
+  margin: 0; text-align: center;
+  font-size: 16px; line-height: 1.5; color: var(--rx-text);
+  max-width: 760px;
+}
+.guide-kid-dots { display: flex; gap: 9px; }
+.guide-kid-dot {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--rx-surface2); border: 1.5px solid var(--rx-border);
+  cursor: pointer; padding: 0; transition: all 0.15s var(--ease-out);
+}
+.guide-kid-dot:hover { border-color: var(--rx-accent); }
+.guide-kid-dot.is-done { background: var(--rx-success); border-color: var(--rx-success); }
+.guide-kid-dot.is-active { background: var(--rx-accent); border-color: var(--rx-accent); transform: scale(1.35); }
+.guide-kid-simbtn { font-size: 15px; padding: 10px 20px; }
+
+@media (max-width: 760px) {
+  .guide-kid-title { font-size: 14px; }
+  .guide-kid-arrow { width: 46px; height: 46px; }
+  .guide-kid-sub { font-size: 14px; }
 }
