@@ -19,20 +19,20 @@
   canvas{display:block}
 
   /* ---- Üst HUD (sensör ekranı) ---- */
-  #hud{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:20;
-    display:flex;gap:8px;align-items:stretch;padding:8px;border-radius:var(--rad);
+  #hud{position:fixed;left:10px;top:10px;z-index:20;
+    display:flex;flex-direction:column;gap:6px;align-items:stretch;padding:8px;border-radius:var(--rad);
     background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line);
-    box-shadow:0 8px 28px rgba(0,0,0,.45);max-width:calc(100vw - 20px);flex-wrap:wrap;justify-content:center}
-  .hcard{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 10px;
-    border-radius:9px;background:rgba(255,255,255,.03);border:1px solid var(--line);min-width:62px}
-  .hcard .lbl{font-size:10px;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;white-space:nowrap}
-  .hcard .val{font-size:20px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+    box-shadow:0 8px 28px rgba(0,0,0,.45);max-height:calc(100vh - 130px);overflow-y:auto;width:130px}
+  .hcard{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:6px;padding:5px 9px;
+    border-radius:9px;background:rgba(255,255,255,.03);border:1px solid var(--line)}
+  .hcard .lbl{font-size:10px;letter-spacing:.3px;color:var(--muted);text-transform:uppercase;white-space:nowrap}
+  .hcard .val{font-size:17px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
   .hcard .unit{font-size:10px;color:var(--muted);margin-top:1px}
   .hcard.us .val{color:var(--accent2)} .hcard.us.near .val{color:var(--bad)}
-  .hsep{width:1px;background:var(--line);margin:2px 0}
-  .hgrp{display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center;padding:0 2px}
-  .hgrp .gname{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-  .hgrp .row{display:flex;gap:6px}
+  .hsep{height:1px;width:auto;align-self:stretch;background:var(--line);margin:1px 0}
+  .hgrp{display:flex;flex-direction:column;gap:3px;align-items:stretch;justify-content:center;padding:0 2px}
+  .hgrp .gname{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:center}
+  .hgrp .row{display:flex;gap:6px;justify-content:center}
   .pill{display:flex;flex-direction:column;align-items:center;padding:4px 8px;border-radius:8px;
     background:rgba(255,255,255,.03);border:1px solid var(--line);min-width:50px}
   .pill .lbl{font-size:9px;color:var(--muted)} .pill .val{font-size:15px;font-weight:700}
@@ -563,7 +563,7 @@ function buildBerryBot(){
 }
 
 // Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
-const BB_BIN_VER='7';
+const BB_BIN_VER='8';
 let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
   if(_bbLoading) return; _bbLoading=true;
@@ -615,7 +615,7 @@ async function loadBerryBotMesh(grp){
       geo.setAttribute('position', new THREE.BufferAttribute(vp,3));
       geo.setIndex(new THREE.BufferAttribute(ip,1));
       geo.computeVertexNormals();
-      const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(g.color), roughness:.72, metalness:.05});
+      const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(g.color), roughness:.72, metalness:.05, side:THREE.DoubleSide});
       const m=new THREE.Mesh(geo,mat); m.castShadow=true; m.receiveShadow=true; m.userData.bbMesh=true;
       if((g.part==='wheelL'||g.part==='wheelR') && g.spin){
         // Tekerleği X ekseni (cy,cz merkezli) etrafında dönebilir pivota koy
