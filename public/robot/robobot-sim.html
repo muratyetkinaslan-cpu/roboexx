@@ -114,6 +114,10 @@
     </div>
   </div>
   <div class="hsep"></div>
+  <div class="hgrp" style="justify-content:center">
+    <div class="buzz" id="buzz"><span class="dot" style="background:#3a4760"></span><span style="font-size:12px;font-weight:700">Buzzer</span></div>
+    <div class="runbadge" id="runbadge"><span class="dot" style="background:#3a4760"></span>Durdu</div>
+  </div>
   <div class="hsep bb-hud" style="display:none"></div>
   <div class="hgrp bb-hud" style="display:none">
     <div class="gname">Işık (LDR)</div>
@@ -153,7 +157,7 @@
   <button class="btn ghost sm" id="btn-clearobs">Tüm engeller</button>
   <div class="vsep"></div>
   <span class="barlabel bb-only" style="display:none">Gündüz/Gece</span>
-  <input type="range" id="rng-light" class="bb-only" min="0" max="100" value="55" style="display:none;width:80px">
+  <input type="range" id="rng-light" class="bb-only" min="0" max="100" value="70" style="display:none;width:80px">
   <button class="btn ghost sm bb-only" id="btn-flash" style="display:none">🔦 Fener</button>
   <button class="btn ghost sm bb-only" id="btn-bA" style="display:none">Buton A</button>
   <button class="btn ghost sm bb-only" id="btn-bB" style="display:none">Buton B</button>
@@ -660,8 +664,8 @@ function resetRobot(){ bot.x=START.x; bot.z=START.z; bot.yaw=START.yaw; bot.whee
 applyBotTransform();
 
 /* ===================== BerryBot durum + RGB/Matrix/LDR/Buton ===================== */
-bot.ldrValue = 55;            // ortam ışığı (0-100), panelden/sliderdan ayarlanır
-bot.ldrLeft = 55; bot.ldrRight = 55; bot.ldrValueLive = 55;
+bot.ldrValue = 70;            // ortam ışığı (0-100), panelden/sliderdan ayarlanır
+bot.ldrLeft = 70; bot.ldrRight = 70; bot.ldrValueLive = 70;
 bot.btnA = false; bot.btnB = false;
 bot.matrixState = new Array(25).fill(0);
 
@@ -768,13 +772,13 @@ function updateLDR(){
 // Gündüz/gece: sahne ışığını ortam seviyesine bağla
 function applyDayNight(){
   const t=Math.max(0,Math.min(100,bot.ldrValue))/100;  // 0 gece, 1 gündüz
-  hemi.intensity=0.12+0.95*t;
-  key.intensity=0.15+1.05*t;
-  rim.intensity=0.1+0.3*t;
-  const sky=new THREE.Color().setHSL(0.6, 0.35, 0.06+0.62*t);
+  hemi.intensity=0.18+1.05*t;
+  key.intensity=0.22+1.15*t;
+  rim.intensity=0.12+0.3*t;
+  const sky=new THREE.Color().setHSL(0.6, 0.4, 0.07+0.6*t);
   scene.background=sky;
   if(scene.fog) scene.fog.color.copy(sky);
-  floorMat.color.setHSL(0.6,0.10,0.12+0.55*t);
+  floorMat.color.setHSL(0.6,0.10,0.16+0.55*t);
 }
 
 /* ===================== Fizik (diferansiyel sürüş) ===================== */
@@ -817,10 +821,10 @@ function updateHUD(){
   setLine('line-left', bot.lineVal.left); setLine('line-right', bot.lineVal.right);
   setMot('mot-left', Math.round(bot._vL/MAX_CMS*100)); setMot('mot-right', Math.round(bot._vR/MAX_CMS*100));
   const bz=document.getElementById('buzz'); const on=performance.now()<bot.buzzUntil;
-  bz.classList.toggle('on',on); bz.querySelector('.dot').style.background = on?'#ffcf5b':'#3a4760';
-  const rb=document.getElementById('runbadge'); rb.classList.toggle('on',bot.running);
-  rb.querySelector('.dot').style.background = bot.running?'#5fd38a':'#3a4760';
-  rb.lastChild.textContent = bot.running?'Çalışıyor':'Durdu';
+  if(bz){ bz.classList.toggle('on',on); const d=bz.querySelector('.dot'); if(d) d.style.background = on?'#ffcf5b':'#3a4760'; }
+  const rb=document.getElementById('runbadge');
+  if(rb){ rb.classList.toggle('on',bot.running); const d=rb.querySelector('.dot'); if(d) d.style.background = bot.running?'#5fd38a':'#3a4760';
+    if(rb.lastChild) rb.lastChild.textContent = bot.running?'Çalışıyor':'Durdu'; }
   if(vehicle==='berrybot'){
     const sl=document.getElementById('ldr-left'), sr=document.getElementById('ldr-right');
     if(sl){ sl.querySelector('.val').textContent=Math.round(bot.ldrLeft);
