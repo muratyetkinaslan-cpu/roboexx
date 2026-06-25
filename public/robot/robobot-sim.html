@@ -130,6 +130,12 @@
 
 <!-- Alt araç çubuğu -->
 <div id="bar">
+  <span class="barlabel">Ortam</span>
+  <select id="sel-env">
+    <option value="test">Test Parkuru</option>
+    <option value="street">Sokak / Yol</option>
+  </select>
+  <div class="vsep"></div>
   <span class="barlabel">Araç</span>
   <select id="sel-vehicle">
     <option value="robobot">RoboBot</option>
@@ -153,6 +159,12 @@
   <button class="btn ghost sm" id="btn-cleartrack">Pisti sil</button>
   <div class="vsep"></div>
   <button class="btn ghost sm" id="btn-addobs">＋ Engel</button>
+  <select id="sel-obshape" title="Engel şekli">
+    <option value="cube">Küp</option>
+    <option value="rect">Dikdörtgen</option>
+    <option value="wall">Duvar</option>
+  </select>
+  <input type="range" id="rng-obsize" min="6" max="34" value="12" title="Engel boyutu" style="width:70px">
   <button class="btn ghost sm" id="btn-delobs">🗑 Seçili engel</button>
   <button class="btn ghost sm" id="btn-clearobs">Tüm engeller</button>
   <div class="vsep"></div>
@@ -294,6 +306,33 @@ function makeTree(x,z,s){
     makeTree(x,z, 0.8+Math.random()*0.8);
   }
 })();
+// asfalt yol (sokak ortamı) — arena ortasından geçen şerit
+const roadGroup=new THREE.Group(); scene.add(roadGroup);
+(function(){
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(ARENA, ARENA),
+    new THREE.MeshStandardMaterial({color:0x33373d, roughness:.95}));
+  road.rotation.x=-Math.PI/2; road.position.y=0.04; roadGroup.add(road);
+  // kesik orta çizgi
+  for(let z=-HALF+10; z<HALF; z+=20){
+    const dash=new THREE.Mesh(new THREE.PlaneGeometry(2.2,10),
+      new THREE.MeshStandardMaterial({color:0xf2d23a, roughness:.6}));
+    dash.rotation.x=-Math.PI/2; dash.position.set(0,0.06,z); roadGroup.add(dash);
+  }
+  // kenar şeritleri
+  [-1,1].forEach(s=>{ const e=new THREE.Mesh(new THREE.PlaneGeometry(2,ARENA),
+    new THREE.MeshStandardMaterial({color:0xdfe3e8, roughness:.7}));
+    e.rotation.x=-Math.PI/2; e.position.set(s*(HALF-10),0.06,0); roadGroup.add(e); });
+})();
+envGroup.visible=false; roadGroup.visible=false;   // varsayılan: Test Parkuru (sade)
+let environment='test';
+function setEnvironment(env){
+  environment=env;
+  const street=(env==='street');
+  envGroup.visible=street; roadGroup.visible=street;
+  // sokakta zemin/ızgara gizlensin (yol görünsün), testte ızgara
+  floor.visible=!street; gFine.visible=!street; gMaj.visible=!street;
+  flashToast(street?'Sokak / Yol ortamı':'Test Parkuru');
+}
 
 /* ===================== Pist (çizgi) ===================== */
 let trackPts = [];            // [{x,z}, ...] dünya noktaları
@@ -380,15 +419,19 @@ function drawLabel(o, text){
 function roundRect(x,a,b,w,h,r){ x.beginPath(); x.moveTo(a+r,b); x.arcTo(a+w,b,a+w,b+h,r); x.arcTo(a+w,b+h,a,b+h,r);
   x.arcTo(a,b+h,a,b,r); x.arcTo(a,b,a+w,b,r); x.closePath(); }
 
+let obsSize=12, obsShape='cube';   // toolbar'dan
 function addObstacle(x, z){
   x = (x===undefined)? (Math.random()*120-60) : x;
   z = (z===undefined)? (Math.random()*120-60) : z;
+  let w=obsSize, d=obsSize, h=14;
+  if(obsShape==='rect'){ d=Math.max(4,obsSize*0.5); h=14; }
+  else if(obsShape==='wall'){ w=obsSize*2; d=4; h=18; }
   const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(12,14,12), OBS_MAT());
-  body.position.y=7; body.castShadow=true; body.receiveShadow=true; g.add(body);
-  const o=mkLabelSprite(); o.sprite.position.set(0,22,0); g.add(o.sprite);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), OBS_MAT());
+  body.position.y=h/2; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  const o=mkLabelSprite(); o.sprite.position.set(0,h+8,0); g.add(o.sprite);
   g.position.set(x,0,z); scene.add(g);
-  const obj={ group:g, body, ...o, half:6 };
+  const obj={ group:g, body, ...o, half:Math.max(w,d)/2, halfX:w/2, halfZ:d/2 };
   obstacles.push(obj); selectObs(obj); return obj;
 }
 function selectObs(o){
@@ -520,7 +563,7 @@ function buildBerryBot(){
 }
 
 // Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
-const BB_BIN_VER='6';
+const BB_BIN_VER='7';
 let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
   if(_bbLoading) return; _bbLoading=true;
@@ -782,9 +825,9 @@ function applyDayNight(){
 }
 
 /* ===================== Fizik (diferansiyel sürüş) ===================== */
-function circleVsAABB(px,pz,ox,oz,half,r){
-  const nx=Math.max(ox-half,Math.min(px,ox+half));
-  const nz=Math.max(oz-half,Math.min(pz,oz+half));
+function circleVsAABB(px,pz,ox,oz,halfX,halfZ,r){
+  const nx=Math.max(ox-halfX,Math.min(px,ox+halfX));
+  const nz=Math.max(oz-halfZ,Math.min(pz,oz+halfZ));
   const dx=px-nx, dz=pz-nz; const dist=Math.hypot(dx,dz);
   if(dist < r){ const pd=(r-dist)||0.001; const ux=(dist>1e-4?dx/dist:1), uz=(dist>1e-4?dz/dist:0);
     return { x:px+ux*pd, z:pz+uz*pd }; }
@@ -803,7 +846,7 @@ function stepPhysics(dt){
   // duvar sınırı
   const lim=HALF-ROBOT_R-1; nx=Math.max(-lim,Math.min(lim,nx)); nz=Math.max(-lim,Math.min(lim,nz));
   // engel çarpışması
-  for(const o of obstacles){ const push=circleVsAABB(nx,nz,o.group.position.x,o.group.position.z,o.half,ROBOT_R+0.5);
+  for(const o of obstacles){ const push=circleVsAABB(nx,nz,o.group.position.x,o.group.position.z,o.halfX!=null?o.halfX:o.half,o.halfZ!=null?o.halfZ:o.half,ROBOT_R+0.5);
     if(push){ nx=push.x; nz=push.z; } }
   bot.x=nx; bot.z=nz;
   applyBotTransform();
@@ -953,6 +996,10 @@ function onDown(ev){
   const obsHit=picker.intersectObjects(obstacles.map(o=>o.body),false)[0];
   if(obsHit){ const o=obstacles.find(o=>o.body===obsHit.object); selectObs(o); drag={kind:'obs',obj:o};
     document.getElementById('sel-track'); return; }
+  // fener (açıkken tutulup sürüklenebilir)
+  if(flashOn){ const fHit=picker.intersectObject(flashlight,true)[0];
+    const p0=floorHit();
+    if(fHit || (p0 && Math.hypot(p0.x-flashPos.x,p0.z-flashPos.z)<14)){ drag={kind:'flash'}; if(p0) placeFlash(p0.x,p0.z); return; } }
   // robot
   const botHit=picker.intersectObjects(bot3d.children,true)[0];
   if(botHit && !bot.running){ drag={kind:'robot'}; selectObs(null); return; }
@@ -964,6 +1011,7 @@ function onDown(ev){
 function onMove(ev){
   if(!drag) return; const {cx,cy}=ndc(ev); const dx=cx-lastPt.x, dy=cy-lastPt.y; lastPt={x:cx,y:cy};
   if(drag.kind==='orbit'){ camTheta-=dx*0.008; camPhi=Math.max(0.18,Math.min(1.4,camPhi-dy*0.006)); updateCam(); }
+  else if(drag.kind==='flash'){ const p=floorHit(); if(p) placeFlash(p.x,p.z); }
   else if(drag.kind==='obs'){ const p=floorHit(); if(p){ drag.obj.group.position.x=clampF(p.x); drag.obj.group.position.z=clampF(p.z); } }
   else if(drag.kind==='robot'){ const p=floorHit(); if(p){ bot.x=clampF(p.x); bot.z=clampF(p.z); applyBotTransform(); } }
   else if(drag.kind==='draw'){ const p=floorHit(); if(p){ const last=trackPts[trackPts.length-1];
@@ -989,9 +1037,11 @@ function setRunUI(on){ document.getElementById('btn-run').style.display=on?'none
 document.getElementById('btn-run').onclick=()=>{ ensureAudio(); runProgram(getCode()); };
 document.getElementById('btn-stop').onclick=()=>{ stopProgramExt(); };
 document.getElementById('btn-reset').onclick=()=>{ stopProgramExt(); resetRobot(); };
-document.getElementById('btn-addobs').onclick=()=>addObstacle();
-document.getElementById('btn-delobs').onclick=deleteSelected;
+document.getElementById('btn-addobs').onclick=()=>addObstacle();document.getElementById('btn-delobs').onclick=deleteSelected;
 document.getElementById('btn-clearobs').onclick=clearObstacles;
+document.getElementById('sel-env').onchange=e=>setEnvironment(e.target.value);
+document.getElementById('sel-obshape').onchange=e=>{ obsShape=e.target.value; };
+document.getElementById('rng-obsize').oninput=e=>{ obsSize=Number(e.target.value)||12; };
 document.getElementById('btn-turn').onclick=()=>{ bot.yaw+=Math.PI/4; applyBotTransform(); };
 document.getElementById('btn-cam').onclick=resetCam;
 document.getElementById('btn-draw').onclick=()=>setDraw(!drawMode);
@@ -1025,21 +1075,9 @@ function holdBtn(id, set){ const el=document.getElementById(id); if(!el) return;
 }
 holdBtn('btn-bA', v=>bot.btnA=v);
 holdBtn('btn-bB', v=>bot.btnB=v);
-// Fener: aç/kapat; açıkken fare zemin üzerinde gezerken feneri taşır
-const _flashRay=new THREE.Raycaster(); const _flashPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
-const _fhit=new THREE.Vector3();
+// Fener: aç/kapat (taşıma onDown/onMove drag sistemiyle yapılır)
 document.getElementById('btn-flash').addEventListener('click',()=>{ setFlash(!flashOn);
-  flashToast(flashOn?'Fener açık — fareyle gezdir':'Fener kapalı'); });
-renderer.domElement.addEventListener('mousemove',ev=>{
-  if(!flashOn) return;
-  _flashRay.setFromCamera(ndc(ev), camera);
-  if(_flashRay.ray.intersectPlane(_flashPlane,_fhit)) placeFlash(_fhit.x,_fhit.z);
-});
-renderer.domElement.addEventListener('touchmove',ev=>{
-  if(!flashOn||!ev.touches[0]) return;
-  _flashRay.setFromCamera(ndc(ev.touches[0]), camera);
-  if(_flashRay.ray.intersectPlane(_flashPlane,_fhit)) placeFlash(_fhit.x,_fhit.z);
-},{passive:true});
+  flashToast(flashOn?'Fener açık — feneri tutup sürükle':'Fener kapalı'); });
 // klavye: A / B butonları (yalnız BerryBot'ta anlamlı, her zaman dinler)
 window.addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=true; if(k==='b')bot.btnB=true; });
 window.addEventListener('keyup',  e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=false; if(k==='b')bot.btnB=false; });
