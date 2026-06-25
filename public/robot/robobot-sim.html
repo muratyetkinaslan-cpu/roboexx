@@ -248,7 +248,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 host.appendChild(renderer.domElement);
 
-const hemi = new THREE.HemisphereLight(0x9fb6d6, 0x10141c, 0.85); scene.add(hemi);
+const hemi = new THREE.HemisphereLight(0xccd2d8, 0x20242c, 0.85); scene.add(hemi);
 const key = new THREE.DirectionalLight(0xffffff, 1.05);
 key.position.set(HALF*0.7, HALF*1.7, HALF*0.5);
 key.castShadow = true;
@@ -339,9 +339,70 @@ function setEnvironment(env){
   boundless=street;
   envGroup.visible=street; roadGroup.visible=street;
   walls.forEach(w=>w.visible=!street);          // sokakta duvar yok (sınırsız)
+  trackDecor.visible=!street;                    // rampalar sadece test parkurunda
   floor.visible=!street; gFine.visible=!street; gMaj.visible=!street;
   if(!street){ target.set(0,0,0); updateCam(); } // testte kamera merkeze döner
+  if(vehicle==='berrybot') applyDayNight();
+  else { scene.background=null; }
   flashToast(street?'Sokak / Yol — sınırsız sürüş':'Test Parkuru');
+}
+
+/* ===================== Gelişmiş test parkuru: rampalar + virajlar ===================== */
+bot.y=0; bot.pitch=0; bot.roll=0;
+const rampMeshes=[];
+const solids=[];   // sabit çarpışan decor (slalom direkleri)
+const trackDecor=new THREE.Group(); scene.add(trackDecor);
+function rampPrism(w,len,h){ // y=0'dan h'ye yükselen kama (z: 0->len)
+  const g=new THREE.BufferGeometry();
+  const x=w/2;
+  const v=new Float32Array([
+    -x,0,0, -x,0,len, -x,h,len,   x,0,0, x,h,len, x,0,len,   // yanlar
+    -x,0,0, x,0,0, x,0,len, -x,0,len,                          // taban
+    -x,0,0, -x,h,len, x,h,len, x,0,0,                          // eğimli üst
+    -x,0,len, x,0,len, x,h,len, -x,h,len ]);                   // arka dik
+  const idx=[0,1,2, 3,4,5, 6,7,8,6,8,9, 10,11,12,10,12,13, 14,15,16,14,16,17];
+  g.setAttribute('position',new THREE.BufferAttribute(v,3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const rampMat=new THREE.MeshStandardMaterial({color:0x5b6470,roughness:.85,metalness:.05,side:THREE.DoubleSide});
+const platMat=new THREE.MeshStandardMaterial({color:0x6b7480,roughness:.85});
+function addRamp(x,z,rotY,w,len,h){
+  const m=new THREE.Mesh(rampPrism(w,len,h),rampMat);
+  m.position.set(x,0,z); m.rotation.y=rotY; m.castShadow=m.receiveShadow=true;
+  trackDecor.add(m); rampMeshes.push(m); return m;
+}
+function addPlatform(x,z,w,d,h){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),platMat);
+  m.position.set(x,h/2,z); m.castShadow=m.receiveShadow=true;
+  trackDecor.add(m); rampMeshes.push(m); return m;
+}
+function buildTrackDecor(){
+  // tepe: yukarı rampa -> platform -> aşağı rampa (üst-alt eğim)
+  const H=7, L=28, PW=34;
+  addRamp(0, -10-L, 0, PW, L, H);          // yukarı çıkış (arkadan)
+  addPlatform(0, -10, PW, 20, H);          // düz tepe
+  const dn=addRamp(0, 10+L, Math.PI, PW, L, H); // aşağı iniş (öne doğru)
+  // yan küçük tümsek
+  addRamp(-70, 30, Math.PI/2, 26, 18, 4);
+  addRamp(70, -30, -Math.PI/2, 26, 18, 4);
+  // viraj için slalom direkleri (spawn'dan uzak, US sensörü görür + çarpışır)
+  [[40,40],[10,55],[-25,40]].forEach(([px,pz])=>{
+    const m=new THREE.Mesh(new THREE.BoxGeometry(8,16,8),
+      new THREE.MeshStandardMaterial({color:0xe0584e,roughness:.7}));
+    m.position.set(px,8,pz); m.castShadow=m.receiveShadow=true;
+    trackDecor.add(m); walls.push(m);                 // US görür
+    solids.push({x:px,z:pz,halfX:4,halfZ:4});         // çarpışır
+  });
+}
+buildTrackDecor();
+// zemin/rampa yüksekliği (aşağı raycast)
+const _hray=new THREE.Raycaster(); const _down=new THREE.Vector3(0,-1,0); const _hpos=new THREE.Vector3();
+function groundAt(x,z){
+  if(environment!=='test' || !trackDecor.visible) return {y:0,n:new THREE.Vector3(0,1,0)};
+  _hpos.set(x,60,z); _hray.set(_hpos,_down); _hray.far=120;
+  const hit=_hray.intersectObjects(rampMeshes,false)[0];
+  if(hit) return {y:hit.point.y, n:(hit.face?hit.face.normal.clone().applyQuaternion(hit.object.quaternion):new THREE.Vector3(0,1,0))};
+  return {y:0,n:new THREE.Vector3(0,1,0)};
 }
 
 /* ===================== Pist (çizgi) ===================== */
@@ -573,7 +634,7 @@ function buildBerryBot(){
 }
 
 // Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
-const BB_BIN_VER='9';
+const BB_BIN_VER='10';
 let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
   if(_bbLoading) return; _bbLoading=true;
@@ -711,7 +772,10 @@ const bot = {
   // çalıştırma bayrakları
   _abort:false, _stop:{__stop:true}, _lastYield:0, running:false
 };
-function applyBotTransform(){ bot3d.position.set(bot.x,0,bot.z); bot3d.rotation.y=bot.yaw; }
+function applyBotTransform(){
+  bot3d.position.set(bot.x, bot.y||0, bot.z);
+  bot3d.rotation.set(bot.pitch||0, bot.yaw, bot.roll||0, 'YXZ');
+}
 function resetRobot(){ bot.x=START.x; bot.z=START.z; bot.yaw=START.yaw; bot.wheelL=bot.wheelR=bot._vL=bot._vR=0;
   applyBotTransform(); flashToast('Robot sıfırlandı'); }
 applyBotTransform();
@@ -828,10 +892,16 @@ function applyDayNight(){
   hemi.intensity=0.18+1.05*t;
   key.intensity=0.22+1.15*t;
   rim.intensity=0.12+0.3*t;
-  const sky=new THREE.Color().setHSL(0.6, 0.4, 0.07+0.6*t);
-  scene.background=sky;
-  if(scene.fog) scene.fog.color.copy(sky);
-  floorMat.color.setHSL(0.6,0.10,0.16+0.55*t);
+  if(environment==='street'){
+    const sky=new THREE.Color().setHSL(0.58, 0.30, 0.09+0.58*t);  // gökyüzü (az doygun)
+    scene.background=sky; if(scene.fog) scene.fog.color.copy(sky);
+    floorMat.color.setHSL(0.3,0.25,0.16+0.4*t);
+  } else {
+    // Test parkuru: nötr açık arka plan (mavi buğu yok)
+    const bg=new THREE.Color().setHSL(0.6,0.04,0.10+0.78*t);
+    scene.background=bg; if(scene.fog) scene.fog.color.copy(bg);
+    floorMat.color.setHSL(0.6,0.05,0.30+0.5*t);
+  }
 }
 
 /* ===================== Fizik (diferansiyel sürüş) ===================== */
@@ -859,7 +929,19 @@ function stepPhysics(dt){
   // engel çarpışması
   for(const o of obstacles){ const push=circleVsAABB(nx,nz,o.group.position.x,o.group.position.z,o.halfX!=null?o.halfX:o.half,o.halfZ!=null?o.halfZ:o.half,ROBOT_R+0.5);
     if(push){ nx=push.x; nz=push.z; } }
+  if(environment==='test'){ for(const s of solids){ const push=circleVsAABB(nx,nz,s.x,s.z,s.halfX,s.halfZ,ROBOT_R+0.5);
+    if(push){ nx=push.x; nz=push.z; } } }
   bot.x=nx; bot.z=nz;
+  // yükseklik + eğim takibi (rampalar) — gövde önü +z
+  if(environment==='test' && trackDecor.visible){
+    const s=ROBOT_R*0.8, cy=Math.cos(bot.yaw), sy=Math.sin(bot.yaw);
+    const fx=bot.x+sy*s, fz=bot.z+cy*s, bx=bot.x-sy*s, bz=bot.z-cy*s;
+    const rx=bot.x+cy*s, rz=bot.z-sy*s, lx=bot.x-cy*s, lz=bot.z+sy*s;
+    const yC=groundAt(bot.x,bot.z).y, yF=groundAt(fx,fz).y, yB=groundAt(bx,bz).y, yR=groundAt(rx,rz).y, yL=groundAt(lx,lz).y;
+    bot.y += (yC-bot.y)*0.35;
+    const tgtPitch=-Math.atan2(yF-yB, 2*s), tgtRoll=Math.atan2(yR-yL, 2*s);
+    bot.pitch += (tgtPitch-bot.pitch)*0.25; bot.roll += (tgtRoll-bot.roll)*0.25;
+  } else if(bot.y||bot.pitch||bot.roll){ bot.y*=0.6; bot.pitch*=0.6; bot.roll*=0.6; }
   applyBotTransform();
   // tekerlek dönüşü (BerryBot gerçek mesh'inde ayrı teker yok → atla)
   const _wr = (vehicle==='berrybot') ? 2.5 : WHEEL_R;
