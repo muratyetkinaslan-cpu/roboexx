@@ -212,6 +212,28 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
 
         <aside className="robotarm-config">
           <div className="robotarm-config-scroll">
+            {/* ARAÇ SEÇİMİ */}
+            <div className="ra-section">
+              <h4 className="ra-h">Araç</h4>
+              <label className="ra-field">
+                <span>Robot aracı</span>
+                <select
+                  value={cfg.vehicle}
+                  onChange={(e) => setCfg((c) => ({ ...c, vehicle: e.target.value as 'robobot' | 'berrybot' }))}
+                >
+                  <option value="robobot">RoboBot (yuvarlak, 3 mesafe)</option>
+                  <option value="berrybot">BerryBot (ahşap kasa + PicoBricks kartı)</option>
+                </select>
+              </label>
+              {cfg.vehicle === 'berrybot' && (
+                <p className="ra-hint">
+                  BerryBot: önde tek mesafe sensörü, altta 2 çizgi sensörü, kartta 5×5 LED matrix,
+                  4 RGB LED, 2 LDR, buzzer ve A/B butonları. Işık ve butonlar sim araç çubuğundan denenir
+                  (klavye <b>A</b>/<b>B</b>).
+                </p>
+              )}
+            </div>
+
             {/* ÇALIŞTIR */}
             <div className="ra-section">
               <div className="rb-run-row">

@@ -122,6 +122,12 @@
 
 <!-- Alt araç çubuğu -->
 <div id="bar">
+  <span class="barlabel">Araç</span>
+  <select id="sel-vehicle">
+    <option value="robobot">RoboBot</option>
+    <option value="berrybot">BerryBot</option>
+  </select>
+  <div class="vsep"></div>
   <button class="btn primary" id="btn-run">▶ Çalıştır</button>
   <button class="btn stop" id="btn-stop" style="display:none">⏹ Durdur</button>
   <button class="btn ghost sm" id="btn-reset">↺ Sıfırla</button>
@@ -141,6 +147,11 @@
   <button class="btn ghost sm" id="btn-addobs">＋ Engel</button>
   <button class="btn ghost sm" id="btn-delobs">🗑 Seçili engel</button>
   <button class="btn ghost sm" id="btn-clearobs">Tüm engeller</button>
+  <div class="vsep"></div>
+  <span class="barlabel bb-only" style="display:none">Işık</span>
+  <input type="range" id="rng-light" class="bb-only" min="0" max="100" value="55" style="display:none;width:80px">
+  <button class="btn ghost sm bb-only" id="btn-bA" style="display:none">Buton A</button>
+  <button class="btn ghost sm bb-only" id="btn-bB" style="display:none">Buton B</button>
   <div class="vsep"></div>
   <button class="btn ghost sm" id="btn-turn">⟳ Robotu çevir</button>
   <button class="btn ghost sm" id="btn-cam">⌂ Kamera</button>
@@ -197,8 +208,10 @@ let config = {
   leftMotor: '1', rightMotor: '2',
   us: { front:{trig:3,echo:2}, left:{trig:7,echo:6}, right:{trig:9,echo:8} },
   line: { left:26, right:27 },
-  potValue: 50
+  potValue: 50,
+  vehicle: 'robobot'            // 'robobot' | 'berrybot'
 };
+let vehicle = 'robobot';
 
 /* ===================== THREE sahne ===================== */
 const host = document.getElementById('app');
@@ -415,9 +428,137 @@ function buildBot(){
     lineMeta.push({ name:nm, mesh:s });
   });
 
-  return { wheels, usMeta, lineMeta, deckTop, deckBot };
+  return { wheels, usMeta, lineMeta, deckTop, deckBot, rgb:[], matrix:[], ldr:[], buttons:[], buzzer:null, kind:'robobot' };
 }
-const M = buildBot();
+
+/* ===================== BerryBot (ahşap kasa + mor PicoBricks kartı) ===================== */
+function buildBerryBot(){
+  const WOOD=0xd8c098, WOOD_D=0x6b4a2a, PCB=0x7a2fd0;
+  const W=20, D=18, H=8.5;             // kasa ölçüleri (cm)
+  // ahşap kasa (kutu) + koyu kenar trim
+  const body=new THREE.Mesh(new THREE.BoxGeometry(W,H,D),
+    new THREE.MeshStandardMaterial({color:WOOD,roughness:.85,metalness:.02}));
+  body.position.y=H/2+1.2; body.castShadow=true; body.receiveShadow=true; bot3d.add(body);
+  // yan havalandırma çizgileri (ince koyu kutular)
+  for(let s of [-1,1]) for(let i=0;i<6;i++){
+    const v=new THREE.Mesh(new THREE.BoxGeometry(0.25,0.5,D*0.62),
+      new THREE.MeshStandardMaterial({color:WOOD_D,roughness:.9}));
+    v.position.set(s*(W/2+0.02), H/2+1.2+(i-2.5)*0.95, 0); bot3d.add(v);
+  }
+  // ön/arka koyu trim çerçeve
+  [[-D/2,'f'],[D/2,'b']].forEach(([zz])=>{
+    const fr=new THREE.Mesh(new THREE.BoxGeometry(W+0.3,H+0.3,0.5),
+      new THREE.MeshStandardMaterial({color:WOOD_D,roughness:.85}));
+    fr.position.set(0,H/2+1.2,zz); bot3d.add(fr);
+  });
+
+  // tekerlekler (siyah, yanlarda) — X ekseni etrafında döner
+  const wheels=[];
+  [-1,1].forEach(side=>{
+    const w=new THREE.Group();
+    const tire=new THREE.Mesh(new THREE.CylinderGeometry(4.6,4.6,2.6,28),
+      new THREE.MeshStandardMaterial({color:0x1a1d22,roughness:.85})); tire.rotation.z=Math.PI/2; tire.castShadow=true;
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(2.0,2.0,2.7,8),
+      new THREE.MeshStandardMaterial({color:0xece3d2,roughness:.6})); hub.rotation.z=Math.PI/2;
+    w.add(tire,hub); w.position.set(side*(W/2+1.3), 4.6, 1.5); bot3d.add(w); wheels.push(w);
+  });
+  // arka kaster topu
+  const caster=new THREE.Mesh(new THREE.SphereGeometry(1.5,16,12),
+    new THREE.MeshStandardMaterial({color:0x2a2f38,metalness:.4,roughness:.4}));
+  caster.position.set(0,1.5,-D/2+1.6); caster.castShadow=true; bot3d.add(caster);
+
+  // === ÖN: ultrasonik (2 göz) ===  ön = +Z
+  const usG=new THREE.Group();
+  const upcb=new THREE.Mesh(new THREE.BoxGeometry(5,2.2,1),new THREE.MeshStandardMaterial({color:0x20507a,roughness:.5}));
+  const eyeMat=new THREE.MeshStandardMaterial({color:0xb9b6ae,metalness:.35,roughness:.45});
+  const e1=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,1.0,20),eyeMat); e1.rotation.x=Math.PI/2; e1.position.set(-1.4,0,.6);
+  const e2=e1.clone(); e2.position.set(1.4,0,.6);
+  usG.add(upcb,e1,e2); usG.position.set(0,H*0.5,D/2+0.6); bot3d.add(usG);
+  const usMeta=[
+    { name:'left',  group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
+    { name:'front', group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
+    { name:'right', group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
+  ];
+
+  // === ÖN-ALT: çizgi sensörü modülü (2 sensör) ===
+  const lineMeta=[];
+  const lmod=new THREE.Mesh(new THREE.BoxGeometry(6,0.6,2.2),new THREE.MeshStandardMaterial({color:0x111418,roughness:.5}));
+  lmod.position.set(0,0.7,D/2+1.2); bot3d.add(lmod);
+  [['left',-1.6],['right',1.6]].forEach(([nm,xx])=>{
+    const s=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.4,1.1),new THREE.MeshStandardMaterial({color:0x0a0a0a,emissive:0x120000}));
+    s.position.set(xx,0.55,D/2+1.7); bot3d.add(s);
+    lineMeta.push({ name:nm, mesh:s });
+  });
+
+  // === ÜST: standoff'lar + mor PCB ===
+  const deckY=H+4.0;
+  for(let sx of [-1,1]) for(let sz of [-1,1]){
+    const st=new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,2.6,10),new THREE.MeshStandardMaterial({color:0xd9c08a,roughness:.6}));
+    st.position.set(sx*(W*0.42), H+1.2+1.3, sz*(D*0.34)); bot3d.add(st);
+  }
+  const pcb=new THREE.Mesh(new THREE.BoxGeometry(W*0.95,0.6,D*0.78),
+    new THREE.MeshStandardMaterial({color:PCB,roughness:.45,metalness:.05}));
+  pcb.position.set(0,deckY,0); pcb.castShadow=true; bot3d.add(pcb);
+  const pcbTopY=deckY+0.32;
+
+  // 5x5 LED matrix (sol-orta)
+  const matrix=[];
+  const mOffX=-W*0.27, mOffZ=0, step=1.15;
+  for(let r=0;r<5;r++) for(let c=0;c<5;c++){
+    const led=new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,.18,12),
+      new THREE.MeshStandardMaterial({color:0x401015,emissive:0x000000,emissiveIntensity:1,roughness:.4}));
+    led.rotation.x=Math.PI/2; // disk yatay... aslında düz dursun:
+    led.rotation.x=0;
+    led.position.set(mOffX+(c-2)*step, pcbTopY, mOffZ+(r-2)*step);
+    bot3d.add(led); matrix.push(led);
+  }
+  // 4 köşe RGB LED
+  const rgb=[];
+  [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([sx,sz])=>{
+    const led=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.4,16),
+      new THREE.MeshStandardMaterial({color:0x202020,emissive:0x000000,emissiveIntensity:1,roughness:.35}));
+    led.position.set(sx*(W*0.40), pcbTopY+0.1, sz*(D*0.32)); bot3d.add(led); rgb.push(led);
+  });
+  // 2 LDR (ön sağ/sol, küçük kubbe)
+  const ldr=[];
+  [['left',-1],['right',1]].forEach(([nm,sx])=>{
+    const d=new THREE.Mesh(new THREE.SphereGeometry(.45,12,8,0,Math.PI*2,0,Math.PI/2),
+      new THREE.MeshStandardMaterial({color:0xf2c14e,roughness:.5,metalness:.1}));
+    d.position.set(sx*(W*0.30), pcbTopY+0.1, D*0.30); bot3d.add(d);
+    ldr.push({name:nm, mesh:d});
+  });
+  // buzzer (siyah silindir)
+  const buzzer=new THREE.Mesh(new THREE.CylinderGeometry(.8,.8,.9,16),
+    new THREE.MeshStandardMaterial({color:0x0c0c0c,roughness:.5}));
+  buzzer.position.set(W*0.30, pcbTopY+0.3, -D*0.26); bot3d.add(buzzer);
+  // 2 buton
+  const buttons=[];
+  [['A',-D*0.20],['B',-D*0.30]].forEach(([nm,zz],i)=>{
+    const b=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.5,1.1),
+      new THREE.MeshStandardMaterial({color:0x202836,emissive:0x000000,roughness:.4}));
+    b.position.set(W*0.10+i*1.6, pcbTopY+0.1, -D*0.22); bot3d.add(b);
+    buttons.push({name:nm, mesh:b});
+  });
+  // yön oku
+  const arrow=new THREE.Mesh(new THREE.ConeGeometry(1.3,2.8,16),new THREE.MeshStandardMaterial({color:0xff8a3d}));
+  arrow.rotation.x=Math.PI/2; arrow.position.set(0,deckY+0.6,D*0.40); bot3d.add(arrow);
+
+  return { wheels, usMeta, lineMeta, deckTop:pcb, deckBot:body, rgb, matrix, ldr, buttons, buzzer, kind:'berrybot' };
+}
+
+let M = buildBot();
+function rebuildVehicle(v){
+  if(v===vehicle && M) return;
+  vehicle=v;
+  while(bot3d.children.length) bot3d.remove(bot3d.children[0]);
+  M = (vehicle==='berrybot') ? buildBerryBot() : buildBot();
+  rgbClearAll(); matrixClearAll();
+  if(vehicle==='berrybot'){
+    // varsayılan gülen yüz (matrix görünür olsun)
+    setMatrixRows([0b01010,0b01010,0b00000,0b10001,0b01110]);
+  }
+  applyBotTransform();
+}
 
 // Robot durumu
 const bot = {
@@ -435,6 +576,24 @@ function applyBotTransform(){ bot3d.position.set(bot.x,0,bot.z); bot3d.rotation.
 function resetRobot(){ bot.x=START.x; bot.z=START.z; bot.yaw=START.yaw; bot.wheelL=bot.wheelR=bot._vL=bot._vR=0;
   applyBotTransform(); flashToast('Robot sıfırlandı'); }
 applyBotTransform();
+
+/* ===================== BerryBot durum + RGB/Matrix/LDR/Buton ===================== */
+bot.ldrValue = 55;            // ortam ışığı (0-100), panelden/sliderdan ayarlanır
+bot.btnA = false; bot.btnB = false;
+bot.matrixState = new Array(25).fill(0);
+
+function hexToEmissive(hex){ const c=new THREE.Color(hex); return c; }
+function rgbClearAll(){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x202020); }); }
+function setRgbAll(hex){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.1; }); }
+function setRgbOne(i,hex){ if(!M||!M.rgb) return; const l=M.rgb[((i%M.rgb.length)+M.rgb.length)%M.rgb.length]; if(!l) return; l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.1; }
+function matrixClearAll(){ bot.matrixState.fill(0); if(M&&M.matrix) M.matrix.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x401015); }); }
+function setMatrixPixel(x,y,on){ const i=y*5+x; if(i<0||i>=25) return; bot.matrixState[i]=on?1:0;
+  const l=M&&M.matrix&&M.matrix[i]; if(!l) return;
+  if(on){ l.material.color.setHex(0xff3b30); l.material.emissive.setHex(0xff2a1f); l.material.emissiveIntensity=1.3; }
+  else { l.material.color.setHex(0x401015); l.material.emissive.setHex(0x000000); } }
+function setMatrixRows(rows){ // rows: 5 sayı (her biri 5-bit) veya 25 elemanlı dizi
+  if(Array.isArray(rows)&&rows.length===25){ for(let i=0;i<25;i++) setMatrixPixel(i%5, (i/5)|0, rows[i]); return; }
+  if(Array.isArray(rows)){ for(let y=0;y<5;y++){ const r=rows[y]||0; for(let x=0;x<5;x++) setMatrixPixel(x,y,(r>>(4-x))&1); } } }
 
 /* ===================== Sensör hesabı ===================== */
 const _ray = new THREE.Raycaster(); _ray.far = US_MAX;
@@ -463,9 +622,14 @@ function readLine(meta){
   return { digital:onLine?1:0, analog: onLine? 62000 : 7000 };
 }
 function updateSensors(){
-  bot.usDist.left  = castUS(M.usMeta[0]);
-  bot.usDist.front = castUS(M.usMeta[1]);
-  bot.usDist.right = castUS(M.usMeta[2]);
+  if(vehicle==='berrybot'){
+    bot.usDist.front = castUS(M.usMeta[1]);
+    bot.usDist.left = US_MAX; bot.usDist.right = US_MAX;     // BerryBot'ta tek ön sensör
+  } else {
+    bot.usDist.left  = castUS(M.usMeta[0]);
+    bot.usDist.front = castUS(M.usMeta[1]);
+    bot.usDist.right = castUS(M.usMeta[2]);
+  }
   const l=readLine(M.lineMeta[0]), r=readLine(M.lineMeta[1]);
   bot.lineVal.left=l.digital; bot.lineVal.right=r.digital;
   bot.lineAnalog.left=l.analog; bot.lineAnalog.right=r.analog;
@@ -564,6 +728,16 @@ const api = {
   async tone(pin, freq, dur){ playBeep(Number(freq)||440, Number(dur)||200); bot.buzzUntil=performance.now()+(Number(dur)||200); await _yield(); },
   async toneOff(pin){ stopBeep(); bot.buzzUntil=0; await _yield(); },
   print(x){ botLog(String(x)); },
+  async rgbAll(hex){ setRgbAll(hex); await _yield(); },
+  async rgbOne(i, hex){ setRgbOne(Number(i)||0, hex); await _yield(); },
+  async rgbClear(){ rgbClearAll(); await _yield(); },
+  async matrixPixel(x,y,on){ setMatrixPixel(Number(x)||0, Number(y)||0, !!on && on!=='0'); await _yield(); },
+  async matrixShow(rows){ setMatrixRows(rows); await _yield(); },
+  async matrixClear(){ matrixClearAll(); await _yield(); },
+  async ldr(pin){ await _yield(); const base=Math.max(0,Math.min(100,bot.ldrValue));
+    const off=(Number(pin)===26)?3:(Number(pin)===27?-3:0);
+    return Math.max(0,Math.min(100, Math.round(base+off))); },
+  async button(pin){ await _yield(); return (Number(pin)===11)? bot.btnB : bot.btnA; },
   map(v, fl, fh, tl, th){ const a=Number(v), b=Number(fl), c=Number(fh), d=Number(tl), e=Number(th);
     if(c===b) return d; return Math.round((a-b)*(e-d)/(c-b)+d); },
   millis(){ return Math.round(performance.now()); },
@@ -669,6 +843,32 @@ document.getElementById('btn-draw').onclick=()=>setDraw(!drawMode);
 document.getElementById('btn-cleartrack').onclick=()=>{ trackPts=[]; rebuildTrack(); document.getElementById('sel-track').value='none'; };
 document.getElementById('sel-track').onchange=e=>{ setDraw(false); trackPreset(e.target.value); };
 
+/* ---- Araç seçimi + BerryBot kontrolleri ---- */
+function syncVehicleUI(){
+  const sel=document.getElementById('sel-vehicle'); if(sel) sel.value=vehicle;
+  const bb = vehicle==='berrybot';
+  document.querySelectorAll('.bb-only').forEach(el=>{ el.style.display = bb ? '' : 'none'; });
+  // RoboBot'ta sol/sağ mesafe kartlarını göster, BerryBot'ta gizle (tek ön sensör)
+  ['us-left','us-right'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = bb?'none':''; });
+}
+document.getElementById('sel-vehicle').onchange=e=>{
+  rebuildVehicle(e.target.value); syncVehicleUI();
+  flashToast(vehicle==='berrybot'?'BerryBot yüklendi':'RoboBot yüklendi');
+  post({type:'rx:vehicle', vehicle});
+};
+document.getElementById('rng-light').oninput=e=>{ bot.ldrValue=Number(e.target.value)||0; };
+function holdBtn(id, set){ const el=document.getElementById(id); if(!el) return;
+  const dn=()=>{ set(true); el.classList.add('primary'); }, up=()=>{ set(false); el.classList.remove('primary'); };
+  el.addEventListener('mousedown',dn); el.addEventListener('touchstart',e=>{e.preventDefault();dn();},{passive:false});
+  window.addEventListener('mouseup',up); el.addEventListener('touchend',up);
+}
+holdBtn('btn-bA', v=>bot.btnA=v);
+holdBtn('btn-bB', v=>bot.btnB=v);
+// klavye: A / B butonları (yalnız BerryBot'ta anlamlı, her zaman dinler)
+window.addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=true; if(k==='b')bot.btnB=true; });
+window.addEventListener('keyup',  e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=false; if(k==='b')bot.btnB=false; });
+syncVehicleUI();
+
 /* ===================== Kod kaynağı (tek başına editör) ===================== */
 function getCode(){ if(EMBED) return externalCode; return document.getElementById('ta').value; }
 let externalCode='';
@@ -736,7 +936,10 @@ window.addEventListener('message',ev=>{
     case 'rx:reset': stopProgramExt(); resetRobot(); break;
     case 'rx:setConfig': if(d.config){ config=Object.assign({},config,d.config);
       if(d.config.us) config.us=Object.assign({},config.us,d.config.us);
-      if(d.config.line) config.line=Object.assign({},config.line,d.config.line); } break;
+      if(d.config.line) config.line=Object.assign({},config.line,d.config.line);
+      if(d.config.vehicle){ rebuildVehicle(d.config.vehicle); syncVehicleUI(); } } break;
+    case 'rx:setVehicle': rebuildVehicle(d.vehicle||'robobot'); syncVehicleUI(); break;
+    case 'rx:setLight': bot.ldrValue=Math.max(0,Math.min(100,Number(d.value)||0)); break;
     case 'rx:setTrack': setDraw(false); trackPreset(d.preset); break;
     case 'rx:clearTrack': trackPts=[]; rebuildTrack(); break;
     case 'rx:drawMode': setDraw(!!d.on); break;
@@ -745,8 +948,10 @@ window.addEventListener('message',ev=>{
     case 'rx:setPot': config.potValue=Number(d.value)||0; break;
     case 'rx:setTrackWidth': trackW=Math.max(1, Math.min(12, Number(d.w)||trackW)); rebuildTrack(); break;
     case 'rx:setColors':
-      if(d.top) M.deckTop.material.color.set(d.top);
-      if(d.bottom) M.deckBot.material.color.set(d.bottom);
+      if(vehicle==='robobot'){
+        if(d.top && M.deckTop) M.deckTop.material.color.set(d.top);
+        if(d.bottom && M.deckBot) M.deckBot.material.color.set(d.bottom);
+      }
       break;
   }
 });

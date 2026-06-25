@@ -12,6 +12,8 @@
 export interface UsPins { trig: number; echo: number; }
 
 export interface RoboBotConfig {
+  /** Simülasyon aracı */
+  vehicle: 'robobot' | 'berrybot';
   /** Sol tekerleği süren DC motor no */
   leftMotor: '1' | '2';
   /** Sağ tekerleği süren DC motor no */
@@ -31,6 +33,7 @@ export interface RoboBotConfig {
 }
 
 export const DEFAULT_CONFIG: RoboBotConfig = {
+  vehicle: 'robobot',
   leftMotor: '1',
   rightMotor: '2',
   us: {
@@ -71,6 +74,7 @@ export function saveRoboBotConfig(cfg: RoboBotConfig): void {
 /** Simülasyona gönderilecek sade config nesnesi (rx:setConfig payload'ı). */
 export function configPayload(cfg: RoboBotConfig) {
   return {
+    vehicle: cfg.vehicle,
     leftMotor: cfg.leftMotor,
     rightMotor: cfg.rightMotor,
     us: cfg.us,

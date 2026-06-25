@@ -133,28 +133,50 @@ export function installSimGenerators(): void {
   // ---- KLAVYE / GAMEPAD (simülasyonda yakalanmıyor → false) ----
   const falseVal = (): [string, number] => ['false', Order.ATOMIC];
   for (const t of ['rx_key_pressed', 'rx_key_just_pressed', 'rx_gamepad_pressed',
-    'rx_gamepad_just_pressed', 'rx_button_pressed']) {
+    'rx_gamepad_just_pressed']) {
     G.forBlock[t] = falseVal;
   }
+  // BerryBot butonu (A=varsayılan, pin 11=B) → sim'de canlı
+  G.forBlock['rx_button_pressed'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN') ?? '10';
+    return awaited(`await bot.button(${pin})`);
+  };
+
+  // ---- BerryBot: LDR ışık (0-100) → sim'de canlı (Işık slider'ı) ----
+  G.forBlock['rx_ldr_read'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN') ?? '27';
+    return awaited(`await bot.ldr(${pin})`);
+  };
+
+  // ---- BerryBot: RGB LED'ler → sim'de canlı ----
+  G.forBlock['rx_rgb_set_all'] = function (block: Blockly.Block) {
+    const col = block.getFieldValue('COLOUR') || '#ff0000';
+    return `await bot.rgbAll("${col}");\n`;
+  };
+  const rgbOne = function (block: Blockly.Block) {
+    const idx = G.valueToCode(block, 'INDEX', Order.NONE) || '0';
+    const col = block.getFieldValue('COLOUR') || '#ff0000';
+    return `await bot.rgbOne(${idx}, "${col}");\n`;
+  };
+  G.forBlock['rx_rgb_set_one'] = rgbOne;
+  G.forBlock['rx_neopixel_set'] = rgbOne;
+  G.forBlock['rx_rgb_clear'] = (): string => 'await bot.rgbClear();\n';
 
   // ---- SİMÜLASYONDA MODELLENMEYEN SENSÖRLER → makul varsayılan ----
   G.forBlock['rx_internal_temp'] = (): [string, number] => ['25', Order.ATOMIC];
-  G.forBlock['rx_ldr_read'] = (): [string, number] => ['500', Order.ATOMIC];
   G.forBlock['rx_ir_read_code'] = (): [string, number] => ['0', Order.ATOMIC];
   G.forBlock['rx_dht'] = (): [string, number] => ['0', Order.ATOMIC];
   G.forBlock['rx_shtc'] = (): [string, number] => ['0', Order.ATOMIC];
 
   // ---- DONANIM ÇIKIŞLARI (sim'de görsel karşılığı yok → sessizce atla) ----
-  // Öğrenci programında LED/OLED/servo bloğu olsa bile simülasyon çökmez;
-  // bu bloklar yalnızca yok sayılır, hareket/sensör blokları normal çalışır.
   const noop = (): string => '';
   for (const t of [
     'rx_digital_write', 'rx_pin_mode', 'rx_pwm_write', 'rx_relay',
     'rx_led_builtin', 'rx_led_external',
     'rx_servo_angle', 'rx_servo_v',
     'rx_motor_init', 'rx_pca', 'rx_ir_init',
-    'rx_neopixel_init', 'rx_neopixel_set', 'rx_neopixel_show',
-    'rx_rgb_init', 'rx_rgb_clear', 'rx_rgb_rainbow', 'rx_rgb_set_all', 'rx_rgb_set_one',
+    'rx_neopixel_init', 'rx_neopixel_show',
+    'rx_rgb_init', 'rx_rgb_rainbow',
     'rx_oled_init', 'rx_oled_clear', 'rx_oled_show', 'rx_oled_text', 'rx_oled_eyes',
     'rx_oled_image', 'rx_oled_scroll_text', 'rx_oled_shape',
     'rx_play_song',
