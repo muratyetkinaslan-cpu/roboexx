@@ -467,16 +467,32 @@ function buildBerryBot(){
 }
 
 // Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
-const BB_BIN_VER='4';
+const BB_BIN_VER='5';
 let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
   if(_bbLoading) return; _bbLoading=true;
   try{
     if(!_bbCache){
+      bbProgress(0);
       // URL'ye sürüm ekleyince eski cache otomatik geçersiz olur (gizli/normal sekme farkı biter)
       const res=await fetch('berrybot.bin?v='+BB_BIN_VER, {cache:'force-cache'});
       if(!res.ok) throw new Error('berrybot.bin yüklenemedi (HTTP '+res.status+')');
-      _bbCache=await res.arrayBuffer();
+      const total=+(res.headers.get('content-length')||0);
+      if(res.body && res.body.getReader){
+        const reader=res.body.getReader(); const chunks=[]; let got=0;
+        for(;;){
+          const {done,value}=await reader.read();
+          if(done) break;
+          chunks.push(value); got+=value.length;
+          bbProgress(total? got/total : null, got);   // total yoksa belirsiz
+        }
+        const all=new Uint8Array(got); let off=0;
+        for(const c of chunks){ all.set(c,off); off+=c.length; }
+        _bbCache=all.buffer;
+      } else {
+        _bbCache=await res.arrayBuffer();   // stream yoksa fallback
+      }
+      bbProgress(1);
     }
     const buf=_bbCache, dv=new DataView(buf);
     if(buf.byteLength<8) throw new Error('dosya çok küçük ('+buf.byteLength+'B)');
@@ -508,10 +524,10 @@ async function loadBerryBotMesh(grp){
       m.userData.bbMesh=true; grp.add(m); built++;
     });
     if(!built) throw new Error('hiç parça oluşturulamadı');
-    bbError(null);
+    bbError(null); bbProgress(-1);
     flashToast('BerryBot modeli yüklendi ('+built+' parça)');
   }catch(e){
-    console.error('berrybot mesh', e);
+    console.error('berrybot mesh', e); bbProgress(-1);
     bbError('BerryBot 3D modeli yüklenemedi: '+(e&&e.message?e.message:e)+'  •  Tarayıcı cache temizleyip yenileyin (Ctrl+Shift+R).');
   }finally{ _bbLoading=false; }
 }
@@ -525,6 +541,30 @@ function bbError(msg){
       'font:13px/1.4 system-ui;box-shadow:0 6px 20px rgba(0,0,0,.4);text-align:center';
     (document.getElementById('app')||document.body).appendChild(el); }
   el.textContent=msg;
+}
+// Yükleme barı: frac 0..1 yüzde, null=belirsiz animasyon, -1=gizle
+function bbProgress(frac, gotBytes){
+  let el=document.getElementById('bb-prog');
+  if(frac===-1){ if(el) el.remove(); return; }
+  if(!el){
+    el=document.createElement('div'); el.id='bb-prog';
+    el.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;'+
+      'width:240px;background:rgba(18,22,30,.92);border:1px solid #2b3650;border-radius:12px;'+
+      'padding:16px 18px;font:13px/1.4 system-ui;color:#dfe8f5;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.45)';
+    el.innerHTML='<div style="margin-bottom:10px;font-weight:600">BerryBot yükleniyor…</div>'+
+      '<div style="height:8px;background:#222b3d;border-radius:99px;overflow:hidden">'+
+      '<div id="bb-prog-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#ff8a3d,#ffb35c);border-radius:99px;transition:width .15s"></div></div>'+
+      '<div id="bb-prog-pct" style="margin-top:8px;color:#9fb0c8;font-variant-numeric:tabular-nums">%0</div>';
+    (document.getElementById('app')||document.body).appendChild(el);
+  }
+  const fill=el.querySelector('#bb-prog-fill'), pct=el.querySelector('#bb-prog-pct');
+  if(frac==null){ // belirsiz: kayan animasyon + indirilen MB
+    fill.style.width='40%'; fill.style.transform='translateX('+((Date.now()/8)%160-40)+'%)';
+    pct.textContent=gotBytes? (gotBytes/1e6).toFixed(1)+' MB' : 'indiriliyor…';
+  } else {
+    const p=Math.max(0,Math.min(100,Math.round(frac*100)));
+    fill.style.transform='none'; fill.style.width=p+'%'; pct.textContent='%'+p;
+  }
 }
 
 let M = buildBot();
