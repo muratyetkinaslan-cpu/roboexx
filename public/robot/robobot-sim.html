@@ -466,32 +466,65 @@ function buildBerryBot(){
   return { wheels:[], usMeta, lineMeta, deckTop:null, deckBot:null, rgb, matrix, ldr:[], buttons:[], buzzer:null, kind:'berrybot', group:grp };
 }
 
-let _bbCache=null;
+// Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
+const BB_BIN_VER='4';
+let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
+  if(_bbLoading) return; _bbLoading=true;
   try{
     if(!_bbCache){
-      const res=await fetch('berrybot.bin', {cache:'force-cache'});
-      if(!res.ok) throw new Error('berrybot.bin bulunamadı ('+res.status+')');
+      // URL'ye sürüm ekleyince eski cache otomatik geçersiz olur (gizli/normal sekme farkı biter)
+      const res=await fetch('berrybot.bin?v='+BB_BIN_VER, {cache:'force-cache'});
+      if(!res.ok) throw new Error('berrybot.bin yüklenemedi (HTTP '+res.status+')');
       _bbCache=await res.arrayBuffer();
     }
     const buf=_bbCache, dv=new DataView(buf);
-    if(buf.byteLength<8) throw new Error('dosya çok küçük');
+    if(buf.byteLength<8) throw new Error('dosya çok küçük ('+buf.byteLength+'B)');
     const jl=dv.getUint32(0,true);
-    if(jl<=0 || jl>65536 || 4+jl>buf.byteLength) throw new Error('geçersiz manifest (yanlış dosya yüklendi?)');
+    if(jl<=0 || jl>65536 || 4+jl>buf.byteLength) throw new Error('geçersiz başlık (eski/bozuk dosya?)');
     const man=JSON.parse(new TextDecoder().decode(new Uint8Array(buf,4,jl)));
     const posOff=4+jl, idxOff=posOff+man.vTotal*3*4;
+    const need=idxOff+man.iTotal*4;
+    if(need>buf.byteLength) throw new Error('dosya eksik ('+buf.byteLength+'/'+need+'B) — cache temizle');
+    // Tüm buffer'ı tek seferde oku
     const pos=new Float32Array(buf, posOff, man.vTotal*3);
     const idx=new Uint32Array(buf, idxOff, man.iTotal);
+    let built=0;
     man.groups.forEach(g=>{
+      // Paylaşımlı buffer view yerine TAZE kopya -> GPU upload sorunlarını ve nokta-bulutu hatasını önler
+      const vp=new Float32Array(g.vCount*3);
+      vp.set(pos.subarray(g.vStart*3, (g.vStart+g.vCount)*3));
+      const src=idx.subarray(g.iStart, g.iStart+g.iCount);
+      // index'ler grup-içi 0-tabanlı; yine de sınır güvenliği
+      const ip=new Uint32Array(src.length); let bad=false;
+      for(let k=0;k<src.length;k++){ const vi=src[k]; if(vi>=g.vCount){bad=true;break;} ip[k]=vi; }
+      if(bad){ console.warn('grup index aralık dışı, atlandı', g.color); return; }
       const geo=new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(g.vStart*3,(g.vStart+g.vCount)*3),3));
-      geo.setIndex(new THREE.BufferAttribute(idx.subarray(g.iStart,g.iStart+g.iCount),1));
+      geo.setAttribute('position', new THREE.BufferAttribute(vp,3));
+      geo.setIndex(new THREE.BufferAttribute(ip,1));
       geo.computeVertexNormals();
       const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(g.color), roughness:.72, metalness:.05});
-      const m=new THREE.Mesh(geo,mat); m.castShadow=true; m.receiveShadow=true; grp.add(m);
+      const m=new THREE.Mesh(geo,mat); m.castShadow=true; m.receiveShadow=true;
+      m.userData.bbMesh=true; grp.add(m); built++;
     });
-    flashToast('BerryBot modeli yüklendi');
-  }catch(e){ console.error('berrybot mesh',e); flashToast('BerryBot modeli yüklenemedi'); }
+    if(!built) throw new Error('hiç parça oluşturulamadı');
+    bbError(null);
+    flashToast('BerryBot modeli yüklendi ('+built+' parça)');
+  }catch(e){
+    console.error('berrybot mesh', e);
+    bbError('BerryBot 3D modeli yüklenemedi: '+(e&&e.message?e.message:e)+'  •  Tarayıcı cache temizleyip yenileyin (Ctrl+Shift+R).');
+  }finally{ _bbLoading=false; }
+}
+// Kalıcı hata kutusu (toast kaçarsa görünsün)
+function bbError(msg){
+  let el=document.getElementById('bb-error');
+  if(!msg){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement('div'); el.id='bb-error';
+    el.style.cssText='position:absolute;left:50%;top:14px;transform:translateX(-50%);max-width:80%;z-index:50;'+
+      'background:#3a0f10;color:#ffd9d9;border:1px solid #ff5a4d;padding:10px 14px;border-radius:10px;'+
+      'font:13px/1.4 system-ui;box-shadow:0 6px 20px rgba(0,0,0,.4);text-align:center';
+    (document.getElementById('app')||document.body).appendChild(el); }
+  el.textContent=msg;
 }
 
 let M = buildBot();
@@ -500,6 +533,7 @@ function rebuildVehicle(v){
   vehicle=v;
   while(bot3d.children.length) bot3d.remove(bot3d.children[0]);
   M = (vehicle==='berrybot') ? buildBerryBot() : buildBot();
+  if(vehicle!=='berrybot' && typeof bbError==='function') bbError(null);
   rgbClearAll(); matrixClearAll();
   if(vehicle==='berrybot'){
     // varsayılan gülen yüz (matrix görünür olsun)
