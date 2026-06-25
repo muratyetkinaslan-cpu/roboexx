@@ -279,9 +279,10 @@ addWall(4, WALL_H, ARENA+4,  HALF, WALL_H/2, 0);
 
 /* ===================== Çevre (sokak dekoru: çim + ağaçlar) ===================== */
 const envGroup=new THREE.Group(); scene.add(envGroup);
+const ROADLEN=ARENA*6;
 // arena dışına uzanan çim zemin
 const grassMat=new THREE.MeshStandardMaterial({color:0x3f7d3a, roughness:1});
-const grass=new THREE.Mesh(new THREE.PlaneGeometry(ARENA*4, ARENA*4), grassMat);
+const grass=new THREE.Mesh(new THREE.PlaneGeometry(ARENA*10, ARENA*10), grassMat);
 grass.rotation.x=-Math.PI/2; grass.position.y=-0.5; grass.receiveShadow=true; envGroup.add(grass);
 // basit ağaç (gövde + yaprak konisi)
 function makeTree(x,z,s){
@@ -299,39 +300,48 @@ function makeTree(x,z,s){
 }
 // arena dışına dağıt
 (function(){
-  const R=HALF+30, far=HALF*2.6;
-  for(let i=0;i<26;i++){
-    let x,z; do{ x=(Math.random()*2-1)*far; z=(Math.random()*2-1)*far; }
-    while(Math.abs(x)<R && Math.abs(z)<R);   // arenanın içine koyma
-    makeTree(x,z, 0.8+Math.random()*0.8);
+  const R=HALF+30;
+  for(let i=0;i<70;i++){
+    // yol kenarlarına dizili + dağınık ağaçlar
+    const z=(Math.random()*2-1)*(ROADLEN*0.5);
+    const side=Math.random()<0.5?-1:1;
+    const x=side*(ARENA*0.75 + Math.random()*ARENA*1.5);
+    makeTree(x,z, 0.8+Math.random()*0.9);
   }
 })();
-// asfalt yol (sokak ortamı) — arena ortasından geçen şerit
+// asfalt yol (sokak ortamı) — geniş, sınırsız his veren yol
 const roadGroup=new THREE.Group(); scene.add(roadGroup);
 (function(){
-  const road=new THREE.Mesh(new THREE.PlaneGeometry(ARENA, ARENA),
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(ARENA*1.3, ROADLEN),
     new THREE.MeshStandardMaterial({color:0x33373d, roughness:.95}));
   road.rotation.x=-Math.PI/2; road.position.y=0.04; roadGroup.add(road);
   // kesik orta çizgi
-  for(let z=-HALF+10; z<HALF; z+=20){
+  for(let z=-ROADLEN/2+10; z<ROADLEN/2; z+=20){
     const dash=new THREE.Mesh(new THREE.PlaneGeometry(2.2,10),
       new THREE.MeshStandardMaterial({color:0xf2d23a, roughness:.6}));
     dash.rotation.x=-Math.PI/2; dash.position.set(0,0.06,z); roadGroup.add(dash);
   }
-  // kenar şeritleri
-  [-1,1].forEach(s=>{ const e=new THREE.Mesh(new THREE.PlaneGeometry(2,ARENA),
-    new THREE.MeshStandardMaterial({color:0xdfe3e8, roughness:.7}));
-    e.rotation.x=-Math.PI/2; e.position.set(s*(HALF-10),0.06,0); roadGroup.add(e); });
+  // kenar şeritleri + kaldırım
+  [-1,1].forEach(s=>{
+    const e=new THREE.Mesh(new THREE.PlaneGeometry(2,ROADLEN),
+      new THREE.MeshStandardMaterial({color:0xdfe3e8, roughness:.7}));
+    e.rotation.x=-Math.PI/2; e.position.set(s*(ARENA*0.62),0.06,0); roadGroup.add(e);
+    const curb=new THREE.Mesh(new THREE.BoxGeometry(6,3,ROADLEN),
+      new THREE.MeshStandardMaterial({color:0x8d9199, roughness:.9}));
+    curb.position.set(s*(ARENA*0.68),1.5,0); roadGroup.add(curb);
+  });
 })();
 envGroup.visible=false; roadGroup.visible=false;   // varsayılan: Test Parkuru (sade)
-let environment='test';
+let environment='test', boundless=false;
 function setEnvironment(env){
   environment=env;
   const street=(env==='street');
+  boundless=street;
   envGroup.visible=street; roadGroup.visible=street;
-  // sokakta zemin/ızgara gizlensin (yol görünsün), testte ızgara
+  walls.forEach(w=>w.visible=!street);          // sokakta duvar yok (sınırsız)
   floor.visible=!street; gFine.visible=!street; gMaj.visible=!street;
-  flashToast(street?'Sokak / Yol ortamı':'Test Parkuru');
+  if(!street){ target.set(0,0,0); updateCam(); } // testte kamera merkeze döner
+  flashToast(street?'Sokak / Yol — sınırsız sürüş':'Test Parkuru');
 }
 
 /* ===================== Pist (çizgi) ===================== */
@@ -563,7 +573,7 @@ function buildBerryBot(){
 }
 
 // Sürüm: berrybot.bin her değiştiğinde artır -> tarayıcı eski cache yerine yeniyi çeker.
-const BB_BIN_VER='8';
+const BB_BIN_VER='9';
 let _bbCache=null, _bbLoading=false;
 async function loadBerryBotMesh(grp){
   if(_bbLoading) return; _bbLoading=true;
@@ -844,7 +854,8 @@ function stepPhysics(dt){
   const fx=Math.sin(bot.yaw), fz=Math.cos(bot.yaw);
   let nx=bot.x + fx*v*dt, nz=bot.z + fz*v*dt;
   // duvar sınırı
-  const lim=HALF-ROBOT_R-1; nx=Math.max(-lim,Math.min(lim,nx)); nz=Math.max(-lim,Math.min(lim,nz));
+  const lim = boundless ? (ROADLEN/2 - 6) : (HALF-ROBOT_R-1);
+  nx=Math.max(-lim,Math.min(lim,nx)); nz=Math.max(-lim,Math.min(lim,nz));
   // engel çarpışması
   for(const o of obstacles){ const push=circleVsAABB(nx,nz,o.group.position.x,o.group.position.z,o.halfX!=null?o.halfX:o.half,o.halfZ!=null?o.halfZ:o.half,ROBOT_R+0.5);
     if(push){ nx=push.x; nz=push.z; } }
@@ -1189,6 +1200,9 @@ function loop(){
   let dt=clock.getDelta(); if(dt>0.05) dt=0.05;
   stepPhysics(dt);
   updateSensors();
+  if(boundless){ // sokakta kamera botu takip etsin (sınırsız sürüş)
+    target.x += (bot.x-target.x)*0.08; target.z += (bot.z-target.z)*0.08; updateCam();
+  }
   hudT+=dt; if(hudT>0.05){ hudT=0; updateHUD(); updateObsLabels();
     post({type:'rx:sensors', d:{...bot.usDist}, line:{...bot.lineVal}, lineAnalog:{...bot.lineAnalog},
       motors:{l:Math.round(bot._vL/MAX_CMS*100), r:Math.round(bot._vR/MAX_CMS*100)}, running:bot.running}); }
