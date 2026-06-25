@@ -469,9 +469,15 @@ function buildBerryBot(){
 let _bbCache=null;
 async function loadBerryBotMesh(grp){
   try{
-    if(!_bbCache){ const res=await fetch('robot/berrybot.bin'); _bbCache=await res.arrayBuffer(); }
+    if(!_bbCache){
+      const res=await fetch('berrybot.bin', {cache:'force-cache'});
+      if(!res.ok) throw new Error('berrybot.bin bulunamadı ('+res.status+')');
+      _bbCache=await res.arrayBuffer();
+    }
     const buf=_bbCache, dv=new DataView(buf);
+    if(buf.byteLength<8) throw new Error('dosya çok küçük');
     const jl=dv.getUint32(0,true);
+    if(jl<=0 || jl>65536 || 4+jl>buf.byteLength) throw new Error('geçersiz manifest (yanlış dosya yüklendi?)');
     const man=JSON.parse(new TextDecoder().decode(new Uint8Array(buf,4,jl)));
     const posOff=4+jl, idxOff=posOff+man.vTotal*3*4;
     const pos=new Float32Array(buf, posOff, man.vTotal*3);
@@ -485,7 +491,7 @@ async function loadBerryBotMesh(grp){
       const m=new THREE.Mesh(geo,mat); m.castShadow=true; m.receiveShadow=true; grp.add(m);
     });
     flashToast('BerryBot modeli yüklendi');
-  }catch(e){ console.error('berrybot mesh',e); }
+  }catch(e){ console.error('berrybot mesh',e); flashToast('BerryBot modeli yüklenemedi'); }
 }
 
 let M = buildBot();
