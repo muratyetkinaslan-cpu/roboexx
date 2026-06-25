@@ -433,117 +433,59 @@ function buildBot(){
 
 /* ===================== BerryBot (ahşap kasa + mor PicoBricks kartı) ===================== */
 function buildBerryBot(){
-  const WOOD=0xd8c098, WOOD_D=0x6b4a2a, PCB=0x7a2fd0;
-  const W=20, D=18, H=8.5;             // kasa ölçüleri (cm)
-  // ahşap kasa (kutu) + koyu kenar trim
-  const body=new THREE.Mesh(new THREE.BoxGeometry(W,H,D),
-    new THREE.MeshStandardMaterial({color:WOOD,roughness:.85,metalness:.02}));
-  body.position.y=H/2+1.2; body.castShadow=true; body.receiveShadow=true; bot3d.add(body);
-  // yan havalandırma çizgileri (ince koyu kutular)
-  for(let s of [-1,1]) for(let i=0;i<6;i++){
-    const v=new THREE.Mesh(new THREE.BoxGeometry(0.25,0.5,D*0.62),
-      new THREE.MeshStandardMaterial({color:WOOD_D,roughness:.9}));
-    v.position.set(s*(W/2+0.02), H/2+1.2+(i-2.5)*0.95, 0); bot3d.add(v);
-  }
-  // ön/arka koyu trim çerçeve
-  [[-D/2,'f'],[D/2,'b']].forEach(([zz])=>{
-    const fr=new THREE.Mesh(new THREE.BoxGeometry(W+0.3,H+0.3,0.5),
-      new THREE.MeshStandardMaterial({color:WOOD_D,roughness:.85}));
-    fr.position.set(0,H/2+1.2,zz); bot3d.add(fr);
-  });
-
-  // tekerlekler (siyah, yanlarda) — X ekseni etrafında döner
-  const wheels=[];
-  [-1,1].forEach(side=>{
-    const w=new THREE.Group();
-    const tire=new THREE.Mesh(new THREE.CylinderGeometry(4.6,4.6,2.6,28),
-      new THREE.MeshStandardMaterial({color:0x1a1d22,roughness:.85})); tire.rotation.z=Math.PI/2; tire.castShadow=true;
-    const hub=new THREE.Mesh(new THREE.CylinderGeometry(2.0,2.0,2.7,8),
-      new THREE.MeshStandardMaterial({color:0xece3d2,roughness:.6})); hub.rotation.z=Math.PI/2;
-    w.add(tire,hub); w.position.set(side*(W/2+1.3), 4.6, 1.5); bot3d.add(w); wheels.push(w);
-  });
-  // arka kaster topu
-  const caster=new THREE.Mesh(new THREE.SphereGeometry(1.5,16,12),
-    new THREE.MeshStandardMaterial({color:0x2a2f38,metalness:.4,roughness:.4}));
-  caster.position.set(0,1.5,-D/2+1.6); caster.castShadow=true; bot3d.add(caster);
-
-  // === ÖN: ultrasonik (2 göz) ===  ön = +Z
-  const usG=new THREE.Group();
-  const upcb=new THREE.Mesh(new THREE.BoxGeometry(5,2.2,1),new THREE.MeshStandardMaterial({color:0x20507a,roughness:.5}));
-  const eyeMat=new THREE.MeshStandardMaterial({color:0xb9b6ae,metalness:.35,roughness:.45});
-  const e1=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,1.0,20),eyeMat); e1.rotation.x=Math.PI/2; e1.position.set(-1.4,0,.6);
-  const e2=e1.clone(); e2.position.set(1.4,0,.6);
-  usG.add(upcb,e1,e2); usG.position.set(0,H*0.5,D/2+0.6); bot3d.add(usG);
+  // GERÇEK BerryBot modeli (Berry_Bot.3mf -> berrybot.bin). Ön = +Z.
+  const grp=new THREE.Group(); bot3d.add(grp);
+  const ZF=7.0, YT=8.0;                       // ön kenar / kart üstü (cm, bbox'tan)
+  function anchor(x,y,z){ const o=new THREE.Object3D(); o.position.set(x,y,z); grp.add(o); return o; }
+  // ön ultrasonik (tek), ön = +Z
+  const usG=anchor(0, 4.2, ZF);
   const usMeta=[
-    { name:'left',  group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
-    { name:'front', group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
-    { name:'right', group:usG, fwdLocal:new THREE.Vector3(0,0,1) },
+    {name:'left', group:usG, fwdLocal:new THREE.Vector3(0,0,1)},
+    {name:'front',group:usG, fwdLocal:new THREE.Vector3(0,0,1)},
+    {name:'right',group:usG, fwdLocal:new THREE.Vector3(0,0,1)},
   ];
-
-  // === ÖN-ALT: çizgi sensörü modülü (2 sensör) ===
-  const lineMeta=[];
-  const lmod=new THREE.Mesh(new THREE.BoxGeometry(6,0.6,2.2),new THREE.MeshStandardMaterial({color:0x111418,roughness:.5}));
-  lmod.position.set(0,0.7,D/2+1.2); bot3d.add(lmod);
-  [['left',-1.6],['right',1.6]].forEach(([nm,xx])=>{
-    const s=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.4,1.1),new THREE.MeshStandardMaterial({color:0x0a0a0a,emissive:0x120000}));
-    s.position.set(xx,0.55,D/2+1.7); bot3d.add(s);
-    lineMeta.push({ name:nm, mesh:s });
+  // alt-ön 2 çizgi sensörü
+  const lL=anchor(-2.2,0.5,ZF-0.4), lR=anchor(2.2,0.5,ZF-0.4);
+  const lineMeta=[{name:'left',mesh:lL},{name:'right',mesh:lR}];
+  // fonksiyonel LED kaplamaları (kart üstüne, açılınca yanar; kapalıyken gizli)
+  const rgb=[], matrix=[];
+  [[-5,4.5],[5,4.5],[5,-4.5],[-5,-4.5]].forEach(([x,z])=>{
+    const l=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.3,16),
+      new THREE.MeshStandardMaterial({color:0x111111,emissive:0x000000,emissiveIntensity:1.2,roughness:.4}));
+    l.position.set(x, YT+0.18, z); l.visible=false; l.userData.overlay=true; grp.add(l); rgb.push(l);
   });
-
-  // === ÜST: standoff'lar + mor PCB ===
-  const deckY=H+4.0;
-  for(let sx of [-1,1]) for(let sz of [-1,1]){
-    const st=new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,2.6,10),new THREE.MeshStandardMaterial({color:0xd9c08a,roughness:.6}));
-    st.position.set(sx*(W*0.42), H+1.2+1.3, sz*(D*0.34)); bot3d.add(st);
+  const mX=-2.4, mZ=-0.5, st=0.95;
+  for(let r=0;r<5;r++)for(let c=0;c<5;c++){
+    const led=new THREE.Mesh(new THREE.CylinderGeometry(.24,.24,.16,10),
+      new THREE.MeshStandardMaterial({color:0x401015,emissive:0x000000,emissiveIntensity:1.3,roughness:.4}));
+    led.position.set(mX+(c-2)*st, YT+0.14, mZ+(r-2)*st); led.visible=false; led.userData.overlay=true; grp.add(led); matrix.push(led);
   }
-  const pcb=new THREE.Mesh(new THREE.BoxGeometry(W*0.95,0.6,D*0.78),
-    new THREE.MeshStandardMaterial({color:PCB,roughness:.45,metalness:.05}));
-  pcb.position.set(0,deckY,0); pcb.castShadow=true; bot3d.add(pcb);
-  const pcbTopY=deckY+0.32;
+  const arrow=new THREE.Mesh(new THREE.ConeGeometry(1.0,2.2,16),new THREE.MeshStandardMaterial({color:0xff8a3d}));
+  arrow.rotation.x=Math.PI/2; arrow.position.set(0,YT+1.1,ZF-0.4); grp.add(arrow);
+  loadBerryBotMesh(grp);
+  return { wheels:[], usMeta, lineMeta, deckTop:null, deckBot:null, rgb, matrix, ldr:[], buttons:[], buzzer:null, kind:'berrybot', group:grp };
+}
 
-  // 5x5 LED matrix (sol-orta)
-  const matrix=[];
-  const mOffX=-W*0.27, mOffZ=0, step=1.15;
-  for(let r=0;r<5;r++) for(let c=0;c<5;c++){
-    const led=new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,.18,12),
-      new THREE.MeshStandardMaterial({color:0x401015,emissive:0x000000,emissiveIntensity:1,roughness:.4}));
-    led.rotation.x=Math.PI/2; // disk yatay... aslında düz dursun:
-    led.rotation.x=0;
-    led.position.set(mOffX+(c-2)*step, pcbTopY, mOffZ+(r-2)*step);
-    bot3d.add(led); matrix.push(led);
-  }
-  // 4 köşe RGB LED
-  const rgb=[];
-  [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([sx,sz])=>{
-    const led=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.4,16),
-      new THREE.MeshStandardMaterial({color:0x202020,emissive:0x000000,emissiveIntensity:1,roughness:.35}));
-    led.position.set(sx*(W*0.40), pcbTopY+0.1, sz*(D*0.32)); bot3d.add(led); rgb.push(led);
-  });
-  // 2 LDR (ön sağ/sol, küçük kubbe)
-  const ldr=[];
-  [['left',-1],['right',1]].forEach(([nm,sx])=>{
-    const d=new THREE.Mesh(new THREE.SphereGeometry(.45,12,8,0,Math.PI*2,0,Math.PI/2),
-      new THREE.MeshStandardMaterial({color:0xf2c14e,roughness:.5,metalness:.1}));
-    d.position.set(sx*(W*0.30), pcbTopY+0.1, D*0.30); bot3d.add(d);
-    ldr.push({name:nm, mesh:d});
-  });
-  // buzzer (siyah silindir)
-  const buzzer=new THREE.Mesh(new THREE.CylinderGeometry(.8,.8,.9,16),
-    new THREE.MeshStandardMaterial({color:0x0c0c0c,roughness:.5}));
-  buzzer.position.set(W*0.30, pcbTopY+0.3, -D*0.26); bot3d.add(buzzer);
-  // 2 buton
-  const buttons=[];
-  [['A',-D*0.20],['B',-D*0.30]].forEach(([nm,zz],i)=>{
-    const b=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.5,1.1),
-      new THREE.MeshStandardMaterial({color:0x202836,emissive:0x000000,roughness:.4}));
-    b.position.set(W*0.10+i*1.6, pcbTopY+0.1, -D*0.22); bot3d.add(b);
-    buttons.push({name:nm, mesh:b});
-  });
-  // yön oku
-  const arrow=new THREE.Mesh(new THREE.ConeGeometry(1.3,2.8,16),new THREE.MeshStandardMaterial({color:0xff8a3d}));
-  arrow.rotation.x=Math.PI/2; arrow.position.set(0,deckY+0.6,D*0.40); bot3d.add(arrow);
-
-  return { wheels, usMeta, lineMeta, deckTop:pcb, deckBot:body, rgb, matrix, ldr, buttons, buzzer, kind:'berrybot' };
+let _bbCache=null;
+async function loadBerryBotMesh(grp){
+  try{
+    if(!_bbCache){ const res=await fetch('robot/berrybot.bin'); _bbCache=await res.arrayBuffer(); }
+    const buf=_bbCache, dv=new DataView(buf);
+    const jl=dv.getUint32(0,true);
+    const man=JSON.parse(new TextDecoder().decode(new Uint8Array(buf,4,jl)));
+    const posOff=4+jl, idxOff=posOff+man.vTotal*3*4;
+    const pos=new Float32Array(buf, posOff, man.vTotal*3);
+    const idx=new Uint32Array(buf, idxOff, man.iTotal);
+    man.groups.forEach(g=>{
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(g.vStart*3,(g.vStart+g.vCount)*3),3));
+      geo.setIndex(new THREE.BufferAttribute(idx.subarray(g.iStart,g.iStart+g.iCount),1));
+      geo.computeVertexNormals();
+      const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(g.color), roughness:.72, metalness:.05});
+      const m=new THREE.Mesh(geo,mat); m.castShadow=true; m.receiveShadow=true; grp.add(m);
+    });
+    flashToast('BerryBot modeli yüklendi');
+  }catch(e){ console.error('berrybot mesh',e); }
 }
 
 let M = buildBot();
@@ -583,14 +525,14 @@ bot.btnA = false; bot.btnB = false;
 bot.matrixState = new Array(25).fill(0);
 
 function hexToEmissive(hex){ const c=new THREE.Color(hex); return c; }
-function rgbClearAll(){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x202020); }); }
-function setRgbAll(hex){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.1; }); }
-function setRgbOne(i,hex){ if(!M||!M.rgb) return; const l=M.rgb[((i%M.rgb.length)+M.rgb.length)%M.rgb.length]; if(!l) return; l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.1; }
-function matrixClearAll(){ bot.matrixState.fill(0); if(M&&M.matrix) M.matrix.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x401015); }); }
+function rgbClearAll(){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x111111); if(l.userData.overlay) l.visible=false; }); }
+function setRgbAll(hex){ if(!M||!M.rgb) return; M.rgb.forEach(l=>{ l.visible=true; l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.2; }); }
+function setRgbOne(i,hex){ if(!M||!M.rgb) return; const l=M.rgb[((i%M.rgb.length)+M.rgb.length)%M.rgb.length]; if(!l) return; l.visible=true; l.material.color.set(hex); l.material.emissive.set(hex); l.material.emissiveIntensity=1.2; }
+function matrixClearAll(){ bot.matrixState.fill(0); if(M&&M.matrix) M.matrix.forEach(l=>{ l.material.emissive.setHex(0x000000); l.material.color.setHex(0x401015); if(l.userData.overlay) l.visible=false; }); }
 function setMatrixPixel(x,y,on){ const i=y*5+x; if(i<0||i>=25) return; bot.matrixState[i]=on?1:0;
   const l=M&&M.matrix&&M.matrix[i]; if(!l) return;
-  if(on){ l.material.color.setHex(0xff3b30); l.material.emissive.setHex(0xff2a1f); l.material.emissiveIntensity=1.3; }
-  else { l.material.color.setHex(0x401015); l.material.emissive.setHex(0x000000); } }
+  if(on){ l.visible=true; l.material.color.setHex(0xff3b30); l.material.emissive.setHex(0xff2a1f); l.material.emissiveIntensity=1.4; }
+  else { l.material.emissive.setHex(0x000000); l.material.color.setHex(0x401015); if(l.userData.overlay) l.visible=false; } }
 function setMatrixRows(rows){ // rows: 5 sayı (her biri 5-bit) veya 25 elemanlı dizi
   if(Array.isArray(rows)&&rows.length===25){ for(let i=0;i<25;i++) setMatrixPixel(i%5, (i/5)|0, rows[i]); return; }
   if(Array.isArray(rows)){ for(let y=0;y<5;y++){ const r=rows[y]||0; for(let x=0;x<5;x++) setMatrixPixel(x,y,(r>>(4-x))&1); } } }
@@ -661,9 +603,9 @@ function stepPhysics(dt){
     if(push){ nx=push.x; nz=push.z; } }
   bot.x=nx; bot.z=nz;
   applyBotTransform();
-  // tekerlek dönüşü
-  M.wheels[0].rotation.x += (bot._vL/WHEEL_R)*dt;
-  M.wheels[1].rotation.x += (bot._vR/WHEEL_R)*dt;
+  // tekerlek dönüşü (BerryBot gerçek mesh'inde ayrı teker yok → atla)
+  if(M.wheels && M.wheels[0]){ M.wheels[0].rotation.x += (bot._vL/WHEEL_R)*dt; }
+  if(M.wheels && M.wheels[1]){ M.wheels[1].rotation.x += (bot._vR/WHEEL_R)*dt; }
 }
 
 /* ===================== HUD ===================== */
