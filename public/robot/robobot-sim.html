@@ -348,7 +348,6 @@ function setEnvironment(env){
 }
 
 /* ===================== Gelişmiş test parkuru: rampalar + virajlar ===================== */
-bot.y=0; bot.pitch=0; bot.roll=0;
 const rampMeshes=[];
 const solids=[];   // sabit çarpışan decor (slalom direkleri)
 const trackDecor=new THREE.Group(); scene.add(trackDecor);
@@ -782,6 +781,7 @@ applyBotTransform();
 
 /* ===================== BerryBot durum + RGB/Matrix/LDR/Buton ===================== */
 bot.ldrValue = 70;            // ortam ışığı (0-100), panelden/sliderdan ayarlanır
+bot.y = 0; bot.pitch = 0; bot.roll = 0;   // rampa yükseklik/eğim
 bot.ldrLeft = 70; bot.ldrRight = 70; bot.ldrValueLive = 70;
 bot.btnA = false; bot.btnB = false;
 bot.matrixState = new Array(25).fill(0);
