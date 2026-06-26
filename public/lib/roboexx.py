@@ -299,7 +299,7 @@ def oled_image(img_bytes, x=0, y=0, width=None, height=None):
 
 
 def oled_shape(shape, x, y, size=20, color=1):
-    """Şekil çiz. shape: CIRCLE/CIRCLE_FILL/RECT/RECT_FILL/LINE/PIXEL"""
+    """Şekil çiz. shape: CIRCLE/CIRCLE_FILL/RECT/RECT_FILL/LINE(yatay)/LINE_V(dikey)/PIXEL"""
     if oled is None:
         return
     if shape == "CIRCLE":
@@ -314,6 +314,8 @@ def oled_shape(shape, x, y, size=20, color=1):
         oled.fill_rect(x, y, size, size, color)
     elif shape == "LINE":
         oled.hline(x, y, size, color)
+    elif shape == "LINE_V":
+        oled.vline(x, y, size, color)
     elif shape == "PIXEL":
         oled.pixel(x, y, color)
 

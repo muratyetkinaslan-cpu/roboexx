@@ -692,7 +692,8 @@ Blockly.Blocks['rx_oled_shape'] = {
           ['Dolu Daire', 'CIRCLE_FILL'],
           ['Kare', 'RECT'],
           ['Dolu Kare', 'RECT_FILL'],
-          ['Çizgi', 'LINE'],
+          ['Çizgi ↔ (yatay)', 'LINE'],
+          ['Çizgi ↕ (dikey)', 'LINE_V'],
           ['Piksel', 'PIXEL'],
         ]),
         'SHAPE'
@@ -717,7 +718,7 @@ Blockly.Blocks['rx_oled_shape'] = {
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(false);
-    this.setTooltip('Şekil çizer. Çizgi için "boyut" çizginin uzunluğu (yatay). Piksel için boyut görmezden gelinir.');
+    this.setTooltip('Şekil çizer. Çizgi ↔ yatay, Çizgi ↕ dikey — "boyut" çizginin uzunluğudur. Piksel için boyut görmezden gelinir.');
   },
 };
 
