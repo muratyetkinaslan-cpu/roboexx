@@ -226,6 +226,10 @@ pythonGenerator.forBlock['rx_oled_shape'] = function (block) {
   const y = block.getFieldValue('Y');
   const size = block.getFieldValue('SIZE');
   const color = block.getFieldValue('COLOR');
+  if (shape === 'LINE_V') {
+    // Dikey çizgi: eski roboexx.py'lerde de çalışsın diye piksel piksel (tek satır, girinti güvenli)
+    return `for __vy in range(${size}): oled_shape("PIXEL", ${x}, ${y} + __vy, color=${color})\n`;
+  }
   return `oled_shape("${shape}", ${x}, ${y}, size=${size}, color=${color})\n`;
 };
 
