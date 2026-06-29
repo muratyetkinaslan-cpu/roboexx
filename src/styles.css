@@ -6058,3 +6058,140 @@ g.blocklyDraggable > path:first-of-type {
   .guide-kid-arrow { width: 46px; height: 46px; }
   .guide-kid-sub { font-size: 14px; }
 }
+
+/* ============================================================
+   Arduino Uploader — ek stiller (fw-* ailesini genişletir)
+   ============================================================ */
+.fw-board-card-active {
+  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(255, 179, 71, 0.7);
+}
+.fw-arduino-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+.fw-arduino-actions .fw-btn {
+  flex: 1 1 auto;
+}
+.fw-arduino-url-status {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fw-arduino-url-status code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.fw-arduino-url-ok {
+  color: rgba(180, 240, 180, 0.9);
+}
+.fw-arduino-url-warn {
+  color: rgba(255, 210, 140, 0.95);
+}
+.fw-url-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 14px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: white;
+  font-size: 14px;
+  font-family: inherit;
+}
+.fw-url-input:focus {
+  outline: none;
+  border-color: rgba(255, 179, 71, 0.6);
+}
+.fw-arduino-stderr {
+  margin-top: 14px;
+  text-align: left;
+  font-size: 12px;
+}
+.fw-arduino-stderr summary {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.7);
+  user-select: none;
+}
+.fw-arduino-stderr pre {
+  margin-top: 8px;
+  max-height: 180px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 10px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(255, 220, 180, 0.9);
+}
+
+[data-theme="galaxy-orange-light"] .fw-board-card-active {
+  background: rgba(255, 140, 30, 0.12);
+  border-color: rgba(255, 140, 30, 0.6);
+}
+[data-theme="galaxy-orange-light"] .fw-url-input {
+  background: rgba(0, 0, 0, 0.05);
+  color: #2a2a2a;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+[data-theme="galaxy-orange-light"] .fw-arduino-url-status code {
+  background: rgba(0, 0, 0, 0.06);
+  color: #2a2a2a;
+}
+
+/* ============================================================
+   Kod hedefi anahtarı (Pico/MicroPython ↔ Arduino) — toolbar
+   ============================================================ */
+.target-switch {
+  display: inline-flex;
+  margin-left: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+.target-switch-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 140ms ease;
+  white-space: nowrap;
+}
+.target-switch-btn:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.06);
+}
+.target-switch-btn.is-active {
+  background: rgba(255, 179, 71, 0.18);
+  color: #ffb347;
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.35);
+}
+[data-theme="galaxy-orange-light"] .target-switch {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme="galaxy-orange-light"] .target-switch-btn {
+  color: rgba(0, 0, 0, 0.55);
+}
+[data-theme="galaxy-orange-light"] .target-switch-btn:hover {
+  color: #1a1a1a;
+  background: rgba(0, 0, 0, 0.05);
+}
+[data-theme="galaxy-orange-light"] .target-switch-btn.is-active {
+  background: rgba(255, 140, 30, 0.16);
+  color: #d56a00;
+  box-shadow: inset 0 0 0 1px rgba(255, 140, 30, 0.4);
+}

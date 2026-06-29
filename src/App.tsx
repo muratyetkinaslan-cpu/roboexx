@@ -15,6 +15,8 @@ import { AssemblyGuide } from './components/AssemblyGuide';
 import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
+import { ArduinoUploader } from './components/ArduinoUploader';
+import type { CodeTarget } from './blockly/codegen';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
 import type { ThemeId } from './themes/types';
@@ -314,6 +316,19 @@ export default function App() {
   const [gamepadActive, setGamepadActive] = useState<boolean>(false);
   const [sensorPanelOpen, setSensorPanelOpen] = useState<boolean>(false);
   const [firmwareUploaderOpen, setFirmwareUploaderOpen] = useState<boolean>(false);
+  const [arduinoUploaderOpen, setArduinoUploaderOpen] = useState<boolean>(false);
+  const [codeTarget, setCodeTarget] = useState<CodeTarget>(() => {
+    const saved = localStorage.getItem('roboexx.code-target');
+    return saved === 'arduino' ? 'arduino' : 'micropython';
+  });
+
+  // Hedef değişince kodu yeniden üret (MicroPython ↔ Arduino)
+  const handleTargetChange = (t: CodeTarget) => {
+    setCodeTarget(t);
+    try { localStorage.setItem('roboexx.code-target', t); } catch { /* yoksay */ }
+    // Bloklar aynı; sadece üretilen kod dilini değiştir
+    setTimeout(() => blocklyRef.current?.regenerate(), 0);
+  };
 
   useEffect(() => {
     // 'connected' → normal kontrol; 'busy' → USB'de canlı "Çalıştır" sürüyor,
@@ -1405,6 +1420,9 @@ export default function App() {
         }}
         onSensorPanel={() => setSensorPanelOpen(true)}
         onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
+        codeTarget={codeTarget}
+        onTargetChange={handleTargetChange}
+        onArduinoUpload={() => setArduinoUploaderOpen(true)}
         onRobotArm={() => { setRobotArmOpen((o) => !o); setRoboBotOpen(false); setRoboBotFullscreen(false); }}
         robotArmActive={robotArmOpen}
         onRoboBot={() => { setRoboBotOpen((o) => !o); setRobotArmOpen(false); setRobotArmFullscreen(false); }}
@@ -1481,6 +1499,7 @@ export default function App() {
               <div className="workspace-blocks">
                 <BlocklyWorkspace
                   ref={blocklyRef}
+                  target={codeTarget}
                   onCodeChange={setGeneratedCode}
                   onUserEdit={handleBlocklyEdit}
                   theme={theme}
@@ -1493,12 +1512,12 @@ export default function App() {
                   <button
                     className="preview-show-btn"
                     onClick={() => setPreviewOpen(true)}
-                    title="MicroPython kod önizlemesini göster"
+                    title={`${codeTarget === 'arduino' ? 'Arduino' : 'MicroPython'} kod önizlemesini göster`}
                   >
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                       <path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <span>MicroPython</span>
+                    <span>{codeTarget === 'arduino' ? 'Arduino' : 'MicroPython'}</span>
                   </button>
                 )}
               </div>
@@ -1512,10 +1531,14 @@ export default function App() {
                 <div className="code-editor-header">
                   <span className="code-editor-title">
                     <span className="dot-indicator" />
-                    MicroPython · main.py
+                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : 'MicroPython · main.py'}
                     {codeWasEdited && <span className="edited-badge">düzenlendi</span>}
                   </span>
-                  <span className="code-editor-hint">Pico W'ye doğrudan bu kod yüklenecek</span>
+                  <span className="code-editor-hint">
+                    {codeTarget === 'arduino'
+                      ? "Arduino'ya bu kod derlenip yüklenecek"
+                      : "Pico W'ye doğrudan bu kod yüklenecek"}
+                  </span>
                 </div>
                 <CodeEditor value={customCode} onChange={handleCodeChange} theme={theme} />
               </div>
@@ -1575,6 +1598,12 @@ export default function App() {
       <FirmwareUploader
         open={firmwareUploaderOpen}
         onClose={() => setFirmwareUploaderOpen(false)}
+      />
+
+      <ArduinoUploader
+        open={arduinoUploaderOpen}
+        onClose={() => setArduinoUploaderOpen(false)}
+        source={activeCode}
       />
 
       {/* Klavye / gamepad basılı tuş göstergesi — sağ alt köşede küçük popup */}

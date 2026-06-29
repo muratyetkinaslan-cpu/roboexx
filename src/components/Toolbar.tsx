@@ -40,6 +40,13 @@ interface Props {
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
+  /** Kod hedefi — MicroPython (Pico) veya Arduino */
+  codeTarget: 'micropython' | 'arduino';
+  /** Kod hedefini değiştir */
+  onTargetChange: (target: 'micropython' | 'arduino') => void;
+  /** Arduino'ya derle+yükle popup'ını aç */
+  onArduinoUpload: () => void;
+
   /** Robot kol simülasyonunu aç/kapat */
   onRobotArm: () => void;
   /** Robot kol paneli açık mı (buton aktif görünümü) */
@@ -86,6 +93,24 @@ export function Toolbar(props: Props) {
 
       <div className="toolbar-section toolbar-center">
         <ModeTabs mode={props.mode} onChange={props.onModeChange} />
+        <div className="target-switch" role="group" aria-label="Kod hedefi">
+          <button
+            className={`target-switch-btn ${props.codeTarget === 'micropython' ? 'is-active' : ''}`}
+            onClick={() => props.onTargetChange('micropython')}
+            data-tooltip="Pico · MicroPython"
+            data-tooltip-detail="Bloklardan MicroPython üret, Raspberry Pi Pico'ya yükle"
+          >
+            🐍 Pico
+          </button>
+          <button
+            className={`target-switch-btn ${props.codeTarget === 'arduino' ? 'is-active' : ''}`}
+            onClick={() => props.onTargetChange('arduino')}
+            data-tooltip="Arduino · C++"
+            data-tooltip-detail="Aynı bloklardan Arduino (C++) üret, Uno/Nano'ya yükle"
+          >
+            🔌 Arduino
+          </button>
+        </div>
       </div>
 
       <div className="toolbar-section toolbar-right">
@@ -187,7 +212,8 @@ export function Toolbar(props: Props) {
 
         {/* GRUP 2: Çalıştırma — modülleri yükle + çalıştır/durdur + yükle */}
         <div className="toolbar-group toolbar-group-actions">
-          {/* Firmware (MicroPython UF2) Yükle — yeni Pico için ilk adım */}
+          {/* Firmware (MicroPython UF2) Yükle — yeni Pico için ilk adım (sadece Pico hedefi) */}
+          {props.codeTarget === 'micropython' && (
           <button
             className="btn btn-ghost btn-icon-only btn-firmware"
             onClick={props.onFirmwareUpload}
@@ -198,7 +224,9 @@ export function Toolbar(props: Props) {
               <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" />
             </svg>
           </button>
+          )}
 
+          {props.codeTarget === 'micropython' && (
           <button
             className="btn btn-ghost btn-icon-only btn-upload-lib"
             onClick={props.onUploadLibrary}
@@ -211,6 +239,7 @@ export function Toolbar(props: Props) {
               <circle cx="13" cy="4" r="2" fill="currentColor" />
             </svg>
           </button>
+          )}
 
           {/* Sensör paneli — robot resmi üzerinde canlı sensör değerleri */}
           <button
@@ -255,8 +284,8 @@ export function Toolbar(props: Props) {
             </svg>
           </button>
 
-          {/* Çalıştır — sadece USB modunda (BLE'de canlı çıktı pratik değil) */}
-          {props.connectionMode === 'usb' && (
+          {/* Çalıştır — sadece USB modunda + Pico hedefinde (BLE'de canlı çıktı pratik değil) */}
+          {props.codeTarget === 'micropython' && props.connectionMode === 'usb' && (
             isBusy ? (
               <button className="btn btn-stop" onClick={props.onStop} title="Çalışan programı durdur (Ctrl+C)">
                 <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
@@ -279,17 +308,30 @@ export function Toolbar(props: Props) {
             )
           )}
 
-          <button
-            className="btn btn-primary"
-            onClick={props.onUpload}
-            disabled={!isConnected || isBusy}
-            title="main.py olarak flash'a kalıcı yaz"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M6 1.5v7M3 4.5L6 1.5l3 3M2 10.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Yükle
-          </button>
+          {props.codeTarget === 'micropython' ? (
+            <button
+              className="btn btn-primary"
+              onClick={props.onUpload}
+              disabled={!isConnected || isBusy}
+              title="main.py olarak flash'a kalıcı yaz"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1.5v7M3 4.5L6 1.5l3 3M2 10.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Yükle
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={props.onArduinoUpload}
+              title="Arduino'ya derle ve yükle (veya .ino indir)"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1.5v7M3 4.5L6 1.5l3 3M2 10.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Arduino'ya Yükle
+            </button>
+          )}
         </div>
       </div>
     </header>

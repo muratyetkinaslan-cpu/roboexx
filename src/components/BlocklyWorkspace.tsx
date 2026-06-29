@@ -4,7 +4,7 @@ import 'blockly/blocks';
 import { SimpleMultiselect } from '../blockly/multiselect';
 import { toolboxXml } from '../blockly/toolbox';
 import '../blockly/blocks';
-import { pythonGenerator } from '../blockly/generator';
+import { generateForTarget, type CodeTarget } from '../blockly/codegen';
 import type { RoboExxTheme } from '../themes/types';
 import { buildBlocklyTheme } from '../themes/registry';
 import { ICONS } from '../blockly/icons';
@@ -27,6 +27,8 @@ interface Props {
   onCodeChange: (code: string) => void;
   onUserEdit?: () => void;
   theme: RoboExxTheme;
+  /** Üretilecek kod hedefi — MicroPython (Pico) veya Arduino (C++) */
+  target: CodeTarget;
   /** Live Share aktifken — lokal cursor pozisyonunu yukarı bildir */
   onCursorMove?: (x: number, y: number) => void;
   /** Live Share aktifken — diğer peer'lerin cursor'larını render et */
@@ -51,10 +53,12 @@ export interface BlocklyWorkspaceHandle {
   addBlocks: (blockTypes: string[]) => void;
   /** Başlangıç bloğu hariç tüm blokları siler (toplu silme). */
   clearAllExceptStart: () => void;
+  /** Mevcut bloklardan kodu yeniden üretir (kod hedefi değişince çağrılır). */
+  regenerate: () => void;
 }
 
 export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
-  ({ onCodeChange, onUserEdit, theme, onCursorMove, peerCursors }, ref) => {
+  ({ onCodeChange, onUserEdit, theme, target, onCursorMove, peerCursors }, ref) => {
     const divRef = useRef<HTMLDivElement>(null);
     const cursorLayerRef = useRef<HTMLDivElement>(null);
     const wsRef = useRef<Blockly.WorkspaceSvg | null>(null);
@@ -65,6 +69,9 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
     const pendingStateRef = useRef<object | null>(null);
     const userEditCb = useRef(onUserEdit);
     userEditCb.current = onUserEdit;
+    // Kod hedefini ref'te tut — onChange closure'ı her zaman güncel hedefi görsün
+    const targetRef = useRef<CodeTarget>(target);
+    targetRef.current = target;
     const cursorMoveCb = useRef(onCursorMove);
     cursorMoveCb.current = onCursorMove;
     /** Şu an bir blok sürükleniyor mu — Live Share için pull'u durdurmak gerek */
@@ -132,10 +139,10 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
 
       const onChange = (event: Blockly.Events.Abstract) => {
         try {
-          const code = pythonGenerator.workspaceToCode(ws);
+          const code = generateForTarget(targetRef.current, ws);
           onCodeChange(code);
         } catch (e) {
-          console.error('MicroPython kod üretim hatası:', e);
+          console.error('Kod üretim hatası:', e);
         }
         // Remote state uygulanıyorsa bu event kullanıcıdan değil — push tetikleme.
         if (event && !event.isUiEvent && !applyingRemoteRef.current && userEditCb.current) {
@@ -401,7 +408,7 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
           // Viewport'u geri koy
           try { ws.scroll(scrollX, scrollY); } catch {}
           // Kod önizlemesini güncelle (event bastırıldığı için manuel)
-          try { onCodeChange(pythonGenerator.workspaceToCode(ws)); } catch {}
+          try { onCodeChange(generateForTarget(targetRef.current, ws)); } catch {}
         } catch (e) {
           console.error('[Blockly] applyRemoteState HATA:', e);
         } finally {
@@ -426,6 +433,11 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         if (ws) Blockly.svgResize(ws);
       },
       isDragging: () => isDraggingRef.current,
+      regenerate: () => {
+        const ws = wsRef.current;
+        if (!ws) return;
+        try { onCodeChange(generateForTarget(targetRef.current, ws)); } catch {}
+      },
       addBlocks: (blockTypes: string[]) => {
         const ws = wsRef.current;
         if (!ws || blockTypes.length === 0) return;

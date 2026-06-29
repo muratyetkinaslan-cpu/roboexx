@@ -157,6 +157,22 @@ export const toolboxXml = `
     <block type="rx_dc_motor_stop"></block>
   </category>
 
+  <category name="L9110 Motor" categorystyle="dcmotor_category">
+    <label text="Pin tabanlı sürücü — Arduino + Pico"></label>
+    <block type="rx_l9110_motor">
+      <value name="SPEED"><shadow type="math_number"><field name="NUM">80</field></shadow></value>
+    </block>
+    <block type="rx_l9110_stop"></block>
+  </category>
+
+  <category name="Enkoder" categorystyle="sensor_category">
+    <label text="Hız / mesafe / devir ölçümü"></label>
+    <block type="rx_encoder_init"></block>
+    <block type="rx_encoder_count"></block>
+    <block type="rx_encoder_speed"></block>
+    <block type="rx_encoder_reset"></block>
+  </category>
+
   <category name="Servo v2" categorystyle="servo_category">
     <block type="rx_motor_init"></block>
     <block type="rx_servo_v2">

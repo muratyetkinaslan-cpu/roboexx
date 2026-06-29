@@ -1251,6 +1251,133 @@ Blockly.Blocks['rx_dc_motor_stop'] = {
 };
 
 // ====================================================================
+// MOTOR SÜRÜCÜ v3 — L9110 / L9110S (Arduino + Pico)
+// Her motor 2 pin (IA/IB) ile kontrol edilir. PWM ile hız, pin sırasıyla yön.
+// I2C YOK — doğrudan pinlere bağlanır. Robot araba/çizgi izleyen için ideal.
+// ====================================================================
+
+Blockly.Blocks['rx_l9110_motor'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.motor))
+      .appendField('L9110 Motor · IA')
+      .appendField(new Blockly.FieldNumber(7, 0, 53, 1), 'IA')
+      .appendField('IB')
+      .appendField(new Blockly.FieldNumber(8, 0, 53, 1), 'IB')
+      .appendField('yön')
+      .appendField(
+        new Blockly.FieldDropdown([
+          ['▶ İleri', 'forward'],
+          ['◀ Geri', 'backward'],
+        ]),
+        'DIRECTION'
+      );
+    this.appendValueInput('SPEED').setCheck('Number').appendField('hız %');
+    this.setStyle('dcmotor_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'L9110 motor sürücü. Her motorun iki giriş pini (IA/IB) var. ' +
+      'Hız 0-100 arası PWM, yön pin sırasıyla belirlenir. I2C gerekmez.'
+    );
+  },
+};
+
+Blockly.Blocks['rx_l9110_stop'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.motor))
+      .appendField('L9110 Motor durdur · IA')
+      .appendField(new Blockly.FieldNumber(7, 0, 53, 1), 'IA')
+      .appendField('IB')
+      .appendField(new Blockly.FieldNumber(8, 0, 53, 1), 'IB');
+    this.setStyle('dcmotor_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('L9110 motoru durdurur (her iki pini LOW yapar).');
+  },
+};
+
+// ====================================================================
+// ENKODER — hız / mesafe / devir ölçümü (Arduino + Pico)
+// Çark enkoderi darbe sayar. Interrupt ile arka planda çalışır.
+// İki enkoder desteklenir (sol/sağ tekerlek için 1 ve 2).
+// ====================================================================
+
+const _encDropdown = () =>
+  new Blockly.FieldDropdown([
+    ['1', '1'],
+    ['2', '2'],
+  ]);
+
+Blockly.Blocks['rx_encoder_init'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.refresh))
+      .appendField('Enkoder')
+      .appendField(_encDropdown(), 'ENC')
+      .appendField('başlat · pin')
+      .appendField(new Blockly.FieldNumber(2, 0, 53, 1), 'PIN');
+    this.setStyle('sensor_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'Enkoderi başlatır. Pini darbe (pulse) okumak için interrupt ile dinler. ' +
+      'Arduino Uno/Nano\'da kesme pinleri 2 ve 3\'tür — enkoderleri oraya bağla.'
+    );
+  },
+};
+
+Blockly.Blocks['rx_encoder_count'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.refresh))
+      .appendField('Enkoder')
+      .appendField(_encDropdown(), 'ENC')
+      .appendField('darbe sayısı');
+    this.setStyle('sensor_blocks');
+    this.setOutput(true, 'Number');
+    this.setInputsInline(true);
+    this.setTooltip('Enkoderin başlangıçtan beri saydığı toplam darbe (pulse) sayısı.');
+  },
+};
+
+Blockly.Blocks['rx_encoder_speed'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.refresh))
+      .appendField('Enkoder')
+      .appendField(_encDropdown(), 'ENC')
+      .appendField('hız (darbe/sn)');
+    this.setStyle('sensor_blocks');
+    this.setOutput(true, 'Number');
+    this.setInputsInline(true);
+    this.setTooltip(
+      'Enkoderin anlık hızı: son çağrıdan bu yana saniyedeki darbe sayısı. ' +
+      'Tekerlek devir/hız kontrolü için kullan.'
+    );
+  },
+};
+
+Blockly.Blocks['rx_encoder_reset'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.refresh))
+      .appendField('Enkoder')
+      .appendField(_encDropdown(), 'ENC')
+      .appendField('sıfırla');
+    this.setStyle('sensor_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Enkoderin darbe sayacını sıfırlar (mesafe ölçümüne yeniden başlamak için).');
+  },
+};
+
+// ====================================================================
 // BUILT-IN BLOK STYLE OVERRIDE
 // ====================================================================
 // Blockly'nin yerleşik mantık blokları varsayılan olarak "logic_blocks"

@@ -500,6 +500,100 @@ pythonGenerator.forBlock['rx_dc_motor_stop'] = function (block) {
   return `dc_motor_stop(${motorNum})\n`;
 };
 
+// ====================================================================
+// L9110 MOTOR SÜRÜCÜ — kendi içinde tam (roboexx.py gerekmez)
+// ====================================================================
+
+/** L9110 yardımcılarını üretilen kodun başına bir kez ekler. */
+function ensureL9110Defs(generator: any) {
+  generator.definitions_['_rx_import_machine_pwm'] = 'from machine import Pin, PWM';
+  generator.definitions_['_rx_l9110_lib'] =
+    '_rx_l9110_pwm = {}\n' +
+    'def _rx_l9110_pin(p):\n' +
+    '    o = _rx_l9110_pwm.get(p)\n' +
+    '    if o is None:\n' +
+    '        o = PWM(Pin(p)); o.freq(1000); _rx_l9110_pwm[p] = o\n' +
+    '    return o\n' +
+    'def rx_l9110(ia, ib, spd, d):\n' +
+    '    spd = 0 if spd < 0 else (100 if spd > 100 else spd)\n' +
+    '    duty = int(spd * 65535 // 100)\n' +
+    '    a = _rx_l9110_pin(ia); b = _rx_l9110_pin(ib)\n' +
+    '    if d > 0:\n' +
+    '        a.duty_u16(duty); b.duty_u16(0)\n' +
+    '    elif d < 0:\n' +
+    '        a.duty_u16(0); b.duty_u16(duty)\n' +
+    '    else:\n' +
+    '        a.duty_u16(0); b.duty_u16(0)';
+}
+
+pythonGenerator.forBlock['rx_l9110_motor'] = function (block, generator) {
+  ensureL9110Defs(generator);
+  const ia = block.getFieldValue('IA');
+  const ib = block.getFieldValue('IB');
+  const dir = block.getFieldValue('DIRECTION') === 'forward' ? 1 : -1;
+  const speed = generator.valueToCode(block, 'SPEED', Order.NONE) || '50';
+  return `rx_l9110(${ia}, ${ib}, ${speed}, ${dir})\n`;
+};
+
+pythonGenerator.forBlock['rx_l9110_stop'] = function (block, generator) {
+  ensureL9110Defs(generator);
+  const ia = block.getFieldValue('IA');
+  const ib = block.getFieldValue('IB');
+  return `rx_l9110(${ia}, ${ib}, 0, 0)\n`;
+};
+
+// ====================================================================
+// ENKODER — kendi içinde tam (roboexx.py gerekmez)
+// ====================================================================
+
+function ensureEncoderDefs(generator: any) {
+  generator.definitions_['_rx_import_machine_enc'] = 'from machine import Pin';
+  generator.definitions_['_rx_import_time_enc'] = 'import time';
+  generator.definitions_['_rx_enc_lib'] =
+    '_rx_enc = {1: 0, 2: 0}\n' +
+    '_rx_enc_t = {1: 0, 2: 0}\n' +
+    '_rx_enc_c = {1: 0, 2: 0}\n' +
+    'def _rx_enc_init(eid, pin):\n' +
+    '    p = Pin(pin, Pin.IN, Pin.PULL_UP)\n' +
+    '    def _cb(t, eid=eid):\n' +
+    '        _rx_enc[eid] += 1\n' +
+    '    p.irq(trigger=Pin.IRQ_RISING, handler=_cb)\n' +
+    '    _rx_enc_t[eid] = time.ticks_ms()\n' +
+    'def _rx_enc_speed(eid):\n' +
+    '    now = time.ticks_ms()\n' +
+    '    dt = time.ticks_diff(now, _rx_enc_t[eid])\n' +
+    '    dc = _rx_enc[eid] - _rx_enc_c[eid]\n' +
+    '    _rx_enc_t[eid] = now; _rx_enc_c[eid] = _rx_enc[eid]\n' +
+    '    if dt <= 0:\n' +
+    '        return 0\n' +
+    '    return dc * 1000 // dt';
+}
+
+pythonGenerator.forBlock['rx_encoder_init'] = function (block, generator) {
+  ensureEncoderDefs(generator);
+  const enc = block.getFieldValue('ENC');
+  const pin = block.getFieldValue('PIN');
+  return `_rx_enc_init(${enc}, ${pin})\n`;
+};
+
+pythonGenerator.forBlock['rx_encoder_count'] = function (block, generator) {
+  ensureEncoderDefs(generator);
+  const enc = block.getFieldValue('ENC');
+  return [`_rx_enc[${enc}]`, Order.MEMBER];
+};
+
+pythonGenerator.forBlock['rx_encoder_speed'] = function (block, generator) {
+  ensureEncoderDefs(generator);
+  const enc = block.getFieldValue('ENC');
+  return [`_rx_enc_speed(${enc})`, Order.FUNCTION_CALL];
+};
+
+pythonGenerator.forBlock['rx_encoder_reset'] = function (block, generator) {
+  ensureEncoderDefs(generator);
+  const enc = block.getFieldValue('ENC');
+  return `_rx_enc[${enc}] = 0\n_rx_enc_c[${enc}] = 0\n`;
+};
+
 // ---- Müzik — hazır şarkı çalma ----
 pythonGenerator.forBlock['rx_play_song'] = function (block, generator) {
   // songs.py'den play_song import et (bir kez)
