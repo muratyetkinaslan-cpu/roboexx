@@ -130,13 +130,20 @@ arduinoGenerator.finish = function (code: string) {
       ? this.INDENT + '__rxPumpKeys(); // canlı tuşları tazele\n'
       : '') + this.rxLoop_;
 
+  // Canlı tuş modunda bekleme blokları seri okumayı kesmesin:
+  // delay(...) → rxDelay(...) (delayMicroseconds etkilenmez).
+  // Aksi halde 64 baytlık RX tamponu beklemede taşar, paketler bölünür,
+  // motorlar "titrer" (tuş bir an bırakılmış görünür).
+  const liveFix = (s: string): string =>
+    this.rxLiveKeysUsed_ ? s.replace(/\bdelay\(/g, 'rxDelay(') : s;
+
   const parts: string[] = [];
   parts.push('// RoboExx — otomatik üretildi (Arduino C++)');
   if (includes) parts.push(includes);
   if (varDecls) parts.push(varDecls);
-  if (defs) parts.push(defs);
-  parts.push(`void setup() {\n${setupBody}}`);
-  parts.push(`void loop() {\n${loopBody}}`);
+  if (defs) parts.push(liveFix(defs));
+  parts.push(`void setup() {\n${liveFix(setupBody)}}`);
+  parts.push(`void loop() {\n${liveFix(loopBody)}}`);
 
   // Temizlik
   this.nameDB_.reset();
@@ -509,32 +516,67 @@ function ensureLiveKeys(g: any): void {
   g.rxLiveKeysUsed_ = true;
   g.definitions_['rx_live_keys'] = [
     '// --- Canlı tuş/gamepad durumu (tarayıcıdan \\x06...\\n paketleri) ---',
+    '// Kararlılık önlemleri:',
+    '//  * Taşan/bozuk paket ÇÖPE atılır (yarım paket "tuş bırakıldı" sanılmaz)',
+    '//  * Tuş, ancak 2 ARDIŞIK geçerli pakette yoksa bırakılmış sayılır',
+    '//  * 500 ms paket gelmezse tüm tuşlar bırakılır (güvenli duruş)',
+    '//  * rxDelay() bekleme sırasında da paketleri okur (tampon taşmaz)',
     'bool __rxKeyDown[128];',
     'bool __rxKeyOnce[128];',
+    'unsigned char __rxKeyMiss[128];',
     'bool __rxKbReading = false;',
-    'char __rxKbBuf[20];',
+    'bool __rxKbOverflow = false;',
+    'char __rxKbBuf[24];',
     'unsigned char __rxKbLen = 0;',
+    'unsigned long __rxLastPacketMs = 0;',
+    '',
+    'void __rxApplyPacket() {',
+    '  bool now[128] = {false};',
+    '  for (unsigned char i = 0; i < __rxKbLen; i++) {',
+    '    unsigned char k = (unsigned char)__rxKbBuf[i];',
+    '    if (k < 128) now[k] = true;',
+    '  }',
+    '  for (int k = 0; k < 128; k++) {',
+    '    if (now[k]) {',
+    '      if (!__rxKeyDown[k]) __rxKeyOnce[k] = true;',
+    '      __rxKeyDown[k] = true;',
+    '      __rxKeyMiss[k] = 0;',
+    '    } else if (__rxKeyDown[k]) {',
+    '      // tek paketlik kayıp titreme yaratmasın: 2 ardışık yoklukta bırak',
+    '      if (++__rxKeyMiss[k] >= 2) { __rxKeyDown[k] = false; __rxKeyMiss[k] = 0; }',
+    '    }',
+    '  }',
+    '  __rxLastPacketMs = millis();',
+    '}',
     '',
     'void __rxPumpKeys() {',
     '  while (Serial.available() > 0) {',
     '    char c = (char)Serial.read();',
-    "    if (c == '\\x06') { __rxKbReading = true; __rxKbLen = 0; }",
+    "    if (c == '\\x06') { __rxKbReading = true; __rxKbOverflow = false; __rxKbLen = 0; }",
     '    else if (__rxKbReading) {',
     "      if (c == '\\n') {",
-    '        bool now[128] = {false};',
-    '        for (unsigned char i = 0; i < __rxKbLen; i++) {',
-    '          unsigned char k = (unsigned char)__rxKbBuf[i];',
-    '          if (k < 128) now[k] = true;',
-    '        }',
-    '        for (int k = 0; k < 128; k++) {',
-    '          if (now[k] && !__rxKeyDown[k]) __rxKeyOnce[k] = true;',
-    '          __rxKeyDown[k] = now[k];',
-    '        }',
+    '        if (!__rxKbOverflow) __rxApplyPacket(); // bozuk paketi uygulama',
     '        __rxKbReading = false;',
     '      } else if (__rxKbLen < sizeof(__rxKbBuf)) {',
     '        __rxKbBuf[__rxKbLen++] = c;',
+    '      } else {',
+    '        __rxKbOverflow = true;',
     '      }',
     '    }',
+    '  }',
+    '  // Güvenli duruş: uzun süre paket yoksa (kablo/sekme) tuşları bırak',
+    '  if (__rxLastPacketMs != 0 && (millis() - __rxLastPacketMs) > 500) {',
+    '    for (int k = 0; k < 128; k++) { __rxKeyDown[k] = false; __rxKeyMiss[k] = 0; }',
+    '    __rxLastPacketMs = 0;',
+    '  }',
+    '}',
+    '',
+    '// delay() yerine: beklerken de seri paketleri okur, tampon taşmaz.',
+    'void rxDelay(unsigned long ms) {',
+    '  unsigned long t0 = millis();',
+    '  while (millis() - t0 < ms) {',
+    '    __rxPumpKeys();',
+    '    delayMicroseconds(200);',
     '  }',
     '}',
     '',

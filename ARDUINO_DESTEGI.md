@@ -130,3 +130,35 @@ tarayıcı her 50 ms'de basılı tuş kümesini `\x06<tuşlar>\n` paketiyle gön
   programı başlatır, normaldir.
 - `Serial.print` blokları canlı bağlantıyla çakışmaz; kartın gönderdiği veri
   tarayıcıda sessizce boşaltılır.
+
+---
+
+# GÜNCELLEME v4 — Canlı Kontrol Kararlılığı (titreme/reset düzeltmesi)
+
+**Belirti:** Gamepad'le sürerken motorlar aralıklı duruyor/başlıyor, "resetleniyor
+gibi" titriyordu (Pico'da yoktu).
+
+**Kök neden:** Arduino'nun donanım seri RX tamponu **64 bayt**. Bloklarda
+`delay()` (bekle) çalışırken kart paketleri okuyamıyor → tampon taşıyor →
+paketler ortadan bölünüyor → kart bir paketliğine "tuş bırakıldı" sanıp motoru
+durduruyor. Pico'da MicroPython'un büyük USB CDC tamponu bunu gizliyordu.
+
+**Düzeltmeler (üretilen C++ içinde, otomatik):**
+1. **rxDelay():** Canlı tuş kullanılan programlarda tüm `delay(...)` çağrıları
+   otomatik olarak `rxDelay(...)`'e çevrilir — bekleme sırasında da seri
+   paketler okunur, tampon hiç taşmaz. (`delayMicroseconds` etkilenmez.)
+2. **Bozuk paket çöpe:** Tampon sınırını aşan (bölünmüş/birleşmiş) paketler
+   uygulanmaz; önceki tuş durumu korunur.
+3. **Bırakma debounce'u:** Bir tuş ancak **2 ardışık geçerli pakette** yoksa
+   bırakılmış sayılır — tek paketlik kayıp artık titreme yaratamaz.
+   (Basma anlıktır, gecikme hissedilmez; bırakma en çok ~100 ms.)
+4. **Güvenli duruş:** 500 ms hiç paket gelmezse (kablo çekildi, sekme kapandı)
+   tüm tuşlar bırakılır → robot kontrolsüz gitmez.
+
+Pump mantığı masaüstünde g++ ile birim testinden geçirildi (bozuk paket,
+debounce, failsafe, yarım paket senaryoları).
+
+**Ayrıca bilinen donanım notu:** Uno/Nano'da `Servo` kütüphanesi Timer1
+kullanır; servo bağlıyken **9 ve 10 numaralı pinlerde `analogWrite` (PWM)
+çalışmaz**. L9110/motor hız pinlerini 3, 5, 6 veya 11'e alın — servo+motor
+birlikte kullanılıp motor "garip" davranıyorsa sebep budur.
