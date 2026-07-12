@@ -23,7 +23,13 @@ interface SerialPortLike {
   }): Promise<void>;
 }
 
+interface SerialAPI {
+  getPorts(): Promise<SerialPortLike[]>;
+}
+
 const LIVE_BAUD = 115200;
+const RECONNECT_TRY_MS = 2000; // deneme aralığı
+const RECONNECT_MAX_MS = 20000; // toplam deneme süresi
 
 export type LiveLinkState = 'closed' | 'open';
 
@@ -35,6 +41,10 @@ class ArduinoLiveLink {
   private draining = false;
   private lastKeys: string | null = null;
   private listeners = new Set<(s: LiveLinkState) => void>();
+  /** Kart resetlenip USB yeniden numaralanırsa aynı cihaza tekrar bağlanmak için */
+  private lastInfo: { usbVendorId?: number; usbProductId?: number } | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDeadline = 0;
 
   get state(): LiveLinkState {
     return this.writer ? 'open' : 'closed';
@@ -62,6 +72,11 @@ class ArduinoLiveLink {
    */
   async attach(port: SerialPortLike): Promise<void> {
     await this.close();
+    try {
+      this.lastInfo = port.getInfo();
+    } catch {
+      this.lastInfo = null;
+    }
     try {
       await port.open({ baudRate: LIVE_BAUD, bufferSize: 4096 });
     } catch (e) {
@@ -103,13 +118,61 @@ class ArduinoLiveLink {
       const data = new TextEncoder().encode('\x06' + safe + '\n');
       await this.writer.write(data);
     } catch {
-      // Yazma hatası = kablo çekildi vb. — bağlantıyı kapat
-      await this.close().catch(() => {});
+      // Yazma hatası: kart brownout'tan resetlenmiş ve USB yeniden
+      // numaralanmış olabilir. Bağlantıyı kapat ve aynı cihaza otomatik
+      // yeniden bağlanmayı dene (öğrenci hiçbir şey yapmasın).
+      await this.teardown();
+      this.scheduleReconnect();
     }
   }
 
-  /** Bağlantıyı kapat (yeni flash öncesi zorunlu — port tek sahipli). */
+  /** Reset/kopma sonrası aynı USB cihazına sessizce yeniden bağlanmayı dener. */
+  private scheduleReconnect(): void {
+    if (!this.lastInfo) return;
+    if (this.reconnectTimer) return; // zaten deneniyor
+    this.reconnectDeadline = Date.now() + RECONNECT_MAX_MS;
+    const tryOnce = async () => {
+      this.reconnectTimer = null;
+      if (this.writer) return; // arada başka yerden bağlanılmış
+      if (Date.now() > this.reconnectDeadline) return; // pes et
+      try {
+        const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+        const ports = await serial.getPorts();
+        const match = ports.find((p) => {
+          try {
+            const i = p.getInfo();
+            return (
+              i.usbVendorId === this.lastInfo!.usbVendorId &&
+              i.usbProductId === this.lastInfo!.usbProductId
+            );
+          } catch {
+            return false;
+          }
+        });
+        if (match) {
+          await this.attach(match);
+          return; // başarılı
+        }
+      } catch {
+        /* sıradaki denemeye */
+      }
+      this.reconnectTimer = setTimeout(tryOnce, RECONNECT_TRY_MS);
+    };
+    this.reconnectTimer = setTimeout(tryOnce, RECONNECT_TRY_MS);
+  }
+
+  /** Bağlantıyı kapat (yeni flash öncesi zorunlu — port tek sahipli).
+   *  Manuel kapatmadır: bekleyen otomatik yeniden bağlanma da iptal edilir. */
   async close(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    await this.teardown();
+  }
+
+  /** İç temizlik — reconnect zamanlayıcısına dokunmaz. */
+  private async teardown(): Promise<void> {
     this.draining = false;
     try {
       await this.reader?.cancel();

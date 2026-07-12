@@ -162,3 +162,22 @@ debounce, failsafe, yarım paket senaryoları).
 kullanır; servo bağlıyken **9 ve 10 numaralı pinlerde `analogWrite` (PWM)
 çalışmaz**. L9110/motor hız pinlerini 3, 5, 6 veya 11'e alın — servo+motor
 birlikte kullanılıp motor "garip" davranıyorsa sebep budur.
+
+---
+
+# GÜNCELLEME v5 — Zorlanınca Reset (brownout) Dayanıklılığı
+
+**Belirti:** Robot kol zorlanınca Arduino resetleniyor.
+
+**Kök neden (donanım):** Servolar zorlanınca ani yüksek akım çeker, 5V hattı
+çöker (brownout) ve işlemci resetlenir. Bu yazılımla önlenemez — çözüm besleme:
+servo gücünü Arduino'nun 5V pininden DEĞİL, ayrı kaynaktan ver (GND'ler ortak),
+servo hattına 470–1000 µF kondansatör koy.
+
+**Yazılım güvenlik ağı (bu sürümde eklendi):**
+- Reset sırasında USB-seri çipi de düşerse canlı bağlantı kopuyordu; artık
+  `livelink` aynı USB cihazına (VID/PID) **20 sn boyunca 2 sn arayla otomatik
+  yeniden bağlanır** — öğrenci hiçbir şey yapmadan gamepad geri gelir.
+- USB düşmeden resetlenirse zaten kendini toparlıyordu: tarayıcı her 50 ms'de
+  tam durumu gönderdiği için sketch yeniden başlar başlamaz kontrol devam eder.
+- Manuel kapatma (yeni flash öncesi) otomatik yeniden bağlanmayı iptal eder.
