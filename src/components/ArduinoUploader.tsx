@@ -7,7 +7,7 @@ import {
   type BoardGuess,
 } from '../arduino/boards';
 import {
-  compileArduino,
+  compileArduinoWithWake,
   discoverCompileUrl,
   downloadIno,
   getCompileUrl,
@@ -46,6 +46,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
   const [portReused, setPortReused] = useState(false);
   const [progress, setProgress] = useState<FlashProgress | null>(null);
   const [flashNote, setFlashNote] = useState('');
+  const [wakeMsg, setWakeMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [stderrMsg, setStderrMsg] = useState('');
   const [urlInput, setUrlInput] = useState('');
@@ -160,12 +161,15 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
     setErrorMsg('');
     setStderrMsg('');
     setFlashNote('');
+    setWakeMsg('');
 
-    // 1) Derle (önbellekte varsa anında döner)
+    // 1) Derle (önbellekte varsa anında döner; sunucu uyuyorsa uyandırılır)
     setStep('compiling');
     let hex: string;
     try {
-      const result = await compileArduino(source, board.fqbn);
+      const result = await compileArduinoWithWake(source, board.fqbn, (m) =>
+        setWakeMsg(m)
+      );
       hex = result.hex;
       if (result.stderr) setStderrMsg(result.stderr);
     } catch (e) {
@@ -364,6 +368,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               <div className="fw-writing-illustration">
                 <div className="fw-spinner" />
               </div>
+              {wakeMsg && <p className="fw-hint">⏳ {wakeMsg}</p>}
               <p className="fw-hint">
                 Kod sunucuda <code>arduino-cli</code> ile derleniyor. Bu birkaç saniye
                 sürebilir. (Aynı kodu tekrar yüklersen bu adım atlanır.)

@@ -119,6 +119,45 @@ export interface CompileResult {
 }
 
 /**
+ * Derleme + otomatik uyandırma:
+ * Render'ın ücretsiz planı 15 dk boşta kalınca uyur; ilk istek 502/timeout
+ * alabilir. Bu sarmalayıcı, ağ hatası veya 5xx durumunda /health'i yoklayarak
+ * sunucu uyanana kadar (en çok ~90 sn) bekler ve derlemeyi otomatik yineler.
+ * Öğrenci hata görmez, sadece "sunucu uyanıyor…" mesajı görür.
+ */
+export async function compileArduinoWithWake(
+  source: string,
+  fqbn: string,
+  onStatus?: (msg: string) => void
+): Promise<CompileResult> {
+  try {
+    return await compileArduino(source, fqbn);
+  } catch (e) {
+    const msg = (e as Error).message || '';
+    const isDown =
+      msg !== 'NO_COMPILE_URL' &&
+      (msg.includes('ulaşılamadı') || /HTTP 50[234]/.test(msg));
+    if (!isDown) throw e;
+
+    const base = getCompileUrl();
+    if (!base) throw e;
+
+    onStatus?.('Derleme sunucusu uyandırılıyor… (ücretsiz sunucu uykudan kalkıyor, ~30 sn)');
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      if (await probeHealth(base, 5000)) {
+        onStatus?.('Sunucu uyandı, derleniyor…');
+        return await compileArduino(source, fqbn);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    throw new Error(
+      'Derleme sunucusu 90 saniyede uyanmadı. Sunucu panelinden çalıştığını kontrol et: ' + base
+    );
+  }
+}
+
+/**
  * .ino kaynağını derleme sunucusuna gönderir, Intel HEX döndürür.
  * Sunucu sözleşmesi:
  *   POST {url}/compile

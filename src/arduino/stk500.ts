@@ -132,9 +132,11 @@ export class Stk500Flasher {
   }
 
   /**
-   * HEX'i flash'lar; bootloader eşitlenemezse (SyncError) ATmega328P kartlarda
-   * diğer bootloader hızıyla (115200 ↔ 57600) OTOMATİK yeniden dener.
-   * Öğrencinin "eski mi yeni mi Nano?" bilmesi gerekmez.
+   * HEX'i flash'lar; başarısız denemelerde OTOMATİK yeniden dener:
+   *   - SyncError → diğer bootloader hızı (115200 ↔ 57600) denenir
+   *   - ilk turda başka geçici hata → kısa bekleyip aynı sırayla ikinci tur
+   * Böylece "ilk seferde hata, ikinci tıkta çalışıyor" durumu öğrenciye
+   * yansımaz — yeniden deneme tek tık içinde yapılır.
    * Dönen değer: gerçekten kullanılan baud hızı.
    */
   async flashHexAuto(
@@ -143,24 +145,41 @@ export class Stk500Flasher {
     onProgress?: (p: FlashProgress) => void,
     onNote?: (msg: string) => void
   ): Promise<number> {
-    try {
-      await this.flashHex(hexText, board, onProgress);
-      return board.baudRate;
-    } catch (e) {
-      const isSync = e instanceof SyncError;
-      const altBaud = board.baudRate === 115200 ? 57600 : 115200;
-      if (!isSync || board.chip !== 'ATmega328P') throw e;
+    const altBaud = board.baudRate === 115200 ? 57600 : 115200;
+    // Denenecek hız sırası (328P'de iki hız, 2 tam tur = en çok 4 deneme)
+    const baudPlan =
+      board.chip === 'ATmega328P'
+        ? [board.baudRate, altBaud, board.baudRate, altBaud]
+        : [board.baudRate, board.baudRate];
 
-      onNote?.(
-        `Bootloader ${board.baudRate} baud ile yanıt vermedi, ` +
-          `${altBaud} baud ile otomatik yeniden deneniyor…`
-      );
-      // kartın toparlanması için kısa bekle
-      await sleep(600);
-      const altBoard: ArduinoBoard = { ...board, baudRate: altBaud };
-      await this.flashHex(hexText, altBoard, onProgress);
-      return altBaud;
+    let lastErr: Error | null = null;
+    for (let i = 0; i < baudPlan.length; i++) {
+      const attempt: ArduinoBoard = { ...board, baudRate: baudPlan[i] };
+      try {
+        await this.flashHex(hexText, attempt, onProgress);
+        return attempt.baudRate;
+      } catch (e) {
+        lastErr = e as Error;
+        const isSync = e instanceof SyncError;
+        // Kalıcı hatalarda (ör. port başka programda açık) beklemeden pes et —
+        // ama ilk denemeye bir şans daha ver, ilk açılışlar bazen tekliyor.
+        if (!isSync && i > 0) throw e;
+        if (i < baudPlan.length - 1) {
+          onNote?.(
+            isSync
+              ? `Bootloader ${attempt.baudRate} baud ile yanıt vermedi, ` +
+                `${baudPlan[i + 1]} baud ile otomatik yeniden deneniyor…`
+              : 'İlk deneme tutmadı, otomatik yeniden deneniyor…'
+          );
+          // kartın ve USB sürücüsünün toparlanması için bekle
+          await sleep(900);
+        }
+      }
     }
+    throw (
+      lastErr ||
+      new Error('Yükleme başarısız oldu. Kabloyu ve kart tipini kontrol et.')
+    );
   }
 
   /** Verilen kart için HEX'i derlenmiş şekilde alır ve flash'lar. */
