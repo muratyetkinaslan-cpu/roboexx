@@ -24,3 +24,20 @@ services:
         value: 20
       # PORT otomatik Render tarafından set edilir
     healthCheckPath: /
+
+  # Arduino derleme sunucusu — arduino-cli gerektirdiği için Docker ile.
+  # (Dockerfile: server/compile-deploy/Dockerfile)
+  - type: web
+    name: roboexx-arduino-compile
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: server/compile-deploy/Dockerfile
+    dockerContext: .
+    envVars:
+      # İstersen kendi site adresinle kısıtla:
+      # - key: ALLOWED_ORIGIN
+      #   value: https://senin-siten.vercel.app
+      - key: PORT
+        value: "8080"
+    healthCheckPath: /health

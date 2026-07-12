@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
-import { ARDUINO_BOARDS, type ArduinoBoard } from '../arduino/boards';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ARDUINO_BOARDS,
+  getBoard,
+  guessBoardFromUsb,
+  type ArduinoBoard,
+  type BoardGuess,
+} from '../arduino/boards';
 import {
   compileArduino,
+  discoverCompileUrl,
   downloadIno,
   getCompileUrl,
   setCompileUrl,
@@ -16,8 +23,9 @@ interface Props {
 }
 
 type Step =
-  | 'choose-board'
-  | 'settings'
+  | 'connect'      // Adım 1: portu seç
+  | 'choose-board' // Adım 2: kartı doğrula + yükle
+  | 'settings'     // derleme sunucusu ayarı
   | 'compiling'
   | 'flashing'
   | 'done'
@@ -32,34 +40,113 @@ const PHASE_LABEL: Record<FlashProgress['phase'], string> = {
 };
 
 export function ArduinoUploader({ open, onClose, source }: Props) {
-  const [step, setStep] = useState<Step>('choose-board');
+  const [step, setStep] = useState<Step>('connect');
   const [board, setBoard] = useState<ArduinoBoard>(ARDUINO_BOARDS[0]);
+  const [guess, setGuess] = useState<BoardGuess | null>(null);
+  const [portReused, setPortReused] = useState(false);
   const [progress, setProgress] = useState<FlashProgress | null>(null);
+  const [flashNote, setFlashNote] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [stderrMsg, setStderrMsg] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [compileUrl, setCompileUrlState] = useState<string | null>(null);
+  const [searchingServer, setSearchingServer] = useState(false);
+
+  // Flasher tüm adımlar boyunca yaşasın (port seçimi korunur)
+  const flasherRef = useRef<Stk500Flasher | null>(null);
+  if (!flasherRef.current) flasherRef.current = new Stk500Flasher();
+  const flasher = flasherRef.current;
 
   useEffect(() => {
     if (!open) return;
-    setStep('choose-board');
     setProgress(null);
     setErrorMsg('');
     setStderrMsg('');
-    const u = getCompileUrl();
-    setCompileUrlState(u);
-    setUrlInput(u || '');
+    setFlashNote('');
+    setGuess(null);
+    setPortReused(false);
+
+    // Derleme sunucusunu arkaplanda bul (localStorage → env → origin → localhost)
+    setSearchingServer(true);
+    discoverCompileUrl()
+      .then((u) => setCompileUrlState(u))
+      .finally(() => setSearchingServer(false));
+    setUrlInput(getCompileUrl() || '');
+
+    // Daha önce izin verilmiş tek bir Arduino portu varsa dialogsuz devam et
+    (async () => {
+      if (flasher.hasPort()) {
+        applyGuess();
+        setPortReused(true);
+        setStep('choose-board');
+        return;
+      }
+      const reused = await flasher.tryReuseKnownPort();
+      if (reused) {
+        applyGuess();
+        setPortReused(true);
+        setStep('choose-board');
+      } else {
+        setStep('connect');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
 
+  const busy = step === 'compiling' || step === 'flashing';
+
   const handleClose = () => {
-    if (step === 'compiling' || step === 'flashing') return; // işlem sürüyorsa kapatma
+    if (busy) return; // işlem sürüyorsa kapatma
     onClose();
   };
 
   const handleDownload = () => {
     downloadIno(source, 'roboexx_sketch');
+  };
+
+  /** Port bilgisinden kartı tahmin edip ön-seç. */
+  const applyGuess = () => {
+    const info = flasher.getPortInfo();
+    if (!info) return;
+    const g = guessBoardFromUsb(info);
+    setGuess(g);
+    if (g) {
+      const b = getBoard(g.boardId);
+      if (b) setBoard(b);
+    }
+  };
+
+  /** Adım 1 → 2: port dialogu aç. */
+  const handlePickPort = async () => {
+    setErrorMsg('');
+    if (!flasher.isSupported()) {
+      setErrorMsg(
+        'Web Serial bu tarayıcıda desteklenmiyor. Chrome veya Edge (masaüstü) kullanmalısın.'
+      );
+      setStep('error');
+      return;
+    }
+    try {
+      await flasher.requestPort();
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg === 'PORT_NOT_SELECTED') return; // dialog iptal — aynı adımda kal
+      setErrorMsg(msg);
+      setStep('error');
+      return;
+    }
+    setPortReused(false);
+    applyGuess();
+    setStep('choose-board');
+  };
+
+  const handleChangePort = async () => {
+    flasher.forgetPort();
+    setGuess(null);
+    setPortReused(false);
+    setStep('connect');
   };
 
   const handleSaveUrl = () => {
@@ -68,11 +155,13 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
     setStep('choose-board');
   };
 
-  const handleCompileAndFlash = async () => {
+  /** Adım 2 → yükleme: derle + flash. */
+  const handleUpload = async () => {
     setErrorMsg('');
     setStderrMsg('');
+    setFlashNote('');
 
-    // 1) Derle
+    // 1) Derle (önbellekte varsa anında döner)
     setStep('compiling');
     let hex: string;
     try {
@@ -82,6 +171,12 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
     } catch (e) {
       const msg = (e as Error).message;
       if (msg === 'NO_COMPILE_URL') {
+        // Son bir kez otomatik ara, yine yoksa ayar ekranı
+        const found = await discoverCompileUrl();
+        if (found) {
+          setCompileUrlState(found);
+          return handleUpload();
+        }
         setStep('settings');
         return;
       }
@@ -90,27 +185,20 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
       return;
     }
 
-    // 2) Port seç + flash
-    const flasher = new Stk500Flasher();
-    if (!flasher.isSupported()) {
-      setErrorMsg(
-        'Web Serial bu tarayıcıda desteklenmiyor. Chrome veya Edge (masaüstü) kullan.'
-      );
-      setStep('error');
+    // 2) Flash (bootloader hızı gerekirse otomatik değişir)
+    if (!flasher.hasPort()) {
+      setStep('connect');
       return;
     }
-    try {
-      await flasher.requestPort();
-    } catch {
-      setErrorMsg('Seri port seçilmedi. Yüklemek için Arduino portunu seçmelisin.');
-      setStep('error');
-      return;
-    }
-
     setStep('flashing');
     setProgress({ phase: 'reset', pct: 0 });
     try {
-      await flasher.flashHex(hex, board, (p) => setProgress(p));
+      await flasher.flashHexAuto(
+        hex,
+        board,
+        (p) => setProgress(p),
+        (note) => setFlashNote(note)
+      );
       setStep('done');
     } catch (e) {
       setErrorMsg((e as Error).message || 'Yükleme sırasında hata oluştu.');
@@ -134,14 +222,47 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
         </div>
 
         <div className="fw-body">
-          {/* ----- Adım 1: Kart seç ----- */}
+          {/* ----- Adım 1: Portu seç ----- */}
+          {step === 'connect' && (
+            <div className="fw-step">
+              <h3>1. Arduino'yu bilgisayara tak</h3>
+              <p className="fw-hint">
+                USB kablosuyla bağla, sonra aşağıdaki butona bas ve açılan listeden
+                kartını seç. Listede yalnız Arduino benzeri cihazlar görünür.
+              </p>
+              <div className="fw-arduino-actions">
+                <button
+                  className="fw-btn fw-btn-primary fw-btn-big"
+                  onClick={handlePickPort}
+                >
+                  🔍 Portu Seç
+                </button>
+                <button className="fw-btn fw-btn-secondary" onClick={handleDownload}>
+                  ⬇ .ino indir
+                </button>
+              </div>
+              <p className="fw-hint fw-hint-small">
+                İpucu: Listede hiçbir şey yoksa kabloyu kontrol et — bazı kablolar
+                yalnızca şarj içindir, veri taşımaz.
+              </p>
+            </div>
+          )}
+
+          {/* ----- Adım 2: Kartı doğrula + yükle ----- */}
           {step === 'choose-board' && (
             <div className="fw-step">
-              <h3>1. Kartını seç</h3>
-              <p className="fw-hint">
-                Bloklardan Arduino (C++) kodu üretildi. Kartını seç, sonra ister
-                doğrudan yükle ister <strong>.ino</strong> olarak indir.
-              </p>
+              <h3>2. Kartını doğrula ve yükle</h3>
+              {(guess || portReused) && (
+                <p className="fw-hint">
+                  {portReused && <>✅ Daha önce kullandığın port hazır. </>}
+                  {guess && (
+                    <>
+                      🔎 {guess.reason} — <strong>{getBoard(guess.boardId)?.name}</strong>{' '}
+                      önerildi{guess.confidence !== 'high' ? ' (emin değilsen değiştirebilirsin)' : ''}.
+                    </>
+                  )}
+                </p>
+              )}
 
               <div className="fw-board-grid">
                 {ARDUINO_BOARDS.map((b) => (
@@ -162,25 +283,30 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
                 ))}
               </div>
 
+              <p className="fw-hint fw-hint-small">
+                Nano'da bootloader'ın eski mi yeni mi olduğunu bilmene gerek yok —
+                yükleme sırasında ikisi de otomatik denenir.
+              </p>
+
               <div className="fw-arduino-actions">
                 <button
                   className="fw-btn fw-btn-primary fw-btn-big"
-                  onClick={handleCompileAndFlash}
-                  title={
-                    hasUrl
-                      ? 'Sunucuda derle ve karta yükle'
-                      : 'Derleme sunucusu ayarlı değil — önce ayarla veya .ino indir'
-                  }
+                  onClick={handleUpload}
                 >
-                  ⚡ Derle ve Yükle
+                  ⚡ Karta Yükle
                 </button>
                 <button className="fw-btn fw-btn-secondary" onClick={handleDownload}>
                   ⬇ .ino indir
                 </button>
+                <button className="fw-btn fw-btn-secondary" onClick={handleChangePort}>
+                  🔁 Portu değiştir
+                </button>
               </div>
 
               <div className="fw-arduino-url-status">
-                {hasUrl ? (
+                {searchingServer ? (
+                  <span>Derleme sunucusu aranıyor…</span>
+                ) : hasUrl ? (
                   <span className="fw-arduino-url-ok">
                     Derleme sunucusu: <code>{compileUrl}</code>{' '}
                     <button className="fw-link-btn" onClick={() => setStep('settings')}>
@@ -189,11 +315,11 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
                   </span>
                 ) : (
                   <span className="fw-arduino-url-warn">
-                    ⚠️ Derleme sunucusu ayarlı değil. Doğrudan yükleme için{' '}
+                    ⚠️ Derleme sunucusu bulunamadı. Tek tıkla yükleme için{' '}
                     <button className="fw-link-btn" onClick={() => setStep('settings')}>
                       sunucu URL'i ayarla
                     </button>
-                    , ya da yukarıdan <strong>.ino indir</strong> ve Arduino IDE ile yükle.
+                    , ya da <strong>.ino indir</strong> ve Arduino IDE ile yükle.
                   </span>
                 )}
               </div>
@@ -206,8 +332,9 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               <h3>Derleme sunucusu</h3>
               <p className="fw-hint">
                 Tarayıcı C++ derleyemez. <code>arduino-cli</code> çalıştıran küçük bir
-                sunucu URL'i gir (bkz. <code>server/arduino-compile.js</code>). Boş
-                bırakırsan sadece .ino indirme kullanılabilir.
+                sunucu URL'i gir (bkz. <code>server/arduino-compile.js</code>).
+                Öğretmen ipucu: siteyi <code>?derleme=https://sunucu-adresi</code> ile
+                açarsan URL herkeste otomatik kaydolur.
               </p>
               <input
                 className="fw-url-input"
@@ -239,7 +366,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               </div>
               <p className="fw-hint">
                 Kod sunucuda <code>arduino-cli</code> ile derleniyor. Bu birkaç saniye
-                sürebilir.
+                sürebilir. (Aynı kodu tekrar yüklersen bu adım atlanır.)
               </p>
             </div>
           )}
@@ -264,6 +391,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
                   </div>
                 </>
               )}
+              {flashNote && <p className="fw-hint">🔁 {flashNote}</p>}
               <p className="fw-hint">
                 Yükleme bitene kadar kartın USB kablosunu çıkarma.
               </p>
@@ -285,6 +413,12 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
                 </details>
               )}
               <div className="fw-step-actions">
+                <button
+                  className="fw-btn fw-btn-secondary"
+                  onClick={() => setStep('choose-board')}
+                >
+                  🔁 Tekrar yükle
+                </button>
                 <button className="fw-btn fw-btn-primary" onClick={onClose}>
                   Kapat
                 </button>
@@ -298,6 +432,15 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               <div className="fw-error-box">
                 <strong>Hata:</strong> {errorMsg}
               </div>
+              <div className="fw-arduino-checklist">
+                <strong>Kontrol listesi:</strong>
+                <ul>
+                  <li>USB kablosu tam takılı mı? (Bazı kablolar veri taşımaz)</li>
+                  <li>Arduino IDE'nin Seri Monitör'ü açık mı? Kapat — portu meşgul eder.</li>
+                  <li>Doğru portu mu seçtin? "Portu değiştir" ile yeniden seç.</li>
+                  <li>Kart tipi doğru mu? (Uno / Nano)</li>
+                </ul>
+              </div>
               {stderrMsg && (
                 <details className="fw-arduino-stderr" open>
                   <summary>Derleyici çıktısı</summary>
@@ -305,14 +448,19 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
                 </details>
               )}
               <div className="fw-step-actions">
-                <button
-                  className="fw-btn fw-btn-secondary"
-                  onClick={() => setStep('choose-board')}
-                >
-                  ← Geri
+                <button className="fw-btn fw-btn-secondary" onClick={handleChangePort}>
+                  🔁 Portu değiştir
                 </button>
-                <button className="fw-btn fw-btn-primary" onClick={handleDownload}>
-                  ⬇ Bunun yerine .ino indir
+                <button
+                  className="fw-btn fw-btn-primary"
+                  onClick={() =>
+                    setStep(flasher.hasPort() ? 'choose-board' : 'connect')
+                  }
+                >
+                  ↻ Tekrar dene
+                </button>
+                <button className="fw-btn fw-btn-secondary" onClick={handleDownload}>
+                  ⬇ .ino indir
                 </button>
               </div>
             </div>

@@ -6080,6 +6080,30 @@ g.blocklyDraggable > path:first-of-type {
   font-size: 13px;
   line-height: 1.5;
 }
+.fw-hint-small {
+  font-size: 12px;
+  opacity: 0.75;
+}
+.fw-arduino-checklist {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.fw-arduino-checklist ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+.fw-arduino-checklist li {
+  margin: 3px 0;
+}
+[data-theme="galaxy-orange-light"] .fw-arduino-checklist {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
 .fw-arduino-url-status code {
   background: rgba(255, 255, 255, 0.08);
   padding: 1px 6px;

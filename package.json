@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite --host",
     "collab": "node server/index.js",
+    "arduino-server": "node server/arduino-compile.js",
     "start": "concurrently --names \"collab,vite\" --prefix-colors \"orange,cyan\" --kill-others \"npm:collab\" \"npm:dev\"",
     "build": "vite build",
     "type-check": "tsc --noEmit",

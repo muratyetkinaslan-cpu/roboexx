@@ -8,7 +8,16 @@
  */
 
 import type { ArduinoBoard } from './boards';
+import { ARDUINO_USB_FILTERS, ARDUINO_USB_VENDOR_IDS } from './boards';
 import { parseIntelHex } from './intelhex';
+
+/** Bootloader ile eşitlenemedi — genelde yanlış baud (eski/yeni Nano) demek. */
+export class SyncError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncError';
+  }
+}
 
 // STK500 sabitleri
 const STK_OK = 0x10;
@@ -32,6 +41,7 @@ interface SerialPortLike {
 
 interface SerialAPI {
   requestPort(opts?: { filters?: Array<{ usbVendorId?: number }> }): Promise<SerialPortLike>;
+  getPorts(): Promise<SerialPortLike[]>;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -55,13 +65,102 @@ export class Stk500Flasher {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
   }
 
-  /** Kullanıcıdan bir seri port seçmesini ister (Arduino auto-reset için DTR gerekir). */
+  /**
+   * Daha önce izin verilmiş bir Arduino portu varsa (tek tane) onu sessizce
+   * yeniden kullanır — öğrenci her seferinde dialog görmez.
+   * Bulamazsa null döner; o zaman requestPort() ile dialog açılır.
+   */
+  async tryReuseKnownPort(): Promise<boolean> {
+    if (!this.isSupported()) return false;
+    try {
+      const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+      const ports = await serial.getPorts();
+      const arduinos = ports.filter((p) => {
+        const info = p.getInfo();
+        return (
+          info.usbVendorId != null &&
+          (ARDUINO_USB_VENDOR_IDS as readonly number[]).includes(info.usbVendorId)
+        );
+      });
+      // Tek eşleşme varsa güvenle onu kullan; birden çoksa kullanıcı seçsin.
+      if (arduinos.length === 1) {
+        this.port = arduinos[0];
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Kullanıcıdan bir seri port seçmesini ister (Arduino auto-reset için DTR gerekir).
+   * Dialog yalnız bilinen Arduino USB çiplerini gösterir.
+   */
   async requestPort(): Promise<void> {
     if (!this.isSupported()) {
       throw new Error('Web Serial bu tarayıcıda yok. Chrome veya Edge kullan.');
     }
     const serial = (navigator as unknown as { serial: SerialAPI }).serial;
-    this.port = await serial.requestPort();
+    try {
+      this.port = await serial.requestPort({ filters: ARDUINO_USB_FILTERS });
+    } catch (e) {
+      const err = e as { name?: string };
+      if (err?.name === 'NotFoundError') {
+        throw new Error('PORT_NOT_SELECTED');
+      }
+      throw e;
+    }
+  }
+
+  /** Seçilen portun USB kimliği (kart tahmini için). */
+  getPortInfo(): { usbVendorId?: number; usbProductId?: number } | null {
+    try {
+      return this.port ? this.port.getInfo() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  hasPort(): boolean {
+    return this.port !== null;
+  }
+
+  /** Portu bırak (yeniden seçim için). */
+  forgetPort(): void {
+    this.port = null;
+  }
+
+  /**
+   * HEX'i flash'lar; bootloader eşitlenemezse (SyncError) ATmega328P kartlarda
+   * diğer bootloader hızıyla (115200 ↔ 57600) OTOMATİK yeniden dener.
+   * Öğrencinin "eski mi yeni mi Nano?" bilmesi gerekmez.
+   * Dönen değer: gerçekten kullanılan baud hızı.
+   */
+  async flashHexAuto(
+    hexText: string,
+    board: ArduinoBoard,
+    onProgress?: (p: FlashProgress) => void,
+    onNote?: (msg: string) => void
+  ): Promise<number> {
+    try {
+      await this.flashHex(hexText, board, onProgress);
+      return board.baudRate;
+    } catch (e) {
+      const isSync = e instanceof SyncError;
+      const altBaud = board.baudRate === 115200 ? 57600 : 115200;
+      if (!isSync || board.chip !== 'ATmega328P') throw e;
+
+      onNote?.(
+        `Bootloader ${board.baudRate} baud ile yanıt vermedi, ` +
+          `${altBaud} baud ile otomatik yeniden deneniyor…`
+      );
+      // kartın toparlanması için kısa bekle
+      await sleep(600);
+      const altBoard: ArduinoBoard = { ...board, baudRate: altBaud };
+      await this.flashHex(hexText, altBoard, onProgress);
+      return altBaud;
+    }
   }
 
   /** Verilen kart için HEX'i derlenmiş şekilde alır ve flash'lar. */
@@ -142,22 +241,28 @@ export class Stk500Flasher {
 
   private async getSync(): Promise<void> {
     let lastErr: Error | null = null;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       try {
-        // ilk denemelerde tamponu temizle
+        // her denemede tamponu temizle
         this.rxBuffer = [];
         await this.write([STK_GET_SYNC, CRC_EOP]);
-        await this.expect(STK_INSYNC, 500);
-        await this.expect(STK_OK, 500);
+        await this.expect(STK_INSYNC, 400);
+        await this.expect(STK_OK, 400);
         return;
       } catch (e) {
         lastErr = e as Error;
-        await sleep(100);
+        // 4. denemede bir kez daha resetlemeyi dene — bazı klonlar
+        // ilk DTR darbesini kaçırabiliyor.
+        if (i === 3) {
+          await this.toggleReset();
+          await sleep(350);
+          this.rxBuffer = [];
+        }
+        await sleep(80);
       }
     }
-    throw new Error(
+    throw new SyncError(
       'Arduino bootloader yanıt vermedi (sync başarısız). ' +
-        'Kartın doğru porta takılı olduğundan ve doğru kart tipini seçtiğinden emin ol. ' +
         (lastErr ? `(${lastErr.message})` : '')
     );
   }

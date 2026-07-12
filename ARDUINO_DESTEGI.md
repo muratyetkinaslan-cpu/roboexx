@@ -40,3 +40,55 @@ Toolbar'daki **🐍 Pico / 🔌 Arduino** anahtarıyla geçiş yapılır; blokla
 ## Doğrulama
 - `npm run build` (vite) ✓ başarılı — sıfır yeni tip hatası (mevcut Blockly 11 uyarıları hariç).
 - Headless üretim testi: L9110 + enkoder + on_start/forever → temiz, derlenebilir C++ üretildi (setup/loop, ISR'lı enkoder, analogWrite'lı L9110).
+
+---
+
+# GÜNCELLEME — Öğrenci Dostu Yükleme Akışı (v2)
+
+Öğrenciler artık Pico'daki gibi **önce portu seçip** tek tıkla yükleme yapar.
+
+## Yeni akış (öğrencinin gördüğü)
+1. **Arduino'yu tak** → "Arduino'ya Yükle" → **Portu Seç** (dialog yalnız Arduino
+   benzeri USB cihazları listeler — yanlış port seçmek neredeyse imkânsız).
+2. Kart **USB çipinden otomatik tanınır** (orijinal Arduino → Uno, CH340 → klon
+   Nano, FTDI → eski Nano) ve önceden seçilir. Öğrenci isterse değiştirir.
+3. **⚡ Karta Yükle** — derle + flash + çalıştır. Bitti.
+
+Bir sonraki yüklemede port dialogu **hiç açılmaz**: daha önce izin verilen port
+otomatik hatırlanır, öğrenci sadece "Yükle"ye basar.
+
+## Güvenilirlik iyileştirmeleri
+- **Otomatik bootloader hızı:** Nano'da eski/yeni bootloader bilinmese de olur —
+  sync başarısız olursa diğer hız (115200 ↔ 57600) otomatik denenir.
+- **Dayanıklı sync:** 8 deneme + ortada ek reset darbesi (ilk DTR'yi kaçıran
+  klonlar için).
+- **HEX önbelleği (2 katman):** Aynı blokları tekrar yüklerken derleme beklenmez
+  (tarayıcı localStorage). Sunucu tarafında da önbellek var: 25 öğrenci aynı
+  örneği yüklerken **tek** derleme yapılır.
+- **Derleme kuyruğu:** Sunucuda derlemeler sıraya alınır, zayıf makine boğulmaz.
+- Hata ekranında çocuklara yönelik **kontrol listesi** (veri taşımayan kablo,
+  açık kalan Seri Monitör, yanlış port…).
+
+## Sıfır ayar (öğretmen için)
+Derleme sunucusu URL'i şu sırayla **kendiliğinden** bulunur:
+1. `?derleme=https://sunucu` linki → kalıcı kaydolur. **Sınıfa tek link paylaş.**
+2. Popup'tan elle girilen URL (localStorage)
+3. Build ortam değişkeni `VITE_ARDUINO_COMPILE_URL`
+4. Otomatik keşif: sitenin origin'i ve `localhost:8080` `/health` ile yoklanır.
+
+Yerelde çalıştırmak (npm install **gerekmez**, yalnız Node + arduino-cli):
+```bash
+npm run arduino-server     # http://localhost:8080 — frontend otomatik bulur
+```
+
+## Düzeltilen hata
+`server/arduino-compile.js` daha önce `require()` kullandığı için
+(`server/package.json` → `"type": "module"`) **hiç başlamıyordu**; ayrıca
+express/cors kurulumu istiyordu. Yeni sürüm ESM + **sıfır npm bağımlılığı**
+(saf `node:http`).
+
+## Deploy
+`render.yaml` artık iki servis içerir; `roboexx-arduino-compile` Docker ile
+arduino-cli kurulu gelir (bkz. `server/compile-deploy/Dockerfile`). Render →
+Blueprint → Apply, çıkan adresi `?derleme=` ile paylaş. Ayrıntı:
+`server/ARDUINO_COMPILE_SERVER.md`.
