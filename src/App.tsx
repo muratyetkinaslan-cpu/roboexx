@@ -16,6 +16,7 @@ import { parseTelemetry } from './robotarm/config';
 import { SensorDashboard } from './components/SensorDashboard';
 import { FirmwareUploader } from './components/FirmwareUploader';
 import { ArduinoUploader } from './components/ArduinoUploader';
+import { arduinoLiveLink } from './arduino/livelink';
 import type { CodeTarget } from './blockly/codegen';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
@@ -317,6 +318,11 @@ export default function App() {
   const [sensorPanelOpen, setSensorPanelOpen] = useState<boolean>(false);
   const [firmwareUploaderOpen, setFirmwareUploaderOpen] = useState<boolean>(false);
   const [arduinoUploaderOpen, setArduinoUploaderOpen] = useState<boolean>(false);
+  // Arduino canlı klavye/gamepad bağlantısı açık mı (yükleme sonrası)
+  const [arduinoLiveOpen, setArduinoLiveOpen] = useState<boolean>(
+    arduinoLiveLink.state === 'open'
+  );
+  useEffect(() => arduinoLiveLink.onStateChange((st) => setArduinoLiveOpen(st === 'open')), []);
   const [codeTarget, setCodeTarget] = useState<CodeTarget>(() => {
     const saved = localStorage.getItem('roboexx.code-target');
     return saved === 'arduino' ? 'arduino' : 'micropython';
@@ -333,7 +339,9 @@ export default function App() {
   useEffect(() => {
     // 'connected' → normal kontrol; 'busy' → USB'de canlı "Çalıştır" sürüyor,
     // tuşlar programın sys.stdin'ine gitmeli (BLE'de busy kısa sürer, sorunsuz).
-    if (bridgeState !== 'connected' && bridgeState !== 'busy') {
+    // Arduino canlı bağlantısı açıkken de (Pico bağlı olmasa bile) döngü çalışır.
+    const picoLive = bridgeState === 'connected' || bridgeState === 'busy';
+    if (!picoLive && !arduinoLiveOpen) {
       setPressedKeysDisplay('');
       return;
     }
@@ -499,11 +507,15 @@ export default function App() {
       setPressedKeysDisplay(display);
       setGamepadActive(gamepadConnected);
       // Hangi bridge bağlıysa ona gönder
-      if (connectionMode === 'ble') {
-        bleBridge.sendKeys(keys).catch(() => {});
-      } else {
-        serialBridge.sendKeys(keys).catch(() => {});
+      if (picoLive) {
+        if (connectionMode === 'ble') {
+          bleBridge.sendKeys(keys).catch(() => {});
+        } else {
+          serialBridge.sendKeys(keys).catch(() => {});
+        }
       }
+      // Arduino canlı bağlantısı açıksa ona da gönder (kapalıysa no-op)
+      arduinoLiveLink.sendKeys(keys).catch(() => {});
     }, 50);
 
     return () => {
@@ -519,10 +531,11 @@ export default function App() {
       } else {
         serialBridge.sendKeys('').catch(() => {});
       }
+      arduinoLiveLink.sendKeys('').catch(() => {});
       setPressedKeysDisplay('');
       setGamepadActive(false);
     };
-  }, [connectionMode, bridgeState]);
+  }, [connectionMode, bridgeState, arduinoLiveOpen]);
 
   useEffect(() => {
     (async () => {

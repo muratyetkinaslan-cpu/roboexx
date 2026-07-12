@@ -73,6 +73,7 @@ arduinoGenerator.init = function (workspace: any) {
   this.rxSetup_ = '';                          // setup() gövdesi
   this.rxLoop_ = '';                           // loop() gövdesi
   this.rxSerialUsed_ = false;
+  this.rxLiveKeysUsed_ = false;                // canlı tuş/gamepad protokolü
 
   if (!this.nameDB_) {
     this.nameDB_ = new (Blockly as any).Names(this.RESERVED_WORDS_);
@@ -110,8 +111,13 @@ arduinoGenerator.finish = function (code: string) {
   void NT;
 
   // setup() — kullanılan donanıma göre Serial.begin
+  // Canlı tuş/gamepad kullanılıyorsa tarayıcı bağlantısıyla aynı hız: 115200.
   let setupBody = '';
-  if (this.rxSerialUsed_) setupBody += this.INDENT + 'Serial.begin(9600);\n';
+  if (this.rxLiveKeysUsed_) {
+    setupBody += this.INDENT + 'Serial.begin(115200); // canlı klavye/gamepad\n';
+  } else if (this.rxSerialUsed_) {
+    setupBody += this.INDENT + 'Serial.begin(9600);\n';
+  }
   // setup öncesi kalan (start/forever dışında kalan) top-level kod
   const leftover = (code || '').trim();
   if (leftover) {
@@ -119,7 +125,10 @@ arduinoGenerator.finish = function (code: string) {
   }
   setupBody += this.rxSetup_;
 
-  const loopBody = this.rxLoop_;
+  const loopBody =
+    (this.rxLiveKeysUsed_
+      ? this.INDENT + '__rxPumpKeys(); // canlı tuşları tazele\n'
+      : '') + this.rxLoop_;
 
   const parts: string[] = [];
   parts.push('// RoboExx — otomatik üretildi (Arduino C++)');
@@ -488,6 +497,97 @@ fb('rx_abs', (block, g) => {
 });
 
 // ====================================================================
+// CANLI TUŞ / GAMEPAD (klavye + gamepad — tarayıcıdan USB seri ile)
+// ====================================================================
+//
+// Tarayıcı, yükleme sonrası aynı porta 115200 baud'da bağlı kalır ve her
+// 50 ms'de basılı tuş kümesini "\x06<tuşlar>\n" paketiyle gönderir
+// (Pico'daki roboexx.py protokolünün aynısı). Aşağıdaki pump bu paketleri
+// bloklamadan okur ve basılı/yeni-basıldı durumlarını günceller.
+
+function ensureLiveKeys(g: any): void {
+  g.rxLiveKeysUsed_ = true;
+  g.definitions_['rx_live_keys'] = [
+    '// --- Canlı tuş/gamepad durumu (tarayıcıdan \\x06...\\n paketleri) ---',
+    'bool __rxKeyDown[128];',
+    'bool __rxKeyOnce[128];',
+    'bool __rxKbReading = false;',
+    'char __rxKbBuf[20];',
+    'unsigned char __rxKbLen = 0;',
+    '',
+    'void __rxPumpKeys() {',
+    '  while (Serial.available() > 0) {',
+    '    char c = (char)Serial.read();',
+    "    if (c == '\\x06') { __rxKbReading = true; __rxKbLen = 0; }",
+    '    else if (__rxKbReading) {',
+    "      if (c == '\\n') {",
+    '        bool now[128] = {false};',
+    '        for (unsigned char i = 0; i < __rxKbLen; i++) {',
+    '          unsigned char k = (unsigned char)__rxKbBuf[i];',
+    '          if (k < 128) now[k] = true;',
+    '        }',
+    '        for (int k = 0; k < 128; k++) {',
+    '          if (now[k] && !__rxKeyDown[k]) __rxKeyOnce[k] = true;',
+    '          __rxKeyDown[k] = now[k];',
+    '        }',
+    '        __rxKbReading = false;',
+    '      } else if (__rxKbLen < sizeof(__rxKbBuf)) {',
+    '        __rxKbBuf[__rxKbLen++] = c;',
+    '      }',
+    '    }',
+    '  }',
+    '}',
+    '',
+    'bool rxTusBasili(char k) {',
+    '  __rxPumpKeys();',
+    "  if (k >= 'A' && k <= 'Z') k += 32;",
+    '  return __rxKeyDown[(unsigned char)k];',
+    '}',
+    '',
+    'bool rxTusBasildi(char k) {',
+    '  __rxPumpKeys();',
+    "  if (k >= 'A' && k <= 'Z') k += 32;",
+    '  unsigned char i = (unsigned char)k;',
+    '  if (__rxKeyOnce[i]) { __rxKeyOnce[i] = false; return true; }',
+    '  return false;',
+    '}',
+  ].join('\n');
+}
+
+/** Tuş karakterini güvenli C++ char literaline çevir ('w', '\x11', '\x20'…). */
+function cKeyLiteral(key: string): string {
+  const code = (key || ' ').charCodeAt(0) & 0xff;
+  // görünür ASCII harf/rakamsa okunur yaz, değilse hex kaçışı
+  if (code >= 0x61 && code <= 0x7a) return `'${String.fromCharCode(code)}'`;
+  if (code >= 0x30 && code <= 0x39) return `'${String.fromCharCode(code)}'`;
+  return `(char)0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+}
+
+fb('rx_key_pressed', (block, g) => {
+  ensureLiveKeys(g);
+  const key = String(block.getFieldValue('KEY') ?? ' ');
+  return [`rxTusBasili(${cKeyLiteral(key)})`, AOrder.ATOMIC];
+});
+
+fb('rx_key_just_pressed', (block, g) => {
+  ensureLiveKeys(g);
+  const key = String(block.getFieldValue('KEY') ?? ' ');
+  return [`rxTusBasildi(${cKeyLiteral(key)})`, AOrder.ATOMIC];
+});
+
+fb('rx_gamepad_pressed', (block, g) => {
+  ensureLiveKeys(g);
+  const btn = String(block.getFieldValue('BTN') ?? '\x20');
+  return [`rxTusBasili(${cKeyLiteral(btn)})`, AOrder.ATOMIC];
+});
+
+fb('rx_gamepad_just_pressed', (block, g) => {
+  ensureLiveKeys(g);
+  const btn = String(block.getFieldValue('BTN') ?? '\x20');
+  return [`rxTusBasildi(${cKeyLiteral(btn)})`, AOrder.ATOMIC];
+});
+
+// ====================================================================
 // ARDUİNO'DA DESTEKLENMEYEN ÇEVRE BİRİMLERİ (Pico'ya özel)
 // ====================================================================
 
@@ -527,10 +627,6 @@ const VALUE_UNSUPPORTED: Record<string, string> = {
   rx_shtc3_humidity: 'SHTC3 nem',
   rx_ir_read_code: 'IR kod oku',
   rx_internal_temp: 'Dahili sıcaklık',
-  rx_key_pressed: 'Tuş basılı',
-  rx_key_just_pressed: 'Tuş basıldı',
-  rx_gamepad_pressed: 'Gamepad basılı',
-  rx_gamepad_just_pressed: 'Gamepad basıldı',
 };
 
 Object.keys(STATEMENT_UNSUPPORTED).forEach((type) => {

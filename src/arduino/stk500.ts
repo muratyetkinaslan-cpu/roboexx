@@ -126,6 +126,11 @@ export class Stk500Flasher {
     return this.port !== null;
   }
 
+  /** Seçili port nesnesi (flash sonrası canlı bağlantıya devretmek için). */
+  getPort(): SerialPortLike | null {
+    return this.port;
+  }
+
   /** Portu bırak (yeniden seçim için). */
   forgetPort(): void {
     this.port = null;

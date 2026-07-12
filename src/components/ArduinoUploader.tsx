@@ -14,6 +14,7 @@ import {
   setCompileUrl,
 } from '../arduino/compile';
 import { Stk500Flasher, type FlashProgress } from '../arduino/stk500';
+import { arduinoLiveLink } from '../arduino/livelink';
 
 interface Props {
   open: boolean;
@@ -47,6 +48,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
   const [progress, setProgress] = useState<FlashProgress | null>(null);
   const [flashNote, setFlashNote] = useState('');
   const [wakeMsg, setWakeMsg] = useState('');
+  const [liveReady, setLiveReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [stderrMsg, setStderrMsg] = useState('');
   const [urlInput, setUrlInput] = useState('');
@@ -144,6 +146,8 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
   };
 
   const handleChangePort = async () => {
+    await arduinoLiveLink.close().catch(() => {});
+    setLiveReady(false);
     flasher.forgetPort();
     setGuess(null);
     setPortReused(false);
@@ -194,6 +198,9 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
       setStep('connect');
       return;
     }
+    // Canlı bağlantı açıksa kapat — port aynı anda tek sahipli olabilir
+    setLiveReady(false);
+    await arduinoLiveLink.close().catch(() => {});
     setStep('flashing');
     setProgress({ phase: 'reset', pct: 0 });
     try {
@@ -203,6 +210,17 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
         (p) => setProgress(p),
         (note) => setFlashNote(note)
       );
+      // Canlı klavye/gamepad: aynı portu 115200 ile açık tut.
+      // Kodda tuş bloğu olmasa da zararsızdır (kart paketleri yok sayar).
+      try {
+        const port = flasher.getPort();
+        if (port) {
+          await arduinoLiveLink.attach(port as any);
+          setLiveReady(true);
+        }
+      } catch {
+        setLiveReady(false);
+      }
       setStep('done');
     } catch (e) {
       setErrorMsg((e as Error).message || 'Yükleme sırasında hata oluştu.');
@@ -411,6 +429,13 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               <p>
                 Kod <strong>{board.name}</strong> kartına yüklendi ve çalışmaya başladı.
               </p>
+              {liveReady && (
+                <p className="fw-hint">
+                  🎮 <strong>Canlı kontrol aktif</strong> — klavye ve gamepad
+                  komutları USB'den karta gidiyor. Bu pencereyi kapatabilirsin;
+                  bağlantı açık kalır.
+                </p>
+              )}
               {stderrMsg && (
                 <details className="fw-arduino-stderr">
                   <summary>Derleyici uyarıları</summary>
