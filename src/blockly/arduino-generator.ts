@@ -267,10 +267,14 @@ fb('rx_digital_read', (block) => {
   return [`digitalRead(${pin})`, AOrder.ATOMIC];
 });
 
+// Pico ADC pinleri (26/27/28) -> Arduino analog pinleri (A0/A1/A2)
+const APIN: Record<string, string> = { '26': 'A0', '27': 'A1', '28': 'A2' };
+const aPin = (pin: string): string => APIN[pin] ?? `A${pin}`;
+
 fb('rx_analog_read', (block) => {
-  const pin = block.getFieldValue('PIN');
-  // A0.. veya ham numara; kullanıcı 26-28 gibi Pico pinleri girebilir, A0 baz al
-  return [`analogRead(A${pin})`, AOrder.ATOMIC];
+  const pin = String(block.getFieldValue('PIN'));
+  // ham deger (Uno: 0-1023)
+  return [`analogRead(${aPin(pin)})`, AOrder.ATOMIC];
 });
 
 fb('rx_pwm_write', (block, g) => {
@@ -384,13 +388,15 @@ fb('rx_ultrasonic_distance', (block, g) => {
 });
 
 fb('rx_potentiometer', (block) => {
-  const pin = block.getFieldValue('PIN');
-  return [`analogRead(A${pin})`, AOrder.ATOMIC];
+  const pin = String(block.getFieldValue('PIN'));
+  // Pico tarafiyla ayni semantik: 0-100
+  return [`map(analogRead(${aPin(pin)}), 0, 1023, 0, 100)`, AOrder.ATOMIC];
 });
 
 fb('rx_ldr_read', (block) => {
-  const pin = block.getFieldValue('PIN');
-  return [`analogRead(A${pin})`, AOrder.ATOMIC];
+  const pin = String(block.getFieldValue('PIN'));
+  // Pico tarafiyla ayni semantik: 0-100
+  return [`map(analogRead(${aPin(pin)}), 0, 1023, 0, 100)`, AOrder.ATOMIC];
 });
 
 // ====================================================================
