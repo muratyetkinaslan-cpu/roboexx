@@ -3,7 +3,7 @@
   "private": true,
   "version": "2.10.1",
   "type": "module",
-  "description": "RoboExx — Pico W tabanlı blok tabanlı programlama uygulaması",
+  "description": "RoboExx — Pico W / ESP32 tabanlı blok programlama uygulaması",
   "scripts": {
     "dev": "vite --host",
     "collab": "node server/index.js",

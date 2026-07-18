@@ -1,5 +1,5 @@
 # ============================================================
-# RoboExx Pico W Kütüphanesi
+# RoboExx Kütüphanesi — Raspberry Pi Pico / Pico W + ESP32
 # ------------------------------------------------------------
 # Tek dosya — RoboExx blok tabanlı programlama uygulaması
 # tarafından üretilen kodlar bu kütüphaneyi kullanır.
@@ -9,7 +9,7 @@
 #   - OLED yazı + şekil + göz çizim helper'ları
 #   - NeoPixel init helper
 #   - Ultrasonik mesafe ölçer
-#   - Pico W dahili sıcaklık sensörü
+#   - Dahili sıcaklık sensörü (Pico + ESP32)
 #   - PWM önbelleği (servo, buzzer, motor için)
 #   - Map fonksiyonu (Arduino map)
 #
@@ -21,11 +21,42 @@
 # Sürüm: 1.0.0
 # ============================================================
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from machine import Pin, ADC, PWM, I2C
 import time
 import framebuf
+import sys
+
+# ============================================================
+# PLATFORM ALGILAMA — Pico (rp2) / ESP32
+# Aynı kütüphane iki kartta da çalışır; farklar burada soyutlanır.
+# ============================================================
+
+_IS_ESP32 = sys.platform == "esp32"
+
+_adc_cache = {}
+
+
+def _adc(pin):
+    """Platformdan bağımsız ADC nesnesi döndürür (önbellekli).
+
+    Pico:  ADC(pin) doğrudan çalışır.
+    ESP32: ADC(Pin(pin)) gerekir + tam 0-3.3V aralığı için ATTN_11DB.
+    """
+    if pin in _adc_cache:
+        return _adc_cache[pin]
+    try:
+        a = ADC(Pin(pin))
+    except (TypeError, ValueError):
+        a = ADC(pin)
+    if _IS_ESP32:
+        try:
+            a.atten(ADC.ATTN_11DB)
+        except Exception:
+            pass
+    _adc_cache[pin] = a
+    return a
 
 # ============================================================
 # SSD1306 OLED DRIVER (gömülü — MicroPython resmi sürümü)
@@ -461,7 +492,9 @@ def buzzer_off(pin):
 
 
 def led_init():
-    """Onboard LED — Pico W'de 'LED' string, Pico'da pin 25."""
+    """Onboard LED — Pico W: 'LED', Pico: 25, ESP32 DevKit: GPIO2."""
+    if _IS_ESP32:
+        return Pin(2, Pin.OUT)
     try:
         return Pin("LED", Pin.OUT)
     except Exception:
@@ -517,8 +550,17 @@ _temp_sensor = None
 
 
 def internal_temp():
-    """Pico chip sıcaklığını °C cinsinden okur (ortam sıcaklığı değil)."""
+    """Çip sıcaklığını °C okur (ortam sıcaklığı değil). Pico + ESP32."""
     global _temp_sensor
+    if _IS_ESP32:
+        try:
+            import esp32
+            if hasattr(esp32, "mcu_temperature"):
+                return esp32.mcu_temperature()
+            # Eski portlarda raw_temperature() Fahrenheit döner
+            return (esp32.raw_temperature() - 32) / 1.8
+        except Exception:
+            return -1
     if _temp_sensor is None:
         _temp_sensor = ADC(4)
     raw = _temp_sensor.read_u16() * 3.3 / 65535
@@ -531,8 +573,8 @@ def internal_temp():
 
 
 def potentiometer(pin):
-    """ADC pininden 0-100 arası okuma."""
-    return int(ADC(pin).read_u16() * 100 / 65535)
+    """ADC pininden 0-100 arası okuma (Pico + ESP32)."""
+    return int(_adc(pin).read_u16() * 100 / 65535)
 
 
 # ============================================================
@@ -606,7 +648,7 @@ def relay_toggle(pin):
 
 def ldr_read(pin):
     """LDR'den 0-100 arası ışık şiddeti okur. Yüksek = aydınlık."""
-    return int(ADC(pin).read_u16() * 100 / 65535)
+    return int(_adc(pin).read_u16() * 100 / 65535)
 
 
 # ============================================================

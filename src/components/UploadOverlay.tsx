@@ -36,7 +36,7 @@ export function UploadOverlay({ progress, onDismiss }: Props) {
               </svg>
             </div>
             <div className="upload-title">Yükleniyor</div>
-            <div className="upload-subtitle">main.py · Pico W'ye yazılıyor</div>
+            <div className="upload-subtitle">main.py · karta yazılıyor</div>
             <div className="upload-progress">
               <div className="upload-progress-bar" style={{ width: `${pct}%` }} />
             </div>
@@ -62,7 +62,7 @@ export function UploadOverlay({ progress, onDismiss }: Props) {
             <div className="upload-subtitle">
               {formatBytes(bytesTotal)} yazıldı · {speedKBs.toFixed(1)} KB/s
             </div>
-            <div className="upload-hint">Pico W yeniden başlatılıyor…</div>
+            <div className="upload-hint">Kart yeniden başlatılıyor…</div>
             <button className="upload-dismiss-btn" onClick={onDismiss}>Tamam</button>
           </>
         )}

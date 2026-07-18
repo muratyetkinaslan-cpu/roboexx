@@ -5,12 +5,16 @@ import {
   pythonBytesLiteral,
   pythonBytesLiteralFromBytes,
   RPI_VID,
+  SUPPORTED_VIDS,
+  isEsp32Like,
+  isUartBridge,
 } from './types';
 
 // Web Serial type stubs (Chrome only API, not in standard lib.dom)
 interface SerialPortLike {
   open(opts: { baudRate: number; bufferSize?: number }): Promise<void>;
   close(): Promise<void>;
+  setSignals?(signals: { dataTerminalReady?: boolean; requestToSend?: boolean; break?: boolean }): Promise<void>;
   readable: ReadableStream<Uint8Array> | null;
   writable: WritableStream<Uint8Array> | null;
   getInfo(): { usbVendorId?: number; usbProductId?: number };
@@ -24,7 +28,9 @@ interface SerialAPI {
 }
 
 /**
- * SerialBridge — Web Serial üzerinden Pico W ile haberleşme katmanı.
+ * SerialBridge — Web Serial üzerinden MicroPython kartlarıyla (Raspberry Pi
+ * Pico / Pico W ve ESP32) haberleşme katmanı. Raw REPL protokolü her iki
+ * ailede birebir aynıdır; Run ve Upload akışları kart fark etmeksizin çalışır.
  *
  * Üç işletim modu:
  *  - normal:    Pico'dan gelen text doğrudan onText'e gider (Serial Monitor)
@@ -58,6 +64,11 @@ export class SerialBridge {
 
   state: BridgeState = 'disconnected';
   portInfo: PortInfo | null = null;
+
+  // Bağlı kart ESP32 mi? (DTR/RTS donanımsal reset sadece ESP32'de denenir)
+  private esp32 = false;
+  // UART köprü çipi mi (CP210x/CH340/FTDI)? Gerçek 115200 baud → küçük chunk
+  private uartBridge = false;
 
   // Public callbacks
   onStateChange: (state: BridgeState) => void = () => {};
@@ -106,12 +117,15 @@ export class SerialBridge {
     try {
       const serial = (navigator as unknown as { serial: SerialAPI }).serial;
       const ports = await serial.getPorts();
-      const picoPort = ports.find((p) => {
-        const info = p.getInfo();
-        return info.usbVendorId === RPI_VID;
-      });
-      if (!picoPort) return null;
-      return await this._connect(picoPort);
+      // Önce Pico'yu, yoksa desteklenen herhangi bir kartı (ESP32) dene
+      const devicePort =
+        ports.find((p) => p.getInfo().usbVendorId === RPI_VID) ??
+        ports.find((p) => {
+          const vid = p.getInfo().usbVendorId;
+          return vid !== undefined && SUPPORTED_VIDS.includes(vid);
+        });
+      if (!devicePort) return null;
+      return await this._connect(devicePort);
     } catch (e) {
       console.warn('Auto-connect failed:', e);
       return null;
@@ -119,7 +133,7 @@ export class SerialBridge {
   }
 
   /**
-   * Picker dialogunu açar (Raspberry Pi cihazlarına filtreli) ve bağlanır.
+   * Picker dialogunu açar (Pico + ESP32 kartlarına filtreli) ve bağlanır.
    */
   async requestAndConnect(): Promise<PortInfo> {
     if (!this.isWebSerialSupported()) {
@@ -128,7 +142,9 @@ export class SerialBridge {
     const serial = (navigator as unknown as { serial: SerialAPI }).serial;
     let port: SerialPortLike;
     try {
-      port = await serial.requestPort({ filters: [{ usbVendorId: RPI_VID }] });
+      port = await serial.requestPort({
+        filters: SUPPORTED_VIDS.map((vid) => ({ usbVendorId: vid })),
+      });
     } catch (e: unknown) {
       const err = e as { name?: string };
       if (err?.name === 'NotFoundError') {
@@ -149,6 +165,8 @@ export class SerialBridge {
     this.writer = null;
     this.reader = null;
     this.portInfo = null;
+    this.esp32 = false;
+    this.uartBridge = false;
     this.onDisconnect();
   }
 
@@ -424,6 +442,23 @@ export class SerialBridge {
     }
     this.port = port;
 
+    // Kart tipini belirle
+    const rawInfo = port.getInfo();
+    this.esp32 = isEsp32Like(rawInfo);
+    this.uartBridge = isUartBridge(rawInfo);
+
+    // ESP32 auto-reset devresi (EN=IO0 transistör çifti): DTR ve RTS'in
+    // İKİSİ birden assert edilince kart normal çalışır. Chrome açılışta
+    // genelde ikisini de assert eder ama bazı sürücülerde (özellikle CH340)
+    // garanti değil — kartın resette/bootloader'da takılı kalmaması için
+    // burada açıkça ayarlıyoruz. Pico için DTR assert USB-CDC "bağlı"
+    // sinyalidir, o yüzden her kart için güvenli.
+    try {
+      await port.setSignals?.({ dataTerminalReady: true, requestToSend: true });
+    } catch {
+      // setSignals bazı sürücülerde yok — sessizce geç
+    }
+
     port.addEventListener('disconnect', () => {
       this.onLog('system', 'USB bağlantısı kesildi');
       this.disconnect();
@@ -544,6 +579,31 @@ export class SerialBridge {
     }
   }
 
+  /**
+   * ESP32'yi DTR/RTS ile donanımsal olarak resetle (uygulama moduna).
+   * Klasik auto-reset devresi: RTS assert + DTR deassert → EN low (reset),
+   * sonra ikisini bırak → kart normal boot eder. Pico'da bu devre yok,
+   * o yüzden sadece ESP32 kartlarda çağrılır.
+   */
+  private async _hardResetEsp32(): Promise<void> {
+    if (!this.esp32 || !this.port?.setSignals) return;
+    try {
+      this.onLog('info', 'ESP32 donanımsal reset deneniyor…');
+      // EN'i çek (reset) — IO0 high kalsın ki bootloader'a DÜŞMESİN
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 120));
+      // Bırak → normal boot
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 60));
+      // DTR'yi tekrar assert et (USB-CDC bağlı sinyali / IO0 devresi dengede)
+      await this.port.setSignals({ dataTerminalReady: true, requestToSend: true });
+      // ESP32 boot log'unu basar — REPL hazır olana dek bekle
+      await new Promise((r) => setTimeout(r, 1200));
+    } catch {
+      // sürücü desteklemiyorsa sessizce geç
+    }
+  }
+
   private async _enterRaw(): Promise<void> {
     this.silent = true;
     this.silentBuffer = '';
@@ -585,6 +645,11 @@ export class SerialBridge {
     // gönder ve uzun bekle, Pico kendini resetlesin. Sonra tekrar dene.
     for (let attempt = 0; attempt < 3; attempt++) {
       this.silentBuffer = '';
+      // ESP32 ise: DTR/RTS ile donanımsal reset dene (Pico'da no-op)
+      if (this.esp32) {
+        await this._hardResetEsp32();
+        this.silentBuffer = '';
+      }
       // Yoğun byte trafiği → yeni bootloader bunu yakalayıp reset eder
       await this._write('\x03\x03\x03\x03\x03');
       await new Promise((r) => setTimeout(r, 1500));
@@ -602,8 +667,11 @@ export class SerialBridge {
 
     // Hiçbir strateji çalışmadı → kullanıcıya net mesaj ver
     throw new Error(
-      'Pico REPL\'e dönmüyor. Lütfen Pico\'da fiziksel RESET tuşuna bas (veya gücü çek-tak), ' +
-      'sonra tekrar dene. (Yeni bootloader yüklendikten sonra bu sorun olmayacak.)'
+      (this.esp32 ? 'ESP32' : 'Pico') + ' REPL\'e dönmüyor. Lütfen karttaki fiziksel ' +
+      (this.esp32 ? 'EN/RST' : 'RESET') + ' tuşuna bas (veya gücü çek-tak), sonra tekrar dene. ' +
+      (this.esp32
+        ? '(ESP32\'de MicroPython yüklü olduğundan emin ol — micropython.org/download/esp32)'
+        : '(Yeni bootloader yüklendikten sonra bu sorun olmayacak.)')
     );
   }
 
@@ -631,9 +699,12 @@ export class SerialBridge {
   ): Promise<{ output: string; error: string }> {
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
-    // Büyük yüklemelerde (lib, resim) Pico'nun yetişmesi için daha küçük chunk
-    // ve aralarda daha uzun pause. 512 bayt + 8ms emniyetli.
-    const chunkSize = 512;
+    // Büyük yüklemelerde kartın yetişmesi için chunk + pause:
+    //  - Pico / Espressif native USB (USB-CDC): 512 bayt + 8ms emniyetli
+    //  - CP210x/CH340/FTDI (gerçek 115200 UART): ESP32'nin UART RX tamponu
+    //    küçük (256B) — 128 bayt + 20ms ile taşma yaşanmıyor
+    const chunkSize = this.uartBridge ? 128 : 512;
+    const pauseMs = this.uartBridge ? 20 : 8;
 
     for (let i = 0; i < total; i += chunkSize) {
       const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
@@ -641,7 +712,7 @@ export class SerialBridge {
       const sent = Math.min(i + chunkSize, total);
       onChunkSent?.(sent, total);
       if (i + chunkSize < total) {
-        await new Promise((r) => setTimeout(r, 8));
+        await new Promise((r) => setTimeout(r, pauseMs));
       }
     }
 

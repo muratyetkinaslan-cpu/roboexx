@@ -289,7 +289,7 @@ export default function App() {
     bleBridge.onStateChange = setBridgeState;
     bleBridge.onLog = (kind, message) => addLine(kind, message);
 
-    addLine('system', 'RoboExx · Pico W bağlantısı bekleniyor');
+    addLine('system', 'RoboExx · Pico / ESP32 bağlantısı bekleniyor');
     serialBridge.tryAutoConnect().then((info) => {
       if (info) addLine('info', 'Önceden tanınan cihaz otomatik bağlandı');
     });
@@ -1201,8 +1201,8 @@ export default function App() {
       });
       setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
       addLine('system', connectionMode === 'ble'
-        ? '✓ Kod gönderildi — Pico yeniden başlıyor, otomatik bağlanılacak'
-        : 'Yükleme başarılı, Pico restart oluyor');
+        ? '✓ Kod gönderildi — kart yeniden başlıyor, otomatik bağlanılacak'
+        : 'Yükleme başarılı, kart restart oluyor');
     } catch (e) {
       const err = e as Error;
       setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
@@ -1550,7 +1550,7 @@ export default function App() {
                   <span className="code-editor-hint">
                     {codeTarget === 'arduino'
                       ? "Arduino'ya bu kod derlenip yüklenecek"
-                      : "Pico W'ye doğrudan bu kod yüklenecek"}
+                      : "Karta (Pico / ESP32) doğrudan bu kod yüklenecek"}
                   </span>
                 </div>
                 <CodeEditor value={customCode} onChange={handleCodeChange} theme={theme} />

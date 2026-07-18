@@ -28,7 +28,7 @@ interface Props {
 
   /* Canlı Paylaşım topbar'dan kaldırıldı — sol rail'deki "Sınıf" sekmesinden yönetilir. */
 
-  /** "Modülleri Yükle" — roboexx.py kütüphanesini Pico'ya yaz */
+  /** "Modülleri Yükle" — roboexx.py kütüphanesini karta (Pico / ESP32) yaz */
   onUploadLibrary: () => void;
 
   /** Force reset — bridge sıkışırsa kurtarma */
@@ -40,7 +40,7 @@ interface Props {
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
-  /** Kod hedefi — MicroPython (Pico) veya Arduino */
+  /** Kod hedefi — MicroPython (Pico / ESP32) veya Arduino */
   codeTarget: 'micropython' | 'arduino';
   /** Kod hedefini değiştir */
   onTargetChange: (target: 'micropython' | 'arduino') => void;
@@ -97,10 +97,10 @@ export function Toolbar(props: Props) {
           <button
             className={`target-switch-btn ${props.codeTarget === 'micropython' ? 'is-active' : ''}`}
             onClick={() => props.onTargetChange('micropython')}
-            data-tooltip="Pico · MicroPython"
-            data-tooltip-detail="Bloklardan MicroPython üret, Raspberry Pi Pico'ya yükle"
+            data-tooltip="Pico / ESP32 · MicroPython"
+            data-tooltip-detail="Bloklardan MicroPython üret, Raspberry Pi Pico veya ESP32'ye yükle"
           >
-            🐍 Pico
+            🐍 MicroPython
           </button>
           <button
             className={`target-switch-btn ${props.codeTarget === 'arduino' ? 'is-active' : ''}`}
@@ -218,7 +218,7 @@ export function Toolbar(props: Props) {
             className="btn btn-ghost btn-icon-only btn-firmware"
             onClick={props.onFirmwareUpload}
             data-tooltip="Firmware Yükle"
-            data-tooltip-detail="Pico'ya MicroPython UF2 dosyası yükle (yeni kart için)"
+            data-tooltip-detail="Pico'ya MicroPython UF2 yükle (yeni Pico için — ESP32'ye firmware micropython.org'dan esptool ile yüklenir)"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" />
@@ -232,7 +232,7 @@ export function Toolbar(props: Props) {
             onClick={props.onUploadLibrary}
             disabled={!isConnected || isBusy}
             data-tooltip="Modülleri Yükle"
-            data-tooltip-detail="RoboExx kütüphanesini Pico'ya yazar. Bir kez yapman yeter."
+            data-tooltip-detail="RoboExx kütüphanesini karta (Pico / ESP32) yazar. Bir kez yapman yeter."
           >
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
               <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

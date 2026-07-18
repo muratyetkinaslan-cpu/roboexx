@@ -108,6 +108,14 @@ export function FirmwareUploader({ open, onClose }: Props) {
               <p className="fw-hint">
                 Hangi Pico kartını kullanıyorsun? Doğru sürümü seç, yoksa Pico çalışmaz.
               </p>
+              <p className="fw-hint" style={{ opacity: 0.8 }}>
+                💡 <strong>ESP32 mi kullanıyorsun?</strong> ESP32'ye MicroPython bir kez{' '}
+                <a href="https://micropython.org/download/ESP32_GENERIC/" target="_blank" rel="noreferrer">
+                  micropython.org
+                </a>{' '}
+                üzerinden (tarayıcıdan veya esptool ile) yüklenir. Sonrasında RoboExx'te
+                Bağlan → Çalıştır / Yükle akışı Pico ile birebir aynıdır.
+              </p>
 
               {!isFileSystemAccessSupported() && (
                 <div className="fw-warning">

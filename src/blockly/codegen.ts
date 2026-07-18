@@ -6,7 +6,7 @@ export type CodeTarget = 'micropython' | 'arduino';
 
 /** İnsan-okur etiketler. */
 export const TARGET_LABELS: Record<CodeTarget, string> = {
-  micropython: 'MicroPython · Pico',
+  micropython: 'MicroPython · Pico / ESP32',
   arduino: 'Arduino · C++',
 };
 

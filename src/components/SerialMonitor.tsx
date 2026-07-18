@@ -87,7 +87,7 @@ export function SerialMonitor({ open, onToggle, connected, lines, onSend, onClea
             <span className="serial-status-dot">
               {connected && <span className="serial-status-pulse" />}
             </span>
-            {connected ? '115200 baud · Pico W' : 'Bağlı değil'}
+            {connected ? '115200 baud · MicroPython' : 'Bağlı değil'}
           </span>
           <span className="serial-line-count">{lines.length} satır</span>
         </div>

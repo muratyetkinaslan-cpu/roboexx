@@ -14,6 +14,47 @@
 
 export const RPI_VID = 0x2E8A;
 
+/**
+ * ESP32 kartlarında görülen USB Vendor ID'leri:
+ *   0x303A → Espressif (native USB — ESP32-S2/S3/C3/C6 dahili USB-CDC)
+ *   0x10C4 → Silicon Labs CP210x (klasik ESP32 DevKit'lerin çoğu)
+ *   0x1A86 → WCH CH340 / CH9102 (ucuz DevKit klonları, NodeMCU vb.)
+ *   0x0403 → FTDI FT232 (bazı eski / endüstriyel kartlar)
+ */
+export const ESPRESSIF_VID = 0x303A;
+export const CP210X_VID = 0x10C4;
+export const WCH_VID = 0x1A86;
+export const FTDI_VID = 0x0403;
+
+/** Port seçim dialogunda gösterilecek tüm desteklenen VID'ler. */
+export const SUPPORTED_VIDS: number[] = [
+  RPI_VID,
+  ESPRESSIF_VID,
+  CP210X_VID,
+  WCH_VID,
+  FTDI_VID,
+];
+
+/**
+ * Kart bir UART köprü çipi (CP210x/CH340/FTDI) üzerinden mi bağlı?
+ * Bu kartlarda veri gerçek 115200 baud UART'tan akar — RX tamponu küçük
+ * olduğundan raw REPL aktarımında daha küçük chunk + daha uzun bekleme gerekir.
+ * (Pico ve Espressif native USB'de bağlantı USB-CDC'dir, baud sanaldır.)
+ */
+export function isUartBridge(info: { usbVendorId?: number }): boolean {
+  const v = info.usbVendorId;
+  return v === CP210X_VID || v === WCH_VID || v === FTDI_VID;
+}
+
+/**
+ * ESP32 (veya ESP32 olması muhtemel) bir cihaz mı?
+ * DTR/RTS ile donanımsal reset (EN/IO0 devresi) sadece bu kartlarda denenir.
+ */
+export function isEsp32Like(info: { usbVendorId?: number }): boolean {
+  const v = info.usbVendorId;
+  return v === ESPRESSIF_VID || v === CP210X_VID || v === WCH_VID || v === FTDI_VID;
+}
+
 export interface PortInfo {
   vendorId?: number;
   productId?: number;
@@ -53,6 +94,19 @@ export function friendlyNameFor(info: { usbVendorId?: number; usbProductId?: num
       default:
         return 'Raspberry Pi Pico';
     }
+  }
+
+  if (usbVendorId === ESPRESSIF_VID) {
+    return 'ESP32 (Espressif USB)';
+  }
+  if (usbVendorId === CP210X_VID) {
+    return 'ESP32 (CP210x)';
+  }
+  if (usbVendorId === WCH_VID) {
+    return 'ESP32 (CH340)';
+  }
+  if (usbVendorId === FTDI_VID) {
+    return 'ESP32 (FTDI)';
   }
 
   if (usbVendorId !== undefined && usbProductId !== undefined) {
