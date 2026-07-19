@@ -409,9 +409,15 @@ function ensureL9110(g: Gen) {
     '  pinMode(ia, OUTPUT); pinMode(ib, OUTPUT);\n' +
     '  spd = constrain(spd, 0, 100);\n' +
     '  int pwm = map(spd, 0, 100, 0, 255);\n' +
-    '  if (dir > 0) { analogWrite(ia, pwm); digitalWrite(ib, LOW); }\n' +
-    '  else if (dir < 0) { analogWrite(ib, pwm); digitalWrite(ia, LOW); }\n' +
-    '  else { digitalWrite(ia, LOW); digitalWrite(ib, LOW); }\n' +
+    '  if (dir > 0 && spd > 0) { analogWrite(ia, pwm); digitalWrite(ib, LOW); }\n' +
+    '  else if (dir < 0 && spd > 0) { analogWrite(ib, pwm); digitalWrite(ia, LOW); }\n' +
+    '  else {\n' +
+    '    // DUR = FREN: L9110\'da iki giris HIGH = kisa devre freni.\n' +
+    '    // Iki pini LOW yapmak "coast"tur — motor ataletle donmeye devam eder.\n' +
+    '    digitalWrite(ia, HIGH); digitalWrite(ib, HIGH);\n' +
+    '    delay(80);\n' +
+    '    digitalWrite(ia, LOW); digitalWrite(ib, LOW);\n' +
+    '  }\n' +
     '}';
 }
 

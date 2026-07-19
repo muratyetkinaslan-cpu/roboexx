@@ -179,13 +179,71 @@ export class SerialBridge {
   }
 
   /**
-   * Çalışan programı durdur (Ctrl-C iki kere).
+   * Çalışan programı durdur (Ctrl-C iki kere) + motor/PWM temizliği.
+   *
+   * ÖNEMLİ: Ctrl-C programı kesse bile PWM DONANIMI son duty'de çıkış
+   * vermeye devam eder (özellikle ESP32 LEDC) — motor dönmeye devam eder!
+   * Bu yüzden kesmeden hemen sonra REPL'e bir temizlik komutu gönderilir:
+   *   - Üretilen koddaki _rx_l9110_pwm ve roboexx._pwm_cache içindeki tüm
+   *     PWM'ler duty=0 + deinit edilir, pinleri dijital LOW'a çekilir
+   *   - L9110 pinlerine kısa fren darbesi (iki giriş HIGH) verilir
    */
   async interrupt(): Promise<void> {
     if (!this.writer) return;
     await this._write('\r\x03\x03');
     // Eğer busy state'de takılı kalmışsak zorla resetle
     this._forceIdle();
+    // Ctrl-C sonrası friendly REPL'in oturması için kısa bekleme,
+    // ardından motor/PWM temizliği (fire-and-forget, hata yutulur)
+    setTimeout(() => {
+      this._sendMotorCleanup().catch(() => {});
+    }, 250);
+  }
+
+  /**
+   * REPL'e tek satırlık PWM/motor temizlik komutu yaz.
+   * Çalışan program yoksa veya ilgili globals tanımlı değilse no-op'tur;
+   * Pico'da da zararsızdır (orada da PWM Ctrl-C sonrası çalışmaya devam eder).
+   */
+  private async _sendMotorCleanup(): Promise<void> {
+    if (!this.writer || this.silent || this.state !== 'connected') return;
+    const py =
+      'exec("try:\\n' +
+      ' import sys, time\\n' +
+      ' from machine import Pin\\n' +
+      ' _l9=globals().get(\'_rx_l9110_pwm\')\\n' +
+      ' _l9p=list(_l9.keys()) if _l9 else []\\n' +
+      ' _ds=[_l9,getattr(sys.modules.get(\'roboexx\'),\'_pwm_cache\',None)]\\n' +
+      ' for _d in _ds:\\n' +
+      '  if _d:\\n' +
+      '   for _p,_o in list(_d.items()):\\n' +
+      '    try:\\n' +
+      '     _o.duty_u16(0)\\n' +
+      '    except Exception:\\n' +
+      '     pass\\n' +
+      '    try:\\n' +
+      '     _o.deinit()\\n' +
+      '    except Exception:\\n' +
+      '     pass\\n' +
+      '    try:\\n' +
+      '     Pin(_p,Pin.OUT).value(0)\\n' +
+      '    except Exception:\\n' +
+      '     pass\\n' +
+      '   _d.clear()\\n' +
+      ' if _l9p:\\n' +
+      '  _ps=[Pin(_p,Pin.OUT) for _p in _l9p]\\n' +
+      '  for _q in _ps:\\n' +
+      '   _q.value(1)\\n' +
+      '  time.sleep_ms(80)\\n' +
+      '  for _q in _ps:\\n' +
+      '   _q.value(0)\\n' +
+      'except Exception:\\n' +
+      ' pass")';
+    try {
+      await this._write(py + '\r\n');
+    } catch {
+      // sessiz yut
+    }
   }
 
   /**

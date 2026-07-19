@@ -507,23 +507,57 @@ pythonGenerator.forBlock['rx_dc_motor_stop'] = function (block) {
 /** L9110 yardımcılarını üretilen kodun başına bir kez ekler. */
 function ensureL9110Defs(generator: any) {
   generator.definitions_['_rx_import_machine_pwm'] = 'from machine import Pin, PWM';
+  generator.definitions_['_rx_import_time'] = 'import time';
   generator.definitions_['_rx_l9110_lib'] =
     '_rx_l9110_pwm = {}\n' +
-    'def _rx_l9110_pin(p):\n' +
+    'def _rx_l9110_duty(o, duty):\n' +
+    '    # duty_u16 yoksa (eski ESP32 firmware) 0-1023 duty() kullan\n' +
+    '    try:\n' +
+    '        o.duty_u16(duty)\n' +
+    '    except AttributeError:\n' +
+    '        o.duty(duty * 1023 // 65535)\n' +
+    'def _rx_l9110_pwm_pin(p):\n' +
     '    o = _rx_l9110_pwm.get(p)\n' +
     '    if o is None:\n' +
     '        o = PWM(Pin(p)); o.freq(1000); _rx_l9110_pwm[p] = o\n' +
     '    return o\n' +
+    'def _rx_l9110_low(p):\n' +
+    '    # PWM kanalini tamamen birak ve pini dijital LOW yap.\n' +
+    '    # ESP32 LEDC duty=0 glitch darbeleri uretir — dijital LOW kesin cozum.\n' +
+    '    o = _rx_l9110_pwm.pop(p, None)\n' +
+    '    if o:\n' +
+    '        try:\n' +
+    '            _rx_l9110_duty(o, 0); o.deinit()\n' +
+    '        except Exception:\n' +
+    '            pass\n' +
+    '    Pin(p, Pin.OUT).value(0)\n' +
+    'def _rx_l9110_high(p):\n' +
+    '    # %100 hizda PWM yerine dijital HIGH (ESP32 max-duty tuhafliklarini atlar)\n' +
+    '    o = _rx_l9110_pwm.pop(p, None)\n' +
+    '    if o:\n' +
+    '        try:\n' +
+    '            o.deinit()\n' +
+    '        except Exception:\n' +
+    '            pass\n' +
+    '    Pin(p, Pin.OUT).value(1)\n' +
     'def rx_l9110(ia, ib, spd, d):\n' +
-    '    spd = 0 if spd < 0 else (100 if spd > 100 else spd)\n' +
-    '    duty = int(spd * 65535 // 100)\n' +
-    '    a = _rx_l9110_pin(ia); b = _rx_l9110_pin(ib)\n' +
-    '    if d > 0:\n' +
-    '        a.duty_u16(duty); b.duty_u16(0)\n' +
-    '    elif d < 0:\n' +
-    '        a.duty_u16(0); b.duty_u16(duty)\n' +
+    '    spd = 0 if spd < 0 else (100 if spd > 100 else int(spd))\n' +
+    '    if spd == 0 or d == 0:\n' +
+    '        # DUR = FREN: L9110\'da iki giris HIGH = kisa devre freni.\n' +
+    '        # Iki pini 0 yapmak "coast"tur — motor ataletle donmeye devam eder!\n' +
+    '        _rx_l9110_low(ia); _rx_l9110_low(ib)\n' +
+    '        pa = Pin(ia, Pin.OUT); pb = Pin(ib, Pin.OUT)\n' +
+    '        pa.value(1); pb.value(1)\n' +
+    '        time.sleep_ms(80)\n' +
+    '        pa.value(0); pb.value(0)\n' +
+    '        return\n' +
+    '    hi = ia if d > 0 else ib\n' +
+    '    lo = ib if d > 0 else ia\n' +
+    '    _rx_l9110_low(lo)\n' +
+    '    if spd >= 100:\n' +
+    '        _rx_l9110_high(hi)\n' +
     '    else:\n' +
-    '        a.duty_u16(0); b.duty_u16(0)';
+    '        _rx_l9110_duty(_rx_l9110_pwm_pin(hi), spd * 65535 // 100)';
 }
 
 pythonGenerator.forBlock['rx_l9110_motor'] = function (block, generator) {
