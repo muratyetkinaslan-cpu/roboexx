@@ -6219,3 +6219,298 @@ g.blocklyDraggable > path:first-of-type {
   color: #d56a00;
   box-shadow: inset 0 0 0 1px rgba(255, 140, 30, 0.4);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   EĞİTMEN KÜTÜPHANESİ PANELİ (şifre korumalı hazır kod arşivi)
+   ════════════════════════════════════════════════════════════════════ */
+
+.teacher-library-panel {
+  overflow: hidden;
+}
+
+.tl-lock-badge {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.tl-lock-badge.is-open { opacity: 1; }
+
+/* — Şifre kapısı — */
+.tl-password-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 20px;
+  text-align: center;
+}
+.tl-password-icon { font-size: 30px; margin-bottom: 2px; }
+.tl-password-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--rx-text);
+}
+.tl-password-desc {
+  font-size: 11.5px;
+  color: var(--rx-text-dim);
+  line-height: 1.5;
+  max-width: 220px;
+}
+.tl-password-input {
+  width: 100%;
+  max-width: 220px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--rx-border);
+  background: var(--rx-surface2);
+  color: var(--rx-text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.tl-password-input:focus {
+  border-color: var(--rx-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rx-accent) 18%, transparent);
+}
+.tl-password-input.is-error {
+  border-color: #ef4444;
+  animation: tl-shake 0.3s;
+}
+@keyframes tl-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.tl-password-error {
+  font-size: 11px;
+  color: #ef4444;
+  font-weight: 600;
+}
+.tl-password-btn {
+  margin-top: 4px;
+  padding: 8px 22px;
+  border-radius: 8px;
+  border: none;
+  background: var(--rx-accent);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease-out), transform 0.1s var(--ease-out);
+}
+.tl-password-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.tl-password-btn:active:not(:disabled) { transform: scale(0.97); }
+.tl-password-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* — Gönderim hedefi satırı — */
+.tl-target-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 11px;
+  color: var(--rx-text-dim);
+  border-bottom: 1px solid var(--rx-border);
+  line-height: 1.4;
+}
+.tl-target-row b { color: var(--rx-text); }
+.tl-target-dot {
+  width: 7px; height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--rx-text-dim);
+  opacity: 0.5;
+}
+.tl-target-dot.is-connected {
+  background: #10b981;
+  opacity: 1;
+  box-shadow: 0 0 6px color-mix(in srgb, #10b981 60%, transparent);
+}
+
+/* — Kit listesi — */
+.tl-kit-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.tl-kit {
+  border: 1px solid var(--rx-border);
+  border-radius: 10px;
+  background: var(--rx-surface2);
+  overflow: hidden;
+}
+.tl-kit.is-open {
+  border-color: color-mix(in srgb, var(--rx-accent) 40%, var(--rx-border));
+}
+.tl-kit-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--rx-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s var(--ease-out);
+}
+.tl-kit-header:hover { background: color-mix(in srgb, var(--rx-accent) 7%, transparent); }
+.tl-kit-emoji { font-size: 18px; }
+.tl-kit-name-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tl-kit-name {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.tl-kit-desc {
+  font-size: 10.5px;
+  color: var(--rx-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tl-kit-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--rx-accent-soft);
+  color: var(--rx-accent);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.tl-kit-chevron {
+  color: var(--rx-text-dim);
+  transition: transform 0.18s var(--ease-out);
+  flex-shrink: 0;
+}
+
+/* — Kod dosyaları — */
+.tl-file-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--rx-border);
+}
+.tl-file {
+  border-bottom: 1px solid color-mix(in srgb, var(--rx-border) 55%, transparent);
+  padding: 0 8px 8px;
+}
+.tl-file:last-child { border-bottom: none; }
+.tl-file-header {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--rx-text);
+  cursor: pointer;
+  text-align: left;
+}
+.tl-file-header svg {
+  margin-top: 2px;
+  color: var(--rx-accent);
+  flex-shrink: 0;
+}
+.tl-file-header:hover .tl-file-name { color: var(--rx-accent); }
+.tl-file-name-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tl-file-name {
+  font-size: 12px;
+  font-weight: 650;
+  transition: color 0.12s var(--ease-out);
+}
+.tl-file-desc {
+  font-size: 10.5px;
+  color: var(--rx-text-dim);
+  line-height: 1.35;
+}
+.tl-file-code {
+  margin: 2px 4px 8px;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--rx-bg);
+  border: 1px solid var(--rx-border);
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--rx-text);
+  white-space: pre;
+}
+.tl-file-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px;
+}
+.tl-action-btn {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--rx-border);
+  background: var(--rx-surface);
+  color: var(--rx-text);
+  font-size: 10.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.15s var(--ease-out);
+}
+.tl-action-btn:hover {
+  border-color: var(--rx-accent);
+  color: var(--rx-accent);
+}
+.tl-action-send {
+  background: var(--rx-accent);
+  border-color: var(--rx-accent);
+  color: #fff;
+}
+.tl-action-send:hover {
+  filter: brightness(1.1);
+  color: #fff;
+}
+.tl-action-btn.is-done {
+  background: #10b981;
+  border-color: #10b981;
+  color: #fff;
+}
+
+/* — Login modalındaki eğitmen şifre alanı — */
+.teacher-pw-wrap {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.teacher-pw-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--rx-text-dim);
+  letter-spacing: 0.03em;
+}
+.teacher-pw-input.is-error {
+  border-color: #ef4444 !important;
+  animation: tl-shake 0.3s;
+}
+.teacher-pw-error {
+  font-size: 11px;
+  color: #ef4444;
+  font-weight: 600;
+}

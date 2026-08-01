@@ -70,6 +70,20 @@ export class SerialBridge {
   // UART köprü çipi mi (CP210x/CH340/FTDI)? Gerçek 115200 baud → küçük chunk
   private uartBridge = false;
 
+  /**
+   * Kontrollü yazılımsal reset (machine.reset) sürüyor mu?
+   * True iken USB 'disconnect' event'i normal kopma gibi işlenmez —
+   * bridge portu kendisi kapatıp yeniden bağlanır.
+   */
+  private rebooting = false;
+
+  /**
+   * Read loop jenerasyon sayacı. Yazılımsal reset sonrası eski read loop'un
+   * yeni portu ele geçirmesini önler: her _startReadLoop çağrısı sayacı
+   * artırır, eski loop kendi jenerasyonu eskiyince sessizce çıkar.
+   */
+  private readLoopGen = 0;
+
   // Public callbacks
   onStateChange: (state: BridgeState) => void = () => {};
   onConnect: (info: PortInfo) => void = () => {};
@@ -158,6 +172,7 @@ export class SerialBridge {
   async disconnect(): Promise<void> {
     this._setState('disconnected');
     this.liveRun = false;
+    this.readLoopGen++; // aktif read loop'u geçersiz kıl
     try { await this.reader?.cancel(); } catch {}
     try { this.writer?.releaseLock(); } catch {}
     try { await this.port?.close(); } catch {}
@@ -487,17 +502,35 @@ export class SerialBridge {
     }
     this._setState('connecting');
     try {
-      await port.open({ baudRate: 115200, bufferSize: 8192 });
+      await this._openPort(port);
     } catch (e: unknown) {
       // "already in progress" hatası StrictMode'da olur — sessizce yut
       const err = e as { name?: string; message?: string };
+      this._setState('disconnected');
       if (err?.name === 'InvalidStateError' || (err?.message ?? '').includes('already')) {
-        this._setState('disconnected');
         throw new Error('Port zaten açılıyor — tekrar dene');
       }
-      this._setState('disconnected');
       throw e;
     }
+
+    const info = port.getInfo();
+    this.portInfo = {
+      vendorId: info.usbVendorId,
+      productId: info.usbProductId,
+      friendlyName: friendlyNameFor(info),
+    };
+    this._setState('connected');
+    this.onConnect(this.portInfo);
+    return this.portInfo;
+  }
+
+  /**
+   * Portu aç, kart tipini belirle, sinyalleri ayarla, writer + read loop kur.
+   * Hem ilk bağlantı (_connect) hem yazılımsal reset sonrası yeniden
+   * bağlanma (_hardResetAndReconnect) tarafından kullanılır.
+   */
+  private async _openPort(port: SerialPortLike): Promise<void> {
+    await port.open({ baudRate: 115200, bufferSize: 8192 });
     this.port = port;
 
     // Kart tipini belirle
@@ -518,6 +551,9 @@ export class SerialBridge {
     }
 
     port.addEventListener('disconnect', () => {
+      // Kontrollü yazılımsal reset sırasında USB'nin kopması BEKLENEN bir
+      // durum — bridge kendi yeniden bağlanacak, kullanıcıya kopma gösterme.
+      if (this.rebooting) return;
       this.onLog('system', 'USB bağlantısı kesildi');
       this.disconnect();
     });
@@ -527,20 +563,93 @@ export class SerialBridge {
     }
 
     this.readLoopPromise = this._startReadLoop();
+  }
 
-    const info = port.getInfo();
-    this.portInfo = {
-      vendorId: info.usbVendorId,
-      productId: info.usbProductId,
-      friendlyName: friendlyNameFor(info),
-    };
-    this._setState('connected');
-    this.onConnect(this.portInfo);
-    return this.portInfo;
+  /** Silent buffer'daki bayat veriyi at (yeni el sıkışmadan önce). */
+  private _drainStale(): void {
+    this.silentBuffer = '';
+  }
+
+  /**
+   * SON ÇARE — kartı yazılımsal olarak resetle ve otomatik yeniden bağlan.
+   *
+   * Sıkışan Pico'da (eski main.py core1 thread'i, kilitli döngü vb.) soft
+   * reset (Ctrl-D) bile takılı kalabiliyor; kullanıcı fiziksel RESET tuşuna
+   * basmak zorunda kalıyordu. Bu fonksiyon aynı işi YAZILIMLA yapar:
+   *   1. Friendly REPL'e kör olarak `machine.reset()` gönder (hard reset —
+   *      core1 thread'lerini beklemez, USB dahil tüm çipi yeniden başlatır)
+   *   2. USB yeniden numaralandırılır → eski portu kapat
+   *   3. Daha önce yetkilendirilmiş portu (izin kalıcıdır) tekrar bul ve aç
+   *
+   * Başarılıysa true döner; kart temiz boot etmiş, REPL'e girilebilir durumda.
+   */
+  private async _hardResetAndReconnect(): Promise<boolean> {
+    if (!this.port) return false;
+    this.onLog('info', '⟳ Kart yazılımsal olarak resetleniyor (RESET tuşuna gerek yok)…');
+    this.rebooting = true;
+    try {
+      // 1) Kör komut: önce Ctrl-C'lerle friendly REPL'e dönmeyi dene,
+      //    sonra machine.reset(). REPL cevap vermese bile zarar yok.
+      try {
+        await this._write('\r\x03\x03');
+        await new Promise((r) => setTimeout(r, 250));
+        await this._write('\r\x03');
+        await new Promise((r) => setTimeout(r, 150));
+        await this._write('import machine\r\nmachine.reset()\r\n');
+      } catch {
+        // yazma hatası — port zaten kopmuş olabilir, devam
+      }
+
+      // 2) USB'nin düşmesi için bekle, sonra eski portu tamamen kapat
+      await new Promise((r) => setTimeout(r, 700));
+      this.readLoopGen++; // eski read loop'u geçersiz kıl
+      try { await this.reader?.cancel(); } catch {}
+      try { this.writer?.releaseLock(); } catch {}
+      this.writer = null;
+      this.reader = null;
+      try { await this.port?.close(); } catch {}
+      this.port = null;
+
+      // 3) Kart yeniden numaralandırılana kadar portu ara (en fazla 12sn)
+      const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+      const deadline = Date.now() + 12000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          const ports = await serial.getPorts();
+          const devicePort =
+            ports.find((p) => p.getInfo().usbVendorId === RPI_VID) ??
+            ports.find((p) => {
+              const vid = p.getInfo().usbVendorId;
+              return vid !== undefined && SUPPORTED_VIDS.includes(vid);
+            });
+          if (!devicePort) continue;
+          await this._openPort(devicePort);
+          // Boot'un oturması + MicroPython banner'ının basılması için bekle
+          await new Promise((r) => setTimeout(r, 1200));
+          this._drainStale();
+          this.onLog('info', '✓ Kart resetlendi ve yeniden bağlanıldı');
+          return true;
+        } catch {
+          // port henüz hazır değil / açılamadı — tekrar dene.
+          // (this.port'u yerel değişkene al — TS, _openPort içindeki
+          // atamayı takip edemediği için tipi 'null'a daraltıyor.)
+          const halfOpen = this.port as SerialPortLike | null;
+          try { await halfOpen?.close(); } catch {}
+          this.port = null;
+          this.writer = null;
+        }
+      }
+      this.onLog('error', 'Kart reset sonrası bulunamadı — USB kablosunu kontrol et');
+      return false;
+    } finally {
+      this.rebooting = false;
+    }
   }
 
   private async _startReadLoop(): Promise<void> {
-    while (this.port?.readable) {
+    const myGen = ++this.readLoopGen;
+    while (this.port?.readable && myGen === this.readLoopGen) {
       try {
         this.reader = this.port.readable.getReader();
         while (true) {
@@ -568,6 +677,7 @@ export class SerialBridge {
         this.reader = null;
       }
       if (this.state === 'disconnected') break;
+      if (myGen !== this.readLoopGen) break; // yeni loop devraldı
       await new Promise((r) => setTimeout(r, 50));
     }
   }
@@ -623,7 +733,15 @@ export class SerialBridge {
   private async _write(data: Uint8Array | string): Promise<void> {
     if (!this.writer) throw new Error('Yazıcı hazır değil');
     const bytes = typeof data === 'string' ? this.encoder.encode(data) : data;
-    await this.writer.write(bytes);
+    // Zaman aşımı emniyeti: USB yığını sıkışırsa write() hiç dönmeyebilir ve
+    // tüm uygulama "Meşgul"de kalır. 4sn'de dönmezse hata fırlat — üst
+    // katman (enterRaw stratejileri) kurtarmayı devralır.
+    await Promise.race([
+      this.writer.write(bytes),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Seri porta yazma zaman aşımı — kart cevap vermiyor')), 4000)
+      ),
+    ]);
   }
 
   private async _waitForBuffer(needle: string, timeoutMs = 5000): Promise<void> {
@@ -662,74 +780,104 @@ export class SerialBridge {
     }
   }
 
+  /**
+   * Tek bir raw REPL giriş denemesi: Ctrl-A gönder, banner'ı bekle.
+   * MicroPython raw REPL'e girince "raw REPL; CTRL-B to exit" basar;
+   * zaten raw REPL'deyse Ctrl-A banner'ı yeniden basar — iki durumda da OK.
+   */
+  private async _tryRawEntry(timeoutMs: number): Promise<boolean> {
+    this._drainStale();
+    try {
+      await this._write('\r\x01');
+      await this._waitForBuffer('raw REPL', timeoutMs);
+      await new Promise((r) => setTimeout(r, 50));
+      this._drainStale();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async _enterRaw(): Promise<void> {
     this.silent = true;
-    this.silentBuffer = '';
+    this._drainStale();
 
-    // STRATEJİ 1: Friendly REPL'de varsayalım — Ctrl-C ile kes + Ctrl-A ile raw'a gir
-    await this._write('\r\x03\x03');
-    await new Promise((r) => setTimeout(r, 200));
-    this.silentBuffer = '';
-    await this._write('\r\x01');
+    // STRATEJİ 1: Friendly REPL'de varsayalım — SABIRLI kesme.
+    // Tek çift Ctrl-C sıkı döngülerde her zaman yakalanmıyor; mpremote gibi
+    // Ctrl-C'yi aralıklarla birkaç kez gönder, sonra Ctrl-A ile raw'a gir.
     try {
-      await this._waitForBuffer('raw REPL', 1500);
-      await new Promise((r) => setTimeout(r, 50));
-      this.silentBuffer = '';
-      return;
+      for (let i = 0; i < 3; i++) {
+        await this._write('\r\x03\x03');
+        await new Promise((r) => setTimeout(r, 150));
+      }
     } catch {
-      // strateji 1 başarısız — devam
+      // yazma zaman aşımı — sonraki stratejiler / yazılımsal reset devralır
     }
+    await new Promise((r) => setTimeout(r, 200));
+    if (await this._tryRawEntry(2000)) return;
 
     // STRATEJİ 2: Soft reset (Ctrl-D) — main.py yeniden başlar, USB aktivite
-    // tespiti devreye girer (yeni bootloader). Sonra raw REPL'e gir.
-    this.silentBuffer = '';
-    await this._write('\r\x04');
-    await new Promise((r) => setTimeout(r, 400));
-    await this._write('\x03\x03\x03');
-    await new Promise((r) => setTimeout(r, 2500));
-    this.silentBuffer = '';
-    await this._write('\r\x01');
+    // tespiti devreye girer (yeni bootloader). Sonra tekrar kes + raw REPL'e gir.
     try {
-      await this._waitForBuffer('raw REPL', 3000);
-      await new Promise((r) => setTimeout(r, 50));
-      this.silentBuffer = '';
-      return;
+      this._drainStale();
+      await this._write('\r\x04');
+      await new Promise((r) => setTimeout(r, 400));
+      await this._write('\x03\x03\x03');
+      await new Promise((r) => setTimeout(r, 2500));
+      await this._write('\r\x03\x03');
+      await new Promise((r) => setTimeout(r, 300));
     } catch {
-      // strateji 2 başarısız — devam
+      // yazma hatası — devam
     }
+    if (await this._tryRawEntry(3000)) return;
 
     // STRATEJİ 3: Pico sıkışmış (eski main.py, core1 thread, BLE meşgul).
     // Yeni bootloader USB byte gelince reset yapar — Ctrl-C'leri art arda
     // gönder ve uzun bekle, Pico kendini resetlesin. Sonra tekrar dene.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      this.silentBuffer = '';
-      // ESP32 ise: DTR/RTS ile donanımsal reset dene (Pico'da no-op)
-      if (this.esp32) {
-        await this._hardResetEsp32();
-        this.silentBuffer = '';
-      }
-      // Yoğun byte trafiği → yeni bootloader bunu yakalayıp reset eder
-      await this._write('\x03\x03\x03\x03\x03');
-      await new Promise((r) => setTimeout(r, 1500));
-      this.silentBuffer = '';
-      await this._write('\r\x03\x01');
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await this._waitForBuffer('raw REPL', 2500);
-        await new Promise((r) => setTimeout(r, 50));
-        this.silentBuffer = '';
-        return;
+        this._drainStale();
+        // ESP32 ise: DTR/RTS ile donanımsal reset dene (Pico'da no-op)
+        if (this.esp32) {
+          await this._hardResetEsp32();
+          this._drainStale();
+        }
+        // Yoğun byte trafiği → yeni bootloader bunu yakalayıp reset eder
+        await this._write('\x03\x03\x03\x03\x03');
+        await new Promise((r) => setTimeout(r, 1500));
+        await this._write('\r\x03');
       } catch {
-        // sonraki deneme
+        // yazma hatası — reset stratejisine düş
+        break;
       }
+      if (await this._tryRawEntry(2500)) return;
+    }
+
+    // STRATEJİ 4 (SON ÇARE): Yazılımsal hard reset + otomatik yeniden bağlanma.
+    // Fiziksel RESET tuşuna basmanın yazılımla yapılmış hali — machine.reset()
+    // core1 thread'lerini beklemeden tüm çipi yeniden başlatır. Kart temiz
+    // boot edince raw REPL'e girmek her zaman mümkündür.
+    const resetOk = await this._hardResetAndReconnect();
+    if (resetOk) {
+      this.silent = true; // yeniden bağlanma sırasında akış silent kalmalı
+      this._drainStale();
+      try {
+        await this._write('\r\x03\x03');
+      } catch {}
+      await new Promise((r) => setTimeout(r, 300));
+      if (await this._tryRawEntry(4000)) return;
+      // İlk deneme tutmadıysa kart hâlâ boot ediyor olabilir — bir kez daha
+      await new Promise((r) => setTimeout(r, 1500));
+      if (await this._tryRawEntry(4000)) return;
     }
 
     // Hiçbir strateji çalışmadı → kullanıcıya net mesaj ver
     throw new Error(
-      (this.esp32 ? 'ESP32' : 'Pico') + ' REPL\'e dönmüyor. Lütfen karttaki fiziksel ' +
-      (this.esp32 ? 'EN/RST' : 'RESET') + ' tuşuna bas (veya gücü çek-tak), sonra tekrar dene. ' +
+      (this.esp32 ? 'ESP32' : 'Pico') + ' REPL\'e dönmüyor. Lütfen USB kablosunu çıkarıp tak ' +
+      'veya karttaki fiziksel ' + (this.esp32 ? 'EN/RST' : 'RESET') + ' tuşuna bas, sonra tekrar dene. ' +
       (this.esp32
         ? '(ESP32\'de MicroPython yüklü olduğundan emin ol — micropython.org/download/esp32)'
-        : '(Yeni bootloader yüklendikten sonra bu sorun olmayacak.)')
+        : '(Kabloyu tekrar taktıktan sonra "Bağlan" ile yeniden bağlanabilirsin.)')
     );
   }
 

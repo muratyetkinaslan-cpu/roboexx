@@ -6,6 +6,8 @@ interface RailItem {
   label: string;
   icon: JSX.Element;
   badge?: string | number;
+  /** Sadece öğretmen rolünde gösterilir (örn. Eğitmen Kütüphanesi) */
+  teacherOnly?: boolean;
 }
 
 // Sadece gerçekten kullanılan sekmeler. (Dersler/Görevler/Cihazlarım
@@ -39,6 +41,18 @@ const topItems: RailItem[] = [
         <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         <circle cx="17" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.6" />
         <path d="M14.5 19c.4-2.5 2.4-4 4.8-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'library',
+    label: 'Eğitmen Kütüphanesi',
+    teacherOnly: true,
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M12 3l9 4.5-9 4.5-9-4.5L12 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M5 10.5v5c0 1.5 3.1 3 7 3s7-1.5 7-3v-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="20.5" cy="17.5" r="0.9" fill="currentColor" />
       </svg>
     ),
   },
@@ -86,7 +100,9 @@ export function ActivityRail({
   return (
     <aside className="activity-rail">
       <div className="rail-group">
-        {topItems.map((item) => (
+        {topItems
+          .filter((item) => !item.teacherOnly || userProfile?.role === 'teacher')
+          .map((item) => (
           <RailButton
             key={item.id}
             item={{ ...item, badge: badges[item.id] ?? item.badge }}

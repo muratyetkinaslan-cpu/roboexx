@@ -338,6 +338,87 @@ export function watchWorkspace(
   };
 }
 
+// ====== Eğitmen Kod Gönderimi ======
+//
+// Öğretmen, Eğitmen Kütüphanesi'nden seçtiği hazır kodu bağlı olduğu
+// öğrencinin ekranına gönderir. Aynı workspace Yjs dokümanındaki ayrı bir
+// 'teacher' map'i üzerinden taşınır — Blockly blok senkronundan bağımsızdır.
+
+export interface TeacherCodePayload {
+  /** Gönderilen MicroPython kodu */
+  code: string;
+  /** Kod dosyasının adı (örn. "Klavye ile Kol Kontrolü") */
+  title: string;
+  /** Gönderen kullanıcının userId'si (kendi gönderdiğimizi yoksaymak için) */
+  from: string;
+  /** Gönderenin görünen adı */
+  fromName: string;
+  /** Gönderim zamanı (bilgi amaçlı) */
+  ts: number;
+}
+
+/** Bağlı olunan workspace odasına eğitmen kodu yaz (öğrenciye iletilir). */
+export function sendTeacherCode(ws: RoomConnection, payload: TeacherCodePayload): void {
+  try {
+    const m = ws.ydoc.getMap<string>('teacher');
+    m.set('code_push', JSON.stringify(payload));
+  } catch (e) {
+    console.error('[LiveShare] sendTeacherCode HATA:', e);
+  }
+}
+
+/**
+ * Workspace odasındaki eğitmen kod gönderimlerini dinle.
+ *
+ * Güvenli davranış:
+ *  - Kendi gönderdiğim payload yoksayılır (from === myUserId)
+ *  - Odaya İLK katılırken senkronla gelen ESKİ payload uygulanmaz
+ *    (provider.synced false iken gelen update'ler baz alınır, sadece
+ *    katılımdan SONRA değişen değer işlenir) — böylece öğrenci odaya
+ *    her girişte dünkü kod ekranına fırlamaz.
+ */
+export function watchTeacherCode(
+  ws: RoomConnection,
+  myUserId: string,
+  onCode: (p: TeacherCodePayload) => void
+): () => void {
+  const m = ws.ydoc.getMap<string>('teacher');
+  // Katılım anında dokümanda hâlihazırda duran değer — baseline.
+  let lastSeen: string | undefined = m.get('code_push');
+
+  const obs = () => {
+    const raw = m.get('code_push');
+    if (!raw || raw === lastSeen) return;
+    // İlk senkron hâlâ sürüyorsa bu, odanın geçmiş state'idir — baseline'ı
+    // güncelle ama uygulamA.
+    if (!ws.provider.synced) {
+      lastSeen = raw;
+      return;
+    }
+    lastSeen = raw;
+    try {
+      const p = JSON.parse(raw) as TeacherCodePayload;
+      if (!p || typeof p.code !== 'string') return;
+      if (p.from === myUserId) return; // kendi gönderimim
+      onCode(p);
+    } catch {
+      // bozuk payload — yoksay
+    }
+  };
+
+  // Senkron bittiğinde baseline'ı tazele (senkronla gelen son değer "eski"dir)
+  const onSync = (synced: boolean) => {
+    if (synced) lastSeen = m.get('code_push');
+  };
+
+  m.observe(obs);
+  ws.provider.on('sync', onSync);
+  return () => {
+    try { m.unobserve(obs); } catch {}
+    try { ws.provider.off('sync', onSync); } catch {}
+  };
+}
+
 export function createCursorBroadcaster(ws: RoomConnection) {
   let lastSent = 0;
   let pending: { x: number; y: number } | null = null;

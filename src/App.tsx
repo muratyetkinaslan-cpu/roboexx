@@ -37,15 +37,25 @@ import {
   connectWorkspaceRoom,
   createCursorBroadcaster,
   markActivity,
+  sendTeacherCode,
   setConnectedTo,
   setHandRaised,
   watchPresence,
+  watchTeacherCode,
   watchWorkspace,
   type PresenceState,
   type RoomConnection,
   type WorkspaceState,
 } from './collab/livesync';
 import { createBlocklyYjsBridge, type BlocklyYjsBridge } from './collab/blockly-sync';
+import { TeacherLibraryPanel } from './components/TeacherLibraryPanel';
+import type { KitCodeFile } from './library/kits';
+import {
+  checkTeacherPassword,
+  clearTeacherAuthed,
+  isTeacherAuthed,
+  setTeacherAuthed,
+} from './config/teacherAuth';
 
 const THEME_KEY = 'roboexx.theme';
 const MONITOR_KEY = 'roboexx.monitorOpen';
@@ -53,7 +63,7 @@ const PANEL_KEY = 'roboexx.activePanel';
 const PREVIEW_KEY = 'roboexx.previewOpen';
 const USER_KEY = 'roboexx.user';
 
-type ActivePanel = 'projects' | 'classroom' | null;
+type ActivePanel = 'projects' | 'classroom' | 'library' | null;
 
 function generateUserId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -140,9 +150,21 @@ export default function App() {
   const [tabActive, setTabActive] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>(() => {
     const saved = localStorage.getItem(PANEL_KEY);
-    if (saved === 'projects' || saved === 'classroom') return saved;
+    if (saved === 'projects' || saved === 'classroom' || saved === 'library') return saved;
     return null;
   });
+
+  // ====== Eğitmen alanı şifre doğrulaması (oturum bazlı) ======
+  const [teacherAuthed, setTeacherAuthed_] = useState<boolean>(() => isTeacherAuthed());
+  const handleTeacherAuthorize = (password: string): boolean => {
+    if (checkTeacherPassword(password)) {
+      setTeacherAuthed();
+      setTeacherAuthed_(true);
+      addLine('system', '🔓 Eğitmen kütüphanesi kilidi açıldı');
+      return true;
+    }
+    return false;
+  };
 
   const [bridgeState, setBridgeState] = useState<BridgeState>('disconnected');
   const [portInfo, setPortInfo] = useState<PortInfo | null>(null);
@@ -231,6 +253,8 @@ export default function App() {
   const workspaceUnsubRef = useRef<(() => void) | null>(null);
   const workspaceBridgeRef = useRef<BlocklyYjsBridge | null>(null);
   const cursorBroadcasterRef = useRef<ReturnType<typeof createCursorBroadcaster> | null>(null);
+  /** Eğitmen kod gönderimi dinleyicisinin unsubscribe fonksiyonu */
+  const teacherCodeUnsubRef = useRef<(() => void) | null>(null);
   /** Aktivite throttle — her edit'te değil, en fazla 1sn'de bir broadcast et */
   const lastActivityBroadcastRef = useRef(0);
 
@@ -253,6 +277,14 @@ export default function App() {
     if (activePanel) localStorage.setItem(PANEL_KEY, activePanel);
     else localStorage.removeItem(PANEL_KEY);
   }, [activePanel]);
+
+  // Emniyet: öğrenci rolündeyken (veya çıkış sonrası) 'library' paneli
+  // localStorage'dan geri gelmiş olabilir — kapat, öğrenci asla göremesin.
+  useEffect(() => {
+    if (activePanel === 'library' && userProfile?.role !== 'teacher') {
+      setActivePanel(null);
+    }
+  }, [activePanel, userProfile?.role]);
 
   useEffect(() => {
     localStorage.setItem(PREVIEW_KEY, String(previewOpen));
@@ -633,25 +665,33 @@ export default function App() {
     if (presenceRoomRef.current) {
       presenceUnsubRef.current?.();
       presenceUnsubRef.current = null;
+      teacherCodeUnsubRef.current?.();
+      teacherCodeUnsubRef.current = null;
       workspaceBridgeRef.current?.dispose();
       workspaceBridgeRef.current = null;
+      workspaceUnsubRef.current?.();
+      workspaceUnsubRef.current = null;
+      cursorBroadcasterRef.current?.dispose();
+      cursorBroadcasterRef.current = null;
       workspaceRoomRef.current?.dispose();
       workspaceRoomRef.current = null;
       presenceRoomRef.current.dispose();
       presenceRoomRef.current = null;
       setPresenceState((s) => ({ ...s, connected: false, peers: [], totalCount: 0 }));
+      // KRİTİK: workspace id'sini de sıfırla — yoksa sekme tekrar aktif
+      // olduğunda switchWorkspace "zaten oradayız" diye erken döner ve
+      // öğrenci kendi odasına BİR DAHA BAĞLANAMAZ (Live Share kopuk kalır).
+      setCurrentWorkspaceUserId(null);
+      setWorkspaceState({ connected: false, synced: false, myClientId: 0, peers: [] });
     }
   }, [tabActive]);
 
-  // Workspace odası değiştiğinde sync sonrası state'i pull et
-  useEffect(() => {
-    if (!workspaceState.synced || !workspaceBridgeRef.current) return;
-    // Yeni bağlandığımız workspace'in state'ini hemen Blockly'ye yükle
-    workspaceBridgeRef.current.pullNow();
-    // Eğer biz öğrenciysek ve odada başka kimse yoksa (yeni öğrenci ilk açılış),
-    // kendi local state'imizi push et — yoksa boş kalır
-    workspaceBridgeRef.current.pushNow();
-  }, [workspaceState.synced, currentWorkspaceUserId]);
+  // NOT: Eski "sync sonrası pull + push" effect'i KALDIRILDI.
+  // O effect, bridge geç kurulduğunda hiç tetiklenmiyor ve koşulsuz
+  // pushNow() öğretmenin boş workspace'ini öğrencinin odasına yazarak
+  // ÖĞRENCİNİN KODUNU SİLEBİLİYORDU. Senkron akışı artık tamamen
+  // blockly-sync bridge'inin içinde, ready kapısı + sahip tohumlamasıyla
+  // güvenli şekilde yönetiliyor.
 
   /**
    * Workspace odasına geçiş yap (eskiden ayrıl, yenisine bağlan).
@@ -664,10 +704,15 @@ export default function App() {
       console.warn('[App] switchWorkspace çağrıldı ama targetUserId BOŞ — atlanıyor');
       return;
     }
-    if (currentWorkspaceUserId === targetUserId) return;
+    // Aynı odadayız VE bağlantı gerçekten ayakta → gereksiz geçiş yapma.
+    // (Oda ref'i null ise — örn. sekme pasifken dispose edildi — id aynı
+    // olsa bile yeniden bağlanmak GEREKİR.)
+    if (currentWorkspaceUserId === targetUserId && workspaceRoomRef.current) return;
 
     // 1) Eski workspace'ten ayrıl
     if (workspaceRoomRef.current) {
+      teacherCodeUnsubRef.current?.();
+      teacherCodeUnsubRef.current = null;
       workspaceUnsubRef.current?.();
       workspaceUnsubRef.current = null;
       cursorBroadcasterRef.current?.dispose();
@@ -678,7 +723,9 @@ export default function App() {
       workspaceRoomRef.current = null;
     }
 
-    // 2) Blockly state'ini temizle — eski odanın state'i yeni odaya sızmasın
+    // 2) Blockly state'ini temizle — eski odanın state'i yeni odaya sızmasın.
+    //    Bu işlemin tetiklediği Blockly event'leri artık ZARARSIZ: yeni
+    //    bridge ready olana kadar tüm push'ları yok sayar.
     blocklyRef.current?.resetToEmpty();
 
     // 3) Yeni workspace odasına bağlan
@@ -693,15 +740,32 @@ export default function App() {
     workspaceUnsubRef.current = watchWorkspace(ws, setWorkspaceState);
     cursorBroadcasterRef.current = createCursorBroadcaster(ws);
 
-    // 4) Bridge kurulumu (Blockly hazır olunca)
+    // 3b) Eğitmen kod gönderimlerini dinle — öğretmen kütüphaneden kod
+    //     gönderince karşı tarafın kod editörüne düşer.
+    teacherCodeUnsubRef.current = watchTeacherCode(ws, userProfile.userId, (p) => {
+      setCustomCode(p.code);
+      setCodeWasEdited(true);
+      setMode('code');
+      addLine('system', `📥 ${p.fromName} ekranına "${p.title}" kodunu gönderdi — Kod sekmesine yüklendi`);
+    });
+
+    // 4) Bridge kurulumu (Blockly hazır olunca). Bridge, provider senkron
+    //    olmuşsa/olunca odadaki kodu kendisi çeker; oda boşsa yalnızca oda
+    //    SAHİBİ yerel state'ini tohumlar. Push'lar o ana dek kilitlidir —
+    //    öğrencinin kodu artık hiçbir yarış durumunda silinemez.
+    const isOwner = targetUserId === userProfile.userId;
     const setupBridge = () => {
+      // Bu arada oda değiştiyse/koptuysa eski kurulum iptal
+      if (workspaceRoomRef.current !== ws) return;
       if (!blocklyRef.current) {
         setTimeout(setupBridge, 100);
         return;
       }
       const bridge = createBlocklyYjsBridge({
         ydoc: ws.ydoc,
+        provider: ws.provider,
         blocklyHandle: blocklyRef.current,
+        isOwner,
       });
       workspaceBridgeRef.current = bridge;
     };
@@ -717,6 +781,8 @@ export default function App() {
   const disconnectWorkspace = () => {
     if (!userProfile || userProfile.role !== 'teacher') return;
     if (workspaceRoomRef.current) {
+      teacherCodeUnsubRef.current?.();
+      teacherCodeUnsubRef.current = null;
       workspaceUnsubRef.current?.();
       workspaceUnsubRef.current = null;
       cursorBroadcasterRef.current?.dispose();
@@ -762,6 +828,8 @@ export default function App() {
     // 1. Live Share kaynaklarını dispose et
     presenceUnsubRef.current?.();
     presenceUnsubRef.current = null;
+    teacherCodeUnsubRef.current?.();
+    teacherCodeUnsubRef.current = null;
     workspaceUnsubRef.current?.();
     workspaceUnsubRef.current = null;
     cursorBroadcasterRef.current?.dispose();
@@ -788,6 +856,10 @@ export default function App() {
     // 4. localStorage'ı temizle — login modal tekrar gösterilsin
     localStorage.removeItem(USER_KEY);
     setUserProfile(null);
+
+    // 5. Eğitmen şifre doğrulamasını da sıfırla — sonraki giriş yeniden ister
+    clearTeacherAuthed();
+    setTeacherAuthed_(false);
 
     addLine('system', '👋 Çıkış yapıldı');
   };
@@ -1360,12 +1432,58 @@ export default function App() {
       setGuideOpen((o) => !o);
       return;
     }
+    if (id === 'library') {
+      // Eğitmen kütüphanesi — sadece öğretmen rolü açabilir
+      if (userProfile?.role !== 'teacher') return;
+      setActivePanel((p) => (p === 'library' ? null : 'library'));
+      return;
+    }
     if (id === 'projects' || id === 'classroom') {
       setActivePanel((p) => (p === id ? null : (id as ActivePanel)));
       return;
     }
     setActiveRail(id);
   };
+
+  /**
+   * Eğitmen Kütüphanesi — "Ekrana Gönder".
+   * Öğretmen bir öğrencinin workspace'ine bağlıysa kod Yjs üzerinden
+   * öğrencinin kod editörüne düşer; her durumda öğretmenin kendi
+   * editörüne de yüklenir (ikisi aynı kodu görür).
+   */
+  const handleSendLibraryCode = (file: KitCodeFile) => {
+    if (!userProfile) return;
+    const connectedToStudent =
+      !!workspaceRoomRef.current &&
+      !!currentWorkspaceUserId &&
+      currentWorkspaceUserId !== userProfile.userId;
+
+    if (connectedToStudent && workspaceRoomRef.current) {
+      sendTeacherCode(workspaceRoomRef.current, {
+        code: file.code,
+        title: file.name,
+        from: userProfile.userId,
+        fromName: userProfile.name,
+        ts: Date.now(),
+      });
+      const target = presenceState.peers.find((p) => p.userId === currentWorkspaceUserId);
+      addLine('system', `➤ "${file.name}" ${target?.name ?? 'öğrencinin'} ekranına gönderildi`);
+    } else {
+      addLine('system', `📄 "${file.name}" kod editörüne yüklendi (öğrenciye bağlı değilsin)`);
+    }
+
+    // Kendi ekranına da yükle — öğretmen ve öğrenci aynı kodu görür
+    setCustomCode(file.code);
+    setCodeWasEdited(true);
+    setMode('code');
+  };
+
+  /** Kütüphane panelinde gösterilecek bağlı öğrenci adı */
+  const connectedStudentName = (() => {
+    if (!userProfile || userProfile.role !== 'teacher') return null;
+    if (!currentWorkspaceUserId || currentWorkspaceUserId === userProfile.userId) return null;
+    return presenceState.peers.find((p) => p.userId === currentWorkspaceUserId)?.name ?? 'Öğrenci';
+  })();
 
   const liveShareActive = !!presenceState.myUserId; // presence bağlı mı
 
@@ -1495,6 +1613,16 @@ export default function App() {
           onConnectToStudent={handleConnectToStudent}
           onDisconnectWorkspace={disconnectWorkspace}
           onToggleHand={handleToggleHand}
+        />
+      )}
+
+      {activePanel === 'library' && userProfile?.role === 'teacher' && (
+        <TeacherLibraryPanel
+          authorized={teacherAuthed}
+          onAuthorize={handleTeacherAuthorize}
+          connectedStudentName={connectedStudentName}
+          onSendToScreen={handleSendLibraryCode}
+          onClose={() => setActivePanel(null)}
         />
       )}
 
@@ -1632,6 +1760,8 @@ export default function App() {
           onSubmit={(p) => {
             saveUserProfile(p);
             setUserProfile(p);
+            // Öğretmen girişi şifreyle yapıldıysa oturum doğrulaması işlendi
+            setTeacherAuthed_(isTeacherAuthed());
           }}
         />
       )}

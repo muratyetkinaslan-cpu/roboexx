@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { checkTeacherPassword, setTeacherAuthed } from '../config/teacherAuth';
 
 export type UserRole = 'teacher' | 'student';
 
@@ -24,10 +25,25 @@ export function LoginModal({ onSubmit }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [role, setRole] = useState<UserRole | null>(null);
   const [name, setName] = useState('');
+  const [teacherPw, setTeacherPw] = useState('');
+  const [pwError, setPwError] = useState(false);
   const trimmedName = name.trim();
+
+  // Öğretmen için ad + şifre, öğrenci için sadece ad yeterli
+  const canSubmit =
+    !!role && !!trimmedName && (role !== 'teacher' || teacherPw.trim().length > 0);
 
   const submit = () => {
     if (!role || !trimmedName) return;
+    if (role === 'teacher') {
+      // EĞİTMEN ALANI ŞİFRE KORUMALI — sabit eğitmen şifresi doğrulanmadan
+      // öğretmen olarak giriş yapılamaz.
+      if (!checkTeacherPassword(teacherPw)) {
+        setPwError(true);
+        return;
+      }
+      setTeacherAuthed();
+    }
     onSubmit({ userId: generateUserId(), role, name: trimmedName });
   };
 
@@ -100,17 +116,34 @@ export function LoginModal({ onSubmit }: Props) {
                 placeholder={role === 'teacher' ? 'Örn: Ahmet Hoca' : 'Örn: Ali Yılmaz'}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && trimmedName) submit(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) submit(); }}
                 autoFocus
                 maxLength={30}
               />
-              <button className="name-submit" disabled={!trimmedName} onClick={submit}>
+              <button className="name-submit" disabled={!canSubmit} onClick={submit}>
                 Başla
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                   <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             </div>
+            {role === 'teacher' && (
+              <div className="teacher-pw-wrap">
+                <label className="teacher-pw-label">🔒 Eğitmen Şifresi</label>
+                <input
+                  type="password"
+                  className={`name-input teacher-pw-input ${pwError ? 'is-error' : ''}`}
+                  placeholder="Eğitmen şifresini gir"
+                  value={teacherPw}
+                  onChange={(e) => { setTeacherPw(e.target.value); setPwError(false); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) submit(); }}
+                  maxLength={30}
+                />
+                {pwError && (
+                  <div className="teacher-pw-error">Şifre yanlış — eğitmen şifresini kontrol et</div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
