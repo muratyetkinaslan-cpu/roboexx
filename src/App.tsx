@@ -37,11 +37,9 @@ import {
   connectWorkspaceRoom,
   createCursorBroadcaster,
   markActivity,
-  sendTeacherCode,
   setConnectedTo,
   setHandRaised,
   watchPresence,
-  watchTeacherCode,
   watchWorkspace,
   type PresenceState,
   type RoomConnection,
@@ -49,7 +47,7 @@ import {
 } from './collab/livesync';
 import { createBlocklyYjsBridge, type BlocklyYjsBridge } from './collab/blockly-sync';
 import { TeacherLibraryPanel } from './components/TeacherLibraryPanel';
-import type { KitCodeFile } from './library/kits';
+import type { KitBlockFile } from './library/kits-blocks';
 import {
   checkTeacherPassword,
   clearTeacherAuthed,
@@ -253,8 +251,46 @@ export default function App() {
   const workspaceUnsubRef = useRef<(() => void) | null>(null);
   const workspaceBridgeRef = useRef<BlocklyYjsBridge | null>(null);
   const cursorBroadcasterRef = useRef<ReturnType<typeof createCursorBroadcaster> | null>(null);
-  /** Eğitmen kod gönderimi dinleyicisinin unsubscribe fonksiyonu */
-  const teacherCodeUnsubRef = useRef<(() => void) | null>(null);
+
+  // ====== Blok Panosu (öğretmen kopyala/yapıştır) ======
+  /**
+   * Uygulama içi blok panosu — Blockly'nin kendi panosu oda değişimlerinde
+   * (resetToEmpty + remote yükleme) güvenilir çalışmadığı için tam workspace
+   * state'i burada saklanır. "Kopyala" doldurur, "Yapıştır" hedef ekrana yükler.
+   */
+  const [blocksClipboard, setBlocksClipboard] = useState<object | null>(null);
+  /**
+   * Öğretmenin KENDİ ekranının otomatik yedeği. Bir öğrenciye bağlanırken
+   * kendi blokları silinmesin diye alınır; "Bağlantıyı Kes" ile öğrenciden
+   * ayrılınca ekran otomatik geri yüklenir.
+   */
+  const ownScreenBackupRef = useRef<object | null>(null);
+
+  /** Workspace state'i "gerçek içerik" mi? (sadece başlangıç bloğu değil) */
+  const isNonTrivialState = (state: object | null): boolean => {
+    if (!state) return false;
+    try {
+      return ((JSON.stringify(state).match(/"type":/g) || []).length) > 1;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Blok state'ini çalışma alanına güvenle yükle. Kod modundaysak önce
+   * blok moduna geç; Blockly yeniden mount olurken ref hazır olana dek
+   * kısa aralıklarla tekrar dene.
+   */
+  const loadBlocksState = (state: object, after?: () => void, tries = 0) => {
+    if (mode !== 'blocks') setMode('blocks');
+    const h = blocklyRef.current;
+    if (!h) {
+      if (tries < 30) setTimeout(() => loadBlocksState(state, after, tries + 1), 100);
+      return;
+    }
+    h.loadState(structuredClone(state));
+    after?.();
+  };
   /** Aktivite throttle — her edit'te değil, en fazla 1sn'de bir broadcast et */
   const lastActivityBroadcastRef = useRef(0);
 
@@ -665,8 +701,6 @@ export default function App() {
     if (presenceRoomRef.current) {
       presenceUnsubRef.current?.();
       presenceUnsubRef.current = null;
-      teacherCodeUnsubRef.current?.();
-      teacherCodeUnsubRef.current = null;
       workspaceBridgeRef.current?.dispose();
       workspaceBridgeRef.current = null;
       workspaceUnsubRef.current?.();
@@ -709,10 +743,25 @@ export default function App() {
     // olsa bile yeniden bağlanmak GEREKİR.)
     if (currentWorkspaceUserId === targetUserId && workspaceRoomRef.current) return;
 
+    // 0) ÖĞRETMEN KENDİ EKRANINDAN AYRILIYORSA: bloklarını otomatik yedekle
+    //    ve panoya kopyala. Böylece öğretmen "bağlan → kendi kodumu çocuğa
+    //    yapıştır" akışını hiç kopyala tuşuna basmadan da yapabilir; ayrıca
+    //    "Bağlantıyı Kes" deyince kendi ekranı geri gelir (kod kaybolmaz).
+    const leavingOwnScreen =
+      userProfile.role === 'teacher' &&
+      targetUserId !== userProfile.userId &&
+      (currentWorkspaceUserId === null || currentWorkspaceUserId === userProfile.userId);
+    if (leavingOwnScreen) {
+      const ownState = blocklyRef.current?.saveState() ?? null;
+      if (isNonTrivialState(ownState)) {
+        ownScreenBackupRef.current = ownState;
+        setBlocksClipboard(ownState);
+        addLine('system', '📋 Kendi ekranındaki bloklar panoya alındı — Sınıf panelinden "Yapıştır" ile öğrenciye aktarabilirsin');
+      }
+    }
+
     // 1) Eski workspace'ten ayrıl
     if (workspaceRoomRef.current) {
-      teacherCodeUnsubRef.current?.();
-      teacherCodeUnsubRef.current = null;
       workspaceUnsubRef.current?.();
       workspaceUnsubRef.current = null;
       cursorBroadcasterRef.current?.dispose();
@@ -739,15 +788,6 @@ export default function App() {
 
     workspaceUnsubRef.current = watchWorkspace(ws, setWorkspaceState);
     cursorBroadcasterRef.current = createCursorBroadcaster(ws);
-
-    // 3b) Eğitmen kod gönderimlerini dinle — öğretmen kütüphaneden kod
-    //     gönderince karşı tarafın kod editörüne düşer.
-    teacherCodeUnsubRef.current = watchTeacherCode(ws, userProfile.userId, (p) => {
-      setCustomCode(p.code);
-      setCodeWasEdited(true);
-      setMode('code');
-      addLine('system', `📥 ${p.fromName} ekranına "${p.title}" kodunu gönderdi — Kod sekmesine yüklendi`);
-    });
 
     // 4) Bridge kurulumu (Blockly hazır olunca). Bridge, provider senkron
     //    olmuşsa/olunca odadaki kodu kendisi çeker; oda boşsa yalnızca oda
@@ -781,8 +821,6 @@ export default function App() {
   const disconnectWorkspace = () => {
     if (!userProfile || userProfile.role !== 'teacher') return;
     if (workspaceRoomRef.current) {
-      teacherCodeUnsubRef.current?.();
-      teacherCodeUnsubRef.current = null;
       workspaceUnsubRef.current?.();
       workspaceUnsubRef.current = null;
       cursorBroadcasterRef.current?.dispose();
@@ -798,7 +836,15 @@ export default function App() {
     if (presenceRoomRef.current) {
       setConnectedTo(presenceRoomRef.current, null);
     }
-    addLine('system', 'Workspace bağlantısı kesildi');
+    // ÖĞRETMENİN KENDİ EKRANINI GERİ YÜKLE — öğrenciye bağlanmadan önceki
+    // bloklar kaybolmaz, "kesip kendi koduma dönme" akışı otomatik çalışır.
+    if (ownScreenBackupRef.current) {
+      const backup = ownScreenBackupRef.current;
+      setTimeout(() => loadBlocksState(backup), 50);
+      addLine('system', 'Workspace bağlantısı kesildi — kendi ekranın geri yüklendi');
+    } else {
+      addLine('system', 'Workspace bağlantısı kesildi');
+    }
   };
 
   /** Öğretmenin sınıf panelinde bir öğrenciye tıklaması */
@@ -828,8 +874,6 @@ export default function App() {
     // 1. Live Share kaynaklarını dispose et
     presenceUnsubRef.current?.();
     presenceUnsubRef.current = null;
-    teacherCodeUnsubRef.current?.();
-    teacherCodeUnsubRef.current = null;
     workspaceUnsubRef.current?.();
     workspaceUnsubRef.current = null;
     cursorBroadcasterRef.current?.dispose();
@@ -1446,36 +1490,87 @@ export default function App() {
   };
 
   /**
-   * Eğitmen Kütüphanesi — "Ekrana Gönder".
-   * Öğretmen bir öğrencinin workspace'ine bağlıysa kod Yjs üzerinden
-   * öğrencinin kod editörüne düşer; her durumda öğretmenin kendi
-   * editörüne de yüklenir (ikisi aynı kodu görür).
+   * Eğitmen Kütüphanesi — "Ekrana Yükle".
+   * Hazır BLOK programını çalışma alanına yükler. Öğretmen bir öğrencinin
+   * workspace'ine bağlıysa bloklar Live Share (Yjs) üzerinden anında
+   * öğrencinin ekranına da düşer — ekstra kanal gerekmez.
    */
-  const handleSendLibraryCode = (file: KitCodeFile) => {
+  const handleSendLibraryCode = (file: KitBlockFile) => {
     if (!userProfile) return;
     const connectedToStudent =
       !!workspaceRoomRef.current &&
       !!currentWorkspaceUserId &&
       currentWorkspaceUserId !== userProfile.userId;
 
-    if (connectedToStudent && workspaceRoomRef.current) {
-      sendTeacherCode(workspaceRoomRef.current, {
-        code: file.code,
-        title: file.name,
-        from: userProfile.userId,
-        fromName: userProfile.name,
-        ts: Date.now(),
-      });
+    if (connectedToStudent) {
       const target = presenceState.peers.find((p) => p.userId === currentWorkspaceUserId);
-      addLine('system', `➤ "${file.name}" ${target?.name ?? 'öğrencinin'} ekranına gönderildi`);
+      const targetName = target?.name ?? 'öğrencinin';
+      const ok = confirm(
+        `"${file.name}" blokları ${targetName} ekranındaki mevcut blokların ÜZERİNE yazılacak. Devam edilsin mi?`
+      );
+      if (!ok) return;
+      loadBlocksState(file.blocks, () => {
+        // Blockly event'leri push'u zaten tetikler; garanti için kısa süre
+        // sonra bir de açıkça push et (bridge ready değilse sessizce yutulur).
+        setTimeout(() => workspaceBridgeRef.current?.pushNow(), 300);
+      });
+      addLine('system', `➤ "${file.name}" blokları ${targetName} ekranına yüklendi`);
     } else {
-      addLine('system', `📄 "${file.name}" kod editörüne yüklendi (öğrenciye bağlı değilsin)`);
+      loadBlocksState(file.blocks);
+      addLine('system', `📄 "${file.name}" blokları çalışma alanına yüklendi (öğrenciye bağlı değilsin)`);
+    }
+  };
+
+  /** Eğitmen Kütüphanesi — "Kopyala": blok programını uygulama panosuna al. */
+  const handleCopyLibraryBlocks = (file: KitBlockFile) => {
+    setBlocksClipboard(structuredClone(file.blocks) as object);
+    addLine('system', `📋 "${file.name}" blokları panoya alındı — Sınıf panelindeki "Yapıştır" ile aktarabilirsin`);
+  };
+
+  /**
+   * Sınıf paneli — "Blokları Kopyala": o an ekranda görünen TÜM blokları
+   * uygulama panosuna alır (kendi ekranın da olabilir, bir öğrencinin
+   * ekranı da). Oda değişimlerinden etkilenmez.
+   */
+  const handleCopyBlocks = () => {
+    const st = blocklyRef.current?.saveState() ?? null;
+    if (!isNonTrivialState(st)) {
+      addLine('info', 'Kopyalanacak blok yok — çalışma alanı boş');
+      return;
+    }
+    setBlocksClipboard(st);
+    addLine('system', '📋 Ekrandaki bloklar panoya alındı');
+  };
+
+  /**
+   * Sınıf paneli — "Blokları Yapıştır": panodaki blokları şu anki ekrana
+   * yükler. Bir öğrenciye bağlıysan bloklar Live Share ile öğrencinin
+   * ekranına da anında yansır. Mevcut blokların üzerine yazar (onaylı).
+   */
+  const handlePasteBlocks = () => {
+    if (!blocksClipboard || !userProfile) return;
+    const connectedToStudent =
+      !!workspaceRoomRef.current &&
+      !!currentWorkspaceUserId &&
+      currentWorkspaceUserId !== userProfile.userId;
+    const targetName = connectedToStudent
+      ? (presenceState.peers.find((p) => p.userId === currentWorkspaceUserId)?.name ?? 'öğrencinin')
+      : null;
+
+    const currentState = blocklyRef.current?.saveState() ?? null;
+    if (isNonTrivialState(currentState)) {
+      const who = targetName ? `${targetName} ekranındaki` : 'Ekrandaki';
+      if (!confirm(`${who} mevcut bloklar, panodaki bloklarla değiştirilecek. Devam edilsin mi?`)) {
+        return;
+      }
     }
 
-    // Kendi ekranına da yükle — öğretmen ve öğrenci aynı kodu görür
-    setCustomCode(file.code);
-    setCodeWasEdited(true);
-    setMode('code');
+    loadBlocksState(blocksClipboard, () => {
+      setTimeout(() => workspaceBridgeRef.current?.pushNow(), 300);
+    });
+    addLine('system', targetName
+      ? `📥 Panodaki bloklar ${targetName} ekranına yapıştırıldı`
+      : '📥 Panodaki bloklar çalışma alanına yapıştırıldı');
   };
 
   /** Kütüphane panelinde gösterilecek bağlı öğrenci adı */
@@ -1613,6 +1708,9 @@ export default function App() {
           onConnectToStudent={handleConnectToStudent}
           onDisconnectWorkspace={disconnectWorkspace}
           onToggleHand={handleToggleHand}
+          onCopyBlocks={handleCopyBlocks}
+          onPasteBlocks={handlePasteBlocks}
+          hasClipboard={blocksClipboard !== null}
         />
       )}
 
@@ -1622,6 +1720,7 @@ export default function App() {
           onAuthorize={handleTeacherAuthorize}
           connectedStudentName={connectedStudentName}
           onSendToScreen={handleSendLibraryCode}
+          onCopyBlocks={handleCopyLibraryBlocks}
           onClose={() => setActivePanel(null)}
         />
       )}

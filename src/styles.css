@@ -6514,3 +6514,79 @@ g.blocklyDraggable > path:first-of-type {
   color: #ef4444;
   font-weight: 600;
 }
+
+/* ── Sınıf paneli: öğretmen blok kopyala/yapıştır araçları ── */
+.cp-blocktools {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px 6px;
+}
+.cp-blocktool-btn {
+  flex: 1;
+  padding: 7px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--rx-border);
+  background: var(--rx-surface2);
+  color: var(--rx-text);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s var(--ease-out);
+}
+.cp-blocktool-btn:hover:not(:disabled) {
+  border-color: var(--rx-accent);
+  color: var(--rx-accent);
+}
+.cp-blocktool-paste:not(:disabled) {
+  background: var(--rx-accent);
+  border-color: var(--rx-accent);
+  color: #fff;
+}
+.cp-blocktool-paste:hover:not(:disabled) {
+  filter: brightness(1.1);
+  color: #fff;
+}
+.cp-blocktool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cp-blocktools-hint {
+  padding: 0 14px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--rx-text-dim);
+  border-bottom: 1px solid var(--rx-border);
+}
+.cp-current-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cp-paste-here-btn {
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--rx-accent);
+  background: var(--rx-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease-out);
+}
+.cp-paste-here-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.cp-paste-here-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Eğitmen kütüphanesi: blok adım listesi ── */
+.tl-steps {
+  margin: 2px 4px 8px;
+  padding: 8px 10px 8px 26px;
+  background: var(--rx-bg);
+  border: 1px solid var(--rx-border);
+  border-radius: 7px;
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--rx-text);
+}
+.tl-steps li { margin: 0; }

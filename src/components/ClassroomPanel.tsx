@@ -12,6 +12,12 @@ interface Props {
   onDisconnectWorkspace: () => void;
   /** Öğrenci el kaldırma toggle */
   onToggleHand: () => void;
+  /** Ekrandaki blokları uygulama panosuna kopyala (öğretmen aracı) */
+  onCopyBlocks?: () => void;
+  /** Panodaki blokları şu anki ekrana yapıştır (öğretmen aracı) */
+  onPasteBlocks?: () => void;
+  /** Panoda yapıştırılacak blok var mı? */
+  hasClipboard?: boolean;
 }
 
 export function ClassroomPanel({
@@ -21,6 +27,9 @@ export function ClassroomPanel({
   onConnectToStudent,
   onDisconnectWorkspace,
   onToggleHand,
+  onCopyBlocks,
+  onPasteBlocks,
+  hasClipboard = false,
 }: Props) {
   // Aktivite zamanları için periyodik tick
   const [, setTick] = useState(0);
@@ -82,6 +91,38 @@ export function ClassroomPanel({
         </button>
       </header>
 
+      {/* Öğretmen araçları: blok kopyala / yapıştır — oda değişse de çalışır */}
+      {isTeacher && (
+        <div className="cp-blocktools">
+          <button
+            className="cp-blocktool-btn"
+            onClick={onCopyBlocks}
+            title="Şu an ekranda görünen TÜM blokları panoya al"
+          >
+            📋 Blokları Kopyala
+          </button>
+          <button
+            className="cp-blocktool-btn cp-blocktool-paste"
+            onClick={onPasteBlocks}
+            disabled={!hasClipboard}
+            title={hasClipboard
+              ? (currentWorkspaceUserId
+                ? 'Panodaki blokları bağlı öğrencinin ekranına yapıştır'
+                : 'Panodaki blokları bu ekrana yapıştır')
+              : 'Pano boş — önce "Blokları Kopyala" veya kütüphaneden "Kopyala" kullan'}
+          >
+            📥 Yapıştır
+          </button>
+        </div>
+      )}
+      {isTeacher && (
+        <div className="cp-blocktools-hint">
+          Kendi ekranındaki kodu bir öğrenciye aktarmak için: Kopyala → öğrenciye
+          bağlan → Yapıştır. (Bir öğrenciye bağlanırken kendi blokların otomatik
+          panoya alınır ve bağlantıyı kesince ekranına geri yüklenir.)
+        </div>
+      )}
+
       {/* Öğretmen için: şu an bağlı durumu */}
       {isTeacher && currentWorkspaceUserId && (
         <div className="cp-current-connection">
@@ -89,12 +130,22 @@ export function ClassroomPanel({
           <div className="cp-current-name">
             {presence.peers.find((p) => p.userId === currentWorkspaceUserId)?.name ?? 'Öğrenci'}
           </div>
-          <button className="cp-disconnect-btn" onClick={onDisconnectWorkspace}>
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            Bağlantıyı Kes
-          </button>
+          <div className="cp-current-actions">
+            <button
+              className="cp-paste-here-btn"
+              onClick={onPasteBlocks}
+              disabled={!hasClipboard}
+              title={hasClipboard ? 'Panodaki blokları bu öğrencinin ekranına yapıştır' : 'Pano boş'}
+            >
+              📥 Bu Ekrana Yapıştır
+            </button>
+            <button className="cp-disconnect-btn" onClick={onDisconnectWorkspace}>
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              Bağlantıyı Kes
+            </button>
+          </div>
         </div>
       )}
 

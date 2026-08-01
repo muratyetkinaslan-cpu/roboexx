@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { KITS, type KitCodeFile } from '../library/kits';
+import { KITS, type KitBlockFile } from '../library/kits-blocks';
 
 /**
- * Eğitmen Kütüphanesi paneli — şifre korumalı hazır kod arşivi.
+ * Eğitmen Kütüphanesi paneli — şifre korumalı hazır BLOK programı arşivi.
  *
  * Yalnızca öğretmen rolündeki kullanıcılara açılır ve içerik ancak
  * eğitmen şifresi (oturum başına bir kez) girildikten sonra görünür.
- * Kitlere göre (RoboArm / BerryBot / Tank) gruplanmış kod dosyaları:
- *  - 📋 Kopyala → panoya kopyalar
- *  - ➤ Ekrana Gönder → bağlı olunan öğrencinin ekranına yapıştırır
- *    (öğrenciye bağlı değilse eğitmenin kendi kod editörüne yükler)
+ * Kitlere göre (RoboArm / BerryBot / Tank) gruplanmış blok programları:
+ *  - 📋 Kopyala → uygulama panosuna alır ("Sınıf" panelinden yapıştırılır)
+ *  - ➤ Ekrana Yükle → blokları çalışma alanına yükler; bir öğrenciye
+ *    bağlıysan Live Share ile anında öğrencinin ekranına da düşer
  */
 
 interface Props {
@@ -19,8 +19,10 @@ interface Props {
   onAuthorize: (password: string) => boolean;
   /** Şu an bağlı olunan öğrencinin adı (yoksa null) */
   connectedStudentName: string | null;
-  /** Kod dosyasını öğrencinin (veya kendi) ekranına gönder */
-  onSendToScreen: (file: KitCodeFile) => void;
+  /** Blok programını çalışma alanına (bağlıysa öğrencinin ekranına) yükle */
+  onSendToScreen: (file: KitBlockFile) => void;
+  /** Blok programını uygulama panosuna kopyala (sonra Yapıştır ile kullanılır) */
+  onCopyBlocks: (file: KitBlockFile) => void;
   onClose: () => void;
 }
 
@@ -29,6 +31,7 @@ export function TeacherLibraryPanel({
   onAuthorize,
   connectedStudentName,
   onSendToScreen,
+  onCopyBlocks,
   onClose,
 }: Props) {
   const [password, setPassword] = useState('');
@@ -47,27 +50,13 @@ export function TeacherLibraryPanel({
     }
   };
 
-  const handleCopy = async (file: KitCodeFile) => {
-    try {
-      await navigator.clipboard.writeText(file.code);
-    } catch {
-      // Clipboard API yoksa (http vb.) eski yöntem
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = file.code;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      } catch {}
-    }
+  const handleCopy = (file: KitBlockFile) => {
+    onCopyBlocks(file);
     setCopiedId(file.id);
     window.setTimeout(() => setCopiedId((c) => (c === file.id ? null : c)), 1800);
   };
 
-  const handleSend = (file: KitCodeFile) => {
+  const handleSend = (file: KitBlockFile) => {
     onSendToScreen(file);
     setSentId(file.id);
     window.setTimeout(() => setSentId((s) => (s === file.id ? null : s)), 1800);
@@ -97,7 +86,7 @@ export function TeacherLibraryPanel({
           <div className="tl-password-icon">🔒</div>
           <div className="tl-password-title">Eğitmen Şifresi</div>
           <div className="tl-password-desc">
-            Hazır kod kütüphanesine erişmek için eğitmen şifresini gir.
+            Hazır blok kütüphanesine erişmek için eğitmen şifresini gir.
           </div>
           <input
             type="password"
@@ -120,13 +109,13 @@ export function TeacherLibraryPanel({
               <>
                 <span className="tl-target-dot is-connected" />
                 <span>
-                  Gönderim hedefi: <b>{connectedStudentName}</b>
+                  "Ekrana Yükle" hedefi: <b>{connectedStudentName}</b>
                 </span>
               </>
             ) : (
               <>
                 <span className="tl-target-dot" />
-                <span>Öğrenciye bağlı değilsin — kodlar kendi ekranına yüklenir</span>
+                <span>Öğrenciye bağlı değilsin — bloklar kendi ekranına yüklenir</span>
               </>
             )}
           </div>
@@ -164,11 +153,11 @@ export function TeacherLibraryPanel({
                             <button
                               className="tl-file-header"
                               onClick={() => setOpenFile(expanded ? null : file.id)}
-                              title={expanded ? 'Kodu gizle' : 'Kodu önizle'}
+                              title={expanded ? 'Adımları gizle' : 'Adımları göster'}
                             >
                               <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                <path d="M4 2h5l3 3v9H4V2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                                <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                                <rect x="2" y="3" width="8" height="4" rx="1" stroke="currentColor" strokeWidth="1.4" />
+                                <rect x="4" y="9" width="8" height="4" rx="1" stroke="currentColor" strokeWidth="1.4" />
                               </svg>
                               <span className="tl-file-name-wrap">
                                 <span className="tl-file-name">{file.name}</span>
@@ -177,26 +166,30 @@ export function TeacherLibraryPanel({
                             </button>
 
                             {expanded && (
-                              <pre className="tl-file-code">{file.code}</pre>
+                              <ul className="tl-steps">
+                                {file.steps.map((s, i) => (
+                                  <li key={i}>{s}</li>
+                                ))}
+                              </ul>
                             )}
 
                             <div className="tl-file-actions">
                               <button
                                 className={`tl-action-btn ${copiedId === file.id ? 'is-done' : ''}`}
                                 onClick={() => handleCopy(file)}
-                                title="Kodu panoya kopyala"
+                                title='Blokları panoya al — "Sınıf" panelindeki Yapıştır ile kullan'
                               >
-                                {copiedId === file.id ? '✓ Kopyalandı' : '📋 Kopyala'}
+                                {copiedId === file.id ? '✓ Panoya alındı' : '📋 Kopyala'}
                               </button>
                               <button
                                 className={`tl-action-btn tl-action-send ${sentId === file.id ? 'is-done' : ''}`}
                                 onClick={() => handleSend(file)}
                                 title={connectedStudentName
-                                  ? `${connectedStudentName} ekranına gönder`
-                                  : 'Kendi kod editörüne yükle'}
+                                  ? `Blokları ${connectedStudentName} ekranına yükle`
+                                  : 'Blokları kendi çalışma alanına yükle'}
                               >
                                 {sentId === file.id
-                                  ? '✓ Gönderildi'
+                                  ? '✓ Yüklendi'
                                   : connectedStudentName
                                     ? `➤ ${connectedStudentName.split(' ')[0]} Ekranına`
                                     : '➤ Ekrana Yükle'}
