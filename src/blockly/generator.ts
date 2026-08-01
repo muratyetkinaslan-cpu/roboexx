@@ -637,4 +637,139 @@ pythonGenerator.forBlock['rx_play_song'] = function (block, generator) {
   return `play_song(${pin}, "${song}")\n`;
 };
 
+
+// ====================================================================
+// 🦾 ROBOT KOL — OTOMATİK HAREKET MOTORU (yumuşak eğrili interpolasyon)
+// ====================================================================
+
+/**
+ * Kol yardımcılarını üretilen kodun başına bir kez ekler.
+ * 20 ms adımlı eşzamanlı interpolasyon; eğriler: linear / ease (smoothstep)
+ * / easein / easeout. servo_angle @SV telemetrisi bastığı için 3D robot kol
+ * simülasyonu hareketleri canlı izler.
+ */
+function ensureArmDefs(generator: any) {
+  generator.definitions_['_rx_import_time'] = 'import time';
+  generator.definitions_['_rx_arm_lib'] =
+    '_rx_arm_pins = [0, 1, 2, 3]\n' +
+    '_rx_arm_pos = [90.0, 90.0, 90.0, 90.0]\n' +
+    '_RX_GRIP_ACIK = 40\n' +
+    '_RX_GRIP_KAPALI = 100\n' +
+    'def _rx_arm_egri(t, c):\n' +
+    "    if c == 'ease':\n" +
+    '        return t * t * (3.0 - 2.0 * t)   # smoothstep (S egrisi)\n' +
+    "    if c == 'easein':\n" +
+    '        return t * t                      # yavas basla\n' +
+    "    if c == 'easeout':\n" +
+    '        return t * (2.0 - t)              # yavas bitir\n' +
+    '    return t                              # dogrusal\n' +
+    "def rx_arm_git(hedefler, ms, egri='ease'):\n" +
+    '    # 4 ekseni AYNI ANDA hedefe tasi. None = o eksen yerinde kalir.\n' +
+    '    adim = max(1, int(ms) // 20)\n' +
+    '    bas = list(_rx_arm_pos)\n' +
+    '    for i in range(1, adim + 1):\n' +
+    '        f = _rx_arm_egri(i / adim, egri)\n' +
+    '        for j in range(4):\n' +
+    '            h = hedefler[j]\n' +
+    '            if h is None:\n' +
+    '                continue\n' +
+    '            a = bas[j] + (h - bas[j]) * f\n' +
+    '            _rx_arm_pos[j] = a\n' +
+    '            servo_angle(_rx_arm_pins[j], int(a + 0.5))\n' +
+    '        time.sleep_ms(20)\n' +
+    "def rx_arm_poz(t, o, d, g, ms, egri='ease'):\n" +
+    '    rx_arm_git([t, o, d, g], ms, egri)\n' +
+    "def rx_arm_eksen(j, aci, ms, egri='ease'):\n" +
+    '    h = [None, None, None, None]\n' +
+    '    h[j] = aci\n' +
+    '    rx_arm_git(h, ms, egri)\n' +
+    'def rx_arm_merkez(ms=800):\n' +
+    "    rx_arm_git([90, 90, 90, _RX_GRIP_ACIK], ms, 'ease')\n" +
+    'def rx_arm_tut(acik, ms=350):\n' +
+    "    rx_arm_eksen(3, _RX_GRIP_ACIK if acik else _RX_GRIP_KAPALI, ms, 'easeout')\n" +
+    'def rx_arm_selam(kez=3):\n' +
+    "    rx_arm_eksen(1, 140, 600, 'ease')\n" +
+    '    for _ in range(max(1, int(kez))):\n' +
+    "        rx_arm_eksen(2, 130, 300, 'easeout')\n" +
+    "        rx_arm_eksen(2, 60, 300, 'easeout')\n" +
+    "    rx_arm_eksen(2, 90, 250, 'ease')\n" +
+    "    rx_arm_eksen(1, 90, 500, 'ease')\n" +
+    'def rx_arm_kup_al(taban, omuz_alcak=55):\n' +
+    '    # Bilimsel kavrama dizisi:\n' +
+    '    #  1) gripper ac  2) kupun ustune S egrisiyle yaklas\n' +
+    "    #  3) 'yavas bitir' egrisiyle carpMADAN alcal  4) kavra  5) kaldir\n" +
+    '    rx_arm_tut(True, 300)\n' +
+    "    rx_arm_git([taban, 120, 80, None], 700, 'ease')\n" +
+    "    rx_arm_git([None, omuz_alcak, 70, None], 600, 'easeout')\n" +
+    '    rx_arm_tut(False, 400)\n' +
+    "    rx_arm_git([None, 120, 90, None], 600, 'ease')\n" +
+    'def rx_arm_kup_birak(taban, omuz_alcak=60):\n' +
+    "    rx_arm_git([taban, 120, 85, None], 800, 'ease')\n" +
+    "    rx_arm_git([None, omuz_alcak, 75, None], 600, 'easeout')\n" +
+    '    rx_arm_tut(True, 350)\n' +
+    "    rx_arm_git([None, 120, 90, None], 550, 'ease')";
+}
+
+pythonGenerator.forBlock['rx_arm_pins'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const t = block.getFieldValue('T');
+  const o = block.getFieldValue('O');
+  const d = block.getFieldValue('D');
+  const g = block.getFieldValue('G');
+  return `_rx_arm_pins[:] = [${t}, ${o}, ${d}, ${g}]\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_pose'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const t = generator.valueToCode(block, 'T', Order.NONE) || '90';
+  const o = generator.valueToCode(block, 'O', Order.NONE) || '90';
+  const d = generator.valueToCode(block, 'D', Order.NONE) || '90';
+  const g = generator.valueToCode(block, 'G', Order.NONE) || '40';
+  const ms = generator.valueToCode(block, 'MS', Order.NONE) || '800';
+  const curve = block.getFieldValue('CURVE') || 'ease';
+  return `rx_arm_poz(${t}, ${o}, ${d}, ${g}, ${ms}, '${curve}')\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_axis'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const axis = block.getFieldValue('AXIS') || '0';
+  const angle = generator.valueToCode(block, 'ANGLE', Order.NONE) || '90';
+  const ms = generator.valueToCode(block, 'MS', Order.NONE) || '600';
+  const curve = block.getFieldValue('CURVE') || 'ease';
+  return `rx_arm_eksen(${axis}, ${angle}, ${ms}, '${curve}')\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_home'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const ms = generator.valueToCode(block, 'MS', Order.NONE) || '800';
+  return `rx_arm_merkez(${ms})\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_gripper'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const act = block.getFieldValue('ACT') || 'open';
+  const ms = generator.valueToCode(block, 'MS', Order.NONE) || '350';
+  return `rx_arm_tut(${act === 'open' ? 'True' : 'False'}, ${ms})\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_wave'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const times = generator.valueToCode(block, 'TIMES', Order.NONE) || '3';
+  return `rx_arm_selam(${times})\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_cube_pick'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const base = generator.valueToCode(block, 'BASE', Order.NONE) || '90';
+  const low = generator.valueToCode(block, 'LOW', Order.NONE) || '55';
+  return `rx_arm_kup_al(${base}, ${low})\n`;
+};
+
+pythonGenerator.forBlock['rx_arm_cube_place'] = function (block, generator) {
+  ensureArmDefs(generator);
+  const base = generator.valueToCode(block, 'BASE', Order.NONE) || '160';
+  const low = generator.valueToCode(block, 'LOW', Order.NONE) || '60';
+  return `rx_arm_kup_birak(${base}, ${low})\n`;
+};
+
 export { pythonGenerator };

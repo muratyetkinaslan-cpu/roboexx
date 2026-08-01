@@ -130,10 +130,39 @@ export function installSimGenerators(): void {
     return awaited(`Math.abs(${v})`);
   };
 
-  // ---- KLAVYE / GAMEPAD (simülasyonda yakalanmıyor → false) ----
+  // ---- L9110 MOTOR (Arduino/Tank kitleri) — sim'de tekerleklere eşlenir ----
+  // IA/IB pin çiftleri sim tarafında sol/sağ tekere atanır (küçük IA = sol).
+  G.forBlock['rx_l9110_motor'] = function (block: Blockly.Block) {
+    const ia = block.getFieldValue('IA');
+    const ib = block.getFieldValue('IB');
+    const dir = block.getFieldValue('DIRECTION');
+    const speed = G.valueToCode(block, 'SPEED', Order.NONE) || '50';
+    return `await bot.l9110(${ia}, ${ib}, ${speed}, "${dir}");\n`;
+  };
+  G.forBlock['rx_l9110_stop'] = function (block: Blockly.Block) {
+    const ia = block.getFieldValue('IA');
+    const ib = block.getFieldValue('IB');
+    return `await bot.l9110Stop(${ia}, ${ib});\n`;
+  };
+
+  // ---- KLAVYE / GAMEPAD — sim'de GERÇEK tuş takibi (WASD ile oynanabilir) ----
+  // Sim iframe'i kendi keydown/keyup dinleyicisine sahip; panel de tuşları
+  // rx:keys mesajıyla iletir (odak nerede olursa olsun çalışır).
+  const jsKeyLiteral = (key: string): string => {
+    const code = (key || ' ').charCodeAt(0) & 0xff;
+    return `"\\x${code.toString(16).padStart(2, '0')}"`;
+  };
+  G.forBlock['rx_key_pressed'] = function (block: Blockly.Block) {
+    const key = String(block.getFieldValue('KEY') ?? ' ');
+    return awaited(`await bot.keyDown(${jsKeyLiteral(key)})`);
+  };
+  G.forBlock['rx_key_just_pressed'] = function (block: Blockly.Block) {
+    const key = String(block.getFieldValue('KEY') ?? ' ');
+    return awaited(`await bot.keyOnce(${jsKeyLiteral(key)})`);
+  };
+  // Gamepad sim'de yakalanmıyor → false (klavye zaten oynanabilir)
   const falseVal = (): [string, number] => ['false', Order.ATOMIC];
-  for (const t of ['rx_key_pressed', 'rx_key_just_pressed', 'rx_gamepad_pressed',
-    'rx_gamepad_just_pressed']) {
+  for (const t of ['rx_gamepad_pressed', 'rx_gamepad_just_pressed']) {
     G.forBlock[t] = falseVal;
   }
   // BerryBot butonu (A=varsayılan, pin 11=B) → sim'de canlı
@@ -165,16 +194,21 @@ export function installSimGenerators(): void {
   // ---- SİMÜLASYONDA MODELLENMEYEN SENSÖRLER → makul varsayılan ----
   G.forBlock['rx_internal_temp'] = (): [string, number] => ['25', Order.ATOMIC];
   G.forBlock['rx_ir_read_code'] = (): [string, number] => ['0', Order.ATOMIC];
-  G.forBlock['rx_dht'] = (): [string, number] => ['0', Order.ATOMIC];
-  G.forBlock['rx_shtc'] = (): [string, number] => ['0', Order.ATOMIC];
+  G.forBlock['rx_dht11_temp'] = (): [string, number] => ['25', Order.ATOMIC];
+  G.forBlock['rx_dht11_humidity'] = (): [string, number] => ['50', Order.ATOMIC];
+  G.forBlock['rx_shtc3_temp'] = (): [string, number] => ['25', Order.ATOMIC];
+  G.forBlock['rx_shtc3_humidity'] = (): [string, number] => ['50', Order.ATOMIC];
+  G.forBlock['rx_encoder_speed'] = (): [string, number] => ['0', Order.ATOMIC];
+  G.forBlock['rx_encoder_count'] = (): [string, number] => ['0', Order.ATOMIC];
 
   // ---- DONANIM ÇIKIŞLARI (sim'de görsel karşılığı yok → sessizce atla) ----
   const noop = (): string => '';
   for (const t of [
     'rx_digital_write', 'rx_pin_mode', 'rx_pwm_write', 'rx_relay',
     'rx_led_builtin', 'rx_led_external',
-    'rx_servo_angle', 'rx_servo_v',
-    'rx_motor_init', 'rx_pca', 'rx_ir_init',
+    'rx_servo_angle', 'rx_servo_v2', 'rx_servo_v3', 'rx_servo_v3_off',
+    'rx_motor_init', 'rx_pca9685_init', 'rx_ir_init', 'rx_shtc3_init',
+    'rx_encoder_init', 'rx_encoder_reset',
     'rx_neopixel_init', 'rx_neopixel_show',
     'rx_rgb_init', 'rx_rgb_rainbow',
     'rx_oled_init', 'rx_oled_clear', 'rx_oled_show', 'rx_oled_text', 'rx_oled_eyes',
@@ -186,10 +220,37 @@ export function installSimGenerators(): void {
 }
 
 /**
+ * EMNİYET AĞI — çalışma alanındaki HER blok tipi için üreteç garantile.
+ * Eşlenmemiş bir blok (yeni eklenen, yanlış adlandırılmış vb.) eskiden
+ * Blockly JS üretecini patlatıyor ve simülasyon HİÇ çalışmıyordu
+ * ("Arduino bloklarıyla simülasyonda oynanamıyor" hatasının kökü buydu:
+ * rx_l9110_* ve birkaç sensör bloğunun sim eşlemesi yoktu / adları yanlıştı).
+ * Artık bilinmeyen komut blokları sessizce atlanır, değer blokları 0 döner —
+ * program her durumda çalışır, sim asla kilitlenmez.
+ */
+function ensureAllBlocksCovered(workspace: Blockly.Workspace): void {
+  const G = javascriptGenerator;
+  const seen = new Set<string>();
+  for (const b of (workspace as any).getAllBlocks(false) as Blockly.Block[]) {
+    const t = b.type;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    if (G.forBlock[t]) continue;
+    if ((b as any).outputConnection) {
+      G.forBlock[t] = (): [string, number] => ['0', Order.ATOMIC];
+    } else {
+      G.forBlock[t] = (): string => '';
+    }
+    console.warn('[Sim] Eşlenmemiş blok tipi sim\'de atlanıyor:', t);
+  }
+}
+
+/**
  * Çalışma alanını simülasyon JS'ine çevirir. Üreteçleri kurar, sonra üretir.
  * Hareket/sensör bloğu olmayan bir programda kullanıcıyı uyarır (sonsuz döngü riski).
  */
 export function generateSimCode(workspace: Blockly.Workspace): string {
   installSimGenerators();
+  ensureAllBlocksCovered(workspace);
   return javascriptGenerator.workspaceToCode(workspace);
 }

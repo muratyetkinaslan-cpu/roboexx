@@ -361,7 +361,7 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
               <input
                 className="fw-url-input"
                 type="text"
-                placeholder="https://senin-derleme-sunucun.onrender.com"
+                placeholder="https://roboexx-arduino-compile.onrender.com (varsayılan)"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
               />

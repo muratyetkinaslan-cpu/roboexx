@@ -94,7 +94,21 @@ arduinoGenerator.finish = function (code: string) {
     .join('\n');
 
   // global değişkenler + yardımcı fonksiyonlar
-  const defs = Object.keys(this.definitions_)
+  //
+  // SIRALAMA KRİTİK: Canlı tuş modunda liveFix() diğer yardımcılardaki
+  // delay() çağrılarını rxDelay()'e çevirir. rxDelay'in TANIMI o
+  // yardımcılardan SONRA gelirse C++ derlemesi "rxDelay was not declared"
+  // hatasıyla patlar (blok sırasına göre ara sıra olur → "bazen yüklenmiyor").
+  // Çözüm: rx_live_keys tanımını her zaman EN BAŞA al + prototip ekle.
+  const defKeys = Object.keys(this.definitions_);
+  if (this.rxLiveKeysUsed_) {
+    const idx = defKeys.indexOf('rx_live_keys');
+    if (idx > 0) {
+      defKeys.splice(idx, 1);
+      defKeys.unshift('rx_live_keys');
+    }
+  }
+  const defs = defKeys
     .map((k) => this.definitions_[k])
     .join('\n\n');
 
@@ -140,6 +154,15 @@ arduinoGenerator.finish = function (code: string) {
   const parts: string[] = [];
   parts.push('// RoboExx — otomatik üretildi (Arduino C++)');
   if (includes) parts.push(includes);
+  if (this.rxLiveKeysUsed_) {
+    // Prototipler: liveFix'in dönüştürdüğü rxDelay() çağrıları hangi sırada
+    // olursa olsun derlenir (tanım sırası bağımsızlığı — emniyet kemeri).
+    parts.push(
+      '// İleri bildirimler (canlı tuş yardımcıları)\n' +
+      'void __rxPumpKeys();\n' +
+      'void rxDelay(unsigned long ms);'
+    );
+  }
   if (varDecls) parts.push(varDecls);
   if (defs) parts.push(liveFix(defs));
   parts.push(`void setup() {\n${liveFix(setupBody)}}`);
@@ -230,12 +253,18 @@ fb('rx_stop', () => {
 
 fb('rx_delay_ms', (block, g) => {
   const ms = g.valueToCode(block, 'MS', AOrder.NONE) || '500';
-  return `delay(${ms});\n`;
+  // KRİTİK — MİLİSANİYE HASSASİYETİ: Blockly değişkenleri Arduino'da float
+  // üretilir. float 0.7 aslında 0.69999998807... olduğundan delay() doğrudan
+  // TRUNCATE ederse hesaplanan süreler sistematik olarak 1 ms EKSİK çalışır
+  // (örn. 700 yerine 699 ms). +0.5 ile yuvarlayıp tam milisaniyeyi koruyoruz.
+  return `delay((unsigned long)((${ms}) + 0.5));\n`;
 });
 
 fb('rx_delay_s', (block, g) => {
   const s = g.valueToCode(block, 'S', AOrder.NONE) || '1';
-  return `delay((unsigned long)(${s} * 1000));\n`;
+  // 1000.0 (double) ile çarp + 0.5 yuvarla — float saniye değerlerinde
+  // (0.3, 0.7 gibi) milisaniye kaybını önler. Bkz. rx_delay_ms notu.
+  return `delay((unsigned long)((${s}) * 1000.0 + 0.5));\n`;
 });
 
 fb('rx_millis', () => {
@@ -345,14 +374,21 @@ fb('rx_buzzer_tone', (block, g) => {
   const pin = block.getFieldValue('PIN');
   const freq = g.valueToCode(block, 'FREQ', AOrder.NONE) || '440';
   const dur = g.valueToCode(block, 'DUR', AOrder.NONE) || '200';
-  return `tone(${pin}, ${freq}, ${dur});\ndelay(${dur});\n`;
+  // Süre/frekans float değişkenden gelebilir — yuvarla, milisaniye kaybetme.
+  return (
+    `tone(${pin}, (unsigned int)((${freq}) + 0.5), (unsigned long)((${dur}) + 0.5));\n` +
+    `delay((unsigned long)((${dur}) + 0.5));\n`
+  );
 });
 
 fb('rx_buzzer_note', (block, g) => {
   const pin = block.getFieldValue('PIN');
   const note = block.getFieldValue('NOTE');
   const dur = g.valueToCode(block, 'DUR', AOrder.NONE) || '300';
-  return `tone(${pin}, ${note}, ${dur});\ndelay(${dur});\n`;
+  return (
+    `tone(${pin}, ${note}, (unsigned long)((${dur}) + 0.5));\n` +
+    `delay((unsigned long)((${dur}) + 0.5));\n`
+  );
 });
 
 fb('rx_buzzer_off', (block) => {
@@ -584,11 +620,19 @@ function ensureLiveKeys(g: any): void {
     '}',
     '',
     '// delay() yerine: beklerken de seri paketleri okur, tampon taşmaz.',
+    '// Hassasiyet: bitişi millis() sınırında tam yakalar; kalan süre uzunken',
+    '// kaba uyur (CPU boşa dönmez), son milisaniyelerde ince taramaya geçer.',
     'void rxDelay(unsigned long ms) {',
+    '  if (ms == 0) { __rxPumpKeys(); return; }',
     '  unsigned long t0 = millis();',
-    '  while (millis() - t0 < ms) {',
+    '  for (;;) {',
+    '    unsigned long gecen = millis() - t0;',
+    '    if (gecen >= ms) return;',
     '    __rxPumpKeys();',
-    '    delayMicroseconds(200);',
+    '    unsigned long kalan = ms - gecen;',
+    '    // NOT: burada delay() KULLANILAMAZ — liveFix onu rxDelay yapar (özyineleme).',
+    '    if (kalan > 4) delayMicroseconds(1500);',
+    '    else delayMicroseconds(250);',
     '  }',
     '}',
     '',
@@ -994,4 +1038,157 @@ fb('procedures_ifreturn', (block, g) => {
   }
   code += '}\n';
   return code;
+});
+// ====================================================================
+// 🦾 ROBOT KOL — OTOMATİK HAREKETLER (Servo.h ile yumuşak interpolasyon)
+// Not: Arduino'da pin 0/1 = Serial. Varsayılan kol pinleri 3,5,6,9
+// (PWM-uyumlu). Pico kullanıcıları rx_arm_pins bloğuyla değiştirebilir.
+// delay(20) canlı tuş modunda liveFix ile rxDelay(20)'ye dönüşür —
+// bekleme sırasında da klavye paketleri okunur.
+// ====================================================================
+
+function ensureArmDefsArduino(g: any): void {
+  g.includes_['servo'] = '#include <Servo.h>';
+  g.definitions_['rx_arm_lib'] = [
+    '// --- Robot kol hareket motoru (esnek egrili interpolasyon) ---',
+    'int _rxArmPins[4] = {3, 5, 6, 9};',
+    'float _rxArmPos[4] = {90, 90, 90, 90};',
+    'Servo _rxArmServo[4];',
+    'bool _rxArmAt[4] = {false, false, false, false};',
+    'const int RX_GRIP_ACIK = 40;',
+    'const int RX_GRIP_KAPALI = 100;',
+    "// egri kodlari: 'l' dogrusal, 's' S-egrisi, 'i' yavas basla, 'o' yavas bitir",
+    'float _rxArmEgri(float t, char c) {',
+    "  if (c == 's') return t * t * (3.0f - 2.0f * t);",
+    "  if (c == 'i') return t * t;",
+    "  if (c == 'o') return t * (2.0f - t);",
+    '  return t;',
+    '}',
+    'void _rxArmYaz(int j, float a) {',
+    '  if (!_rxArmAt[j]) { _rxArmServo[j].attach(_rxArmPins[j]); _rxArmAt[j] = true; }',
+    '  if (a < 0) a = 0; if (a > 180) a = 180;',
+    '  _rxArmPos[j] = a;',
+    '  _rxArmServo[j].write((int)(a + 0.5f));',
+    '}',
+    '// hedef < -0.5 => o eksen yerinde kalir',
+    'void rxArmGit(float t, float o, float d, float g, unsigned long ms, char egri) {',
+    '  float hedef[4] = {t, o, d, g};',
+    '  float bas[4] = {_rxArmPos[0], _rxArmPos[1], _rxArmPos[2], _rxArmPos[3]};',
+    '  int adim = (int)(ms / 20UL); if (adim < 1) adim = 1;',
+    '  for (int i = 1; i <= adim; i++) {',
+    '    float f = _rxArmEgri((float)i / adim, egri);',
+    '    for (int j = 0; j < 4; j++) {',
+    '      if (hedef[j] < -0.5f) continue;',
+    '      _rxArmYaz(j, bas[j] + (hedef[j] - bas[j]) * f);',
+    '    }',
+    '    delay(20);',
+    '  }',
+    '}',
+    'void rxArmEksen(int j, float aci, unsigned long ms, char egri) {',
+    '  float h[4] = {-1, -1, -1, -1}; h[j] = aci;',
+    '  rxArmGit(h[0], h[1], h[2], h[3], ms, egri);',
+    '}',
+    "void rxArmMerkez(unsigned long ms) { rxArmGit(90, 90, 90, RX_GRIP_ACIK, ms, 's'); }",
+    'void rxArmTut(bool acik, unsigned long ms) {',
+    "  rxArmEksen(3, acik ? RX_GRIP_ACIK : RX_GRIP_KAPALI, ms, 'o');",
+    '}',
+    'void rxArmSelam(int kez) {',
+    "  rxArmEksen(1, 140, 600, 's');",
+    '  if (kez < 1) kez = 1;',
+    '  for (int i = 0; i < kez; i++) {',
+    "    rxArmEksen(2, 130, 300, 'o');",
+    "    rxArmEksen(2, 60, 300, 'o');",
+    '  }',
+    "  rxArmEksen(2, 90, 250, 's');",
+    "  rxArmEksen(1, 90, 500, 's');",
+    '}',
+    'void rxArmKupAl(float taban, float omuzAlcak) {',
+    '  rxArmTut(true, 300);',
+    "  rxArmGit(taban, 120, 80, -1, 700, 's');",
+    "  rxArmGit(-1, omuzAlcak, 70, -1, 600, 'o');",
+    '  rxArmTut(false, 400);',
+    "  rxArmGit(-1, 120, 90, -1, 600, 's');",
+    '}',
+    'void rxArmKupBirak(float taban, float omuzAlcak) {',
+    "  rxArmGit(taban, 120, 85, -1, 800, 's');",
+    "  rxArmGit(-1, omuzAlcak, 75, -1, 600, 'o');",
+    '  rxArmTut(true, 350);',
+    "  rxArmGit(-1, 120, 90, -1, 550, 's');",
+    '}',
+  ].join('\n');
+}
+
+/** Blok eğri değerini C++ char koduna çevir. */
+function armCurveChar(curve: string): string {
+  if (curve === 'ease') return "'s'";
+  if (curve === 'easein') return "'i'";
+  if (curve === 'easeout') return "'o'";
+  return "'l'";
+}
+
+const armMs = (expr: string): string => `(unsigned long)((${expr}) + 0.5)`;
+
+fb('rx_arm_pins', (block, g) => {
+  ensureArmDefsArduino(g);
+  const t = block.getFieldValue('T');
+  const o = block.getFieldValue('O');
+  const d = block.getFieldValue('D');
+  const gr = block.getFieldValue('G');
+  return (
+    `_rxArmPins[0] = ${t}; _rxArmPins[1] = ${o}; ` +
+    `_rxArmPins[2] = ${d}; _rxArmPins[3] = ${gr};\n`
+  );
+});
+
+fb('rx_arm_pose', (block, g) => {
+  ensureArmDefsArduino(g);
+  const t = g.valueToCode(block, 'T', AOrder.NONE) || '90';
+  const o = g.valueToCode(block, 'O', AOrder.NONE) || '90';
+  const d = g.valueToCode(block, 'D', AOrder.NONE) || '90';
+  const gr = g.valueToCode(block, 'G', AOrder.NONE) || '40';
+  const ms = g.valueToCode(block, 'MS', AOrder.NONE) || '800';
+  const curve = armCurveChar(String(block.getFieldValue('CURVE') || 'ease'));
+  return `rxArmGit(${t}, ${o}, ${d}, ${gr}, ${armMs(ms)}, ${curve});\n`;
+});
+
+fb('rx_arm_axis', (block, g) => {
+  ensureArmDefsArduino(g);
+  const axis = block.getFieldValue('AXIS') || '0';
+  const angle = g.valueToCode(block, 'ANGLE', AOrder.NONE) || '90';
+  const ms = g.valueToCode(block, 'MS', AOrder.NONE) || '600';
+  const curve = armCurveChar(String(block.getFieldValue('CURVE') || 'ease'));
+  return `rxArmEksen(${axis}, ${angle}, ${armMs(ms)}, ${curve});\n`;
+});
+
+fb('rx_arm_home', (block, g) => {
+  ensureArmDefsArduino(g);
+  const ms = g.valueToCode(block, 'MS', AOrder.NONE) || '800';
+  return `rxArmMerkez(${armMs(ms)});\n`;
+});
+
+fb('rx_arm_gripper', (block, g) => {
+  ensureArmDefsArduino(g);
+  const act = block.getFieldValue('ACT') || 'open';
+  const ms = g.valueToCode(block, 'MS', AOrder.NONE) || '350';
+  return `rxArmTut(${act === 'open' ? 'true' : 'false'}, ${armMs(ms)});\n`;
+});
+
+fb('rx_arm_wave', (block, g) => {
+  ensureArmDefsArduino(g);
+  const times = g.valueToCode(block, 'TIMES', AOrder.NONE) || '3';
+  return `rxArmSelam((int)((${times}) + 0.5));\n`;
+});
+
+fb('rx_arm_cube_pick', (block, g) => {
+  ensureArmDefsArduino(g);
+  const base = g.valueToCode(block, 'BASE', AOrder.NONE) || '90';
+  const low = g.valueToCode(block, 'LOW', AOrder.NONE) || '55';
+  return `rxArmKupAl(${base}, ${low});\n`;
+});
+
+fb('rx_arm_cube_place', (block, g) => {
+  ensureArmDefsArduino(g);
+  const base = g.valueToCode(block, 'BASE', AOrder.NONE) || '160';
+  const low = g.valueToCode(block, 'LOW', AOrder.NONE) || '60';
+  return `rxArmKupBirak(${base}, ${low});\n`;
 });

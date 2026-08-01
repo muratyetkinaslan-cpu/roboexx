@@ -1001,6 +1001,21 @@ const api = {
   },
   async motorStop(num){ if(String(num)===String(config.leftMotor)) bot.wheelL=0; else if(String(num)===String(config.rightMotor)) bot.wheelR=0; await _yield(); },
   async motorStopAll(){ bot.wheelL=0; bot.wheelR=0; await _yield(); },
+  async l9110(ia, ib, speed, dir){
+    const s=Math.max(0,Math.min(100, Number(speed)||0))/100*MAX_CMS*(String(dir)==='backward'?-1:1);
+    const side=rxL9Side(ia, ib);
+    if(side==='L'||side==='both') bot.wheelL=s;
+    if(side==='R'||side==='both') bot.wheelR=s;
+    await _yield();
+  },
+  async l9110Stop(ia, ib){
+    const side=rxL9Side(ia, ib);
+    if(side==='L'||side==='both') bot.wheelL=0;
+    if(side==='R'||side==='both') bot.wheelR=0;
+    await _yield();
+  },
+  async keyDown(k){ await _yield(); return bot.keys.has(k); },
+  async keyOnce(k){ await _yield(); if(bot.keysOnce.has(k)){ bot.keysOnce.delete(k); return true; } return false; },
   async wait(ms){ const end=performance.now()+Math.max(0,Number(ms)||0);
     while(performance.now()<end){ if(bot._abort) throw bot._stop; await new Promise(r=>requestAnimationFrame(()=>r())); }
     bot._lastYield=performance.now(); },
@@ -1040,6 +1055,7 @@ async function runProgram(code){
   if(bot.running){ bot._abort=true; await new Promise(r=>setTimeout(r,40)); }
   for(const k in logSeen) delete logSeen[k];
   bot._abort=false; bot._lastYield=performance.now(); bot.running=true;
+  rxL9.pairs.length=0; bot.keysOnce.clear();   // yeni program: L9110 eşlemesi ve tek-sefer tuşlar sıfır
   setRunUI(true); post({type:'rx:running', on:true});
   botLog('▶ Çalışıyor…');
   let fn;
@@ -1173,6 +1189,54 @@ document.getElementById('btn-flash').addEventListener('click',()=>{ setFlash(!fl
   flashToast(flashOn?'Fener açık — feneri tutup sürükle':'Fener kapalı'); });
 // klavye: A / B butonları (yalnız BerryBot'ta anlamlı, her zaman dinler)
 window.addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=true; if(k==='b')bot.btnB=true; });
+
+// ── CANLI KLAVYE (WASD ile oynama) ─────────────────────────────────
+// Blok değerleriyle aynı karakter eşlemesi: oklar \x11-\x14, boşluk, enter.
+bot.keys = new Set(); bot.keysOnce = new Set();
+function rxNormKey(e){
+  const k = e.key;
+  if (k === 'ArrowUp') return '\x11';
+  if (k === 'ArrowDown') return '\x12';
+  if (k === 'ArrowLeft') return '\x13';
+  if (k === 'ArrowRight') return '\x14';
+  if (k === 'Enter') return '\n';
+  if (k === ' ') return ' ';
+  if (k.length === 1) return k.toLowerCase();
+  return null;
+}
+window.addEventListener('keydown', e => {
+  const k = rxNormKey(e); if (k === null) return;
+  if ('wasdqe '.includes(k) || (k >= '\x11' && k <= '\x14')) e.preventDefault();
+  if (!bot.keys.has(k)) bot.keysOnce.add(k);
+  bot.keys.add(k);
+});
+window.addEventListener('keyup', e => {
+  const k = rxNormKey(e); if (k === null) return;
+  bot.keys.delete(k);
+});
+window.addEventListener('blur', () => { bot.keys.clear(); });
+// Panel (parent) tuşları rx:keys mesajıyla da iletir — iframe odakta
+// olmasa bile sürüş çalışır. Basılı set'i olduğu gibi değiştirir.
+function rxApplyKeys(list){
+  const next = new Set(list || []);
+  next.forEach(k => { if (!bot.keys.has(k)) bot.keysOnce.add(k); });
+  bot.keys = next;
+}
+
+// ── L9110 MOTORLARI (Tank/Arduino kitleri) ────────────────────────
+// IA/IB pin çiftleri tekerlere eşlenir: iki çift görülünce küçük IA = SOL.
+// Tek çift varsa her iki tekere uygulanır (tek motorlu test yine yürüsün).
+const rxL9 = { pairs: [] };
+function rxL9Side(ia, ib){
+  const key = ia + '_' + ib;
+  let e = rxL9.pairs.find(p => p.key === key);
+  if (!e) { e = { key, ia: Number(ia) }; rxL9.pairs.push(e); }
+  if (rxL9.pairs.length === 1) return 'both';
+  const sorted = [...rxL9.pairs].sort((a, b) => a.ia - b.ia);
+  if (e === sorted[0]) return 'L';
+  if (e === sorted[1]) return 'R';
+  return 'both';
+}
 window.addEventListener('keyup',  e=>{ const k=e.key.toLowerCase(); if(k==='a')bot.btnA=false; if(k==='b')bot.btnB=false; });
 syncVehicleUI();
 
@@ -1239,6 +1303,7 @@ window.addEventListener('message',ev=>{
   const d=ev.data; if(!d||typeof d!=='object') return;
   switch(d.type){
     case 'rx:run': externalCode=d.code||''; ensureAudio(); runProgram(externalCode); break;
+    case 'rx:keys': rxApplyKeys(d.down); break;
     case 'rx:stop': stopProgramExt(); break;
     case 'rx:reset': stopProgramExt(); resetRobot(); break;
     case 'rx:setConfig': if(d.config){ config=Object.assign({},config,d.config);

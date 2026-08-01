@@ -186,6 +186,51 @@ const printText = (text: string): BlockNode => ({
   inputs: { TEXT: { block: { type: 'text', fields: { TEXT: text } } } },
 });
 
+// ── Robot Kol otomatik hareket blokları ─────────────────────────────
+type ArmCurve = 'ease' | 'linear' | 'easein' | 'easeout';
+
+const armHome = (ms: number): BlockNode => ({
+  type: 'rx_arm_home',
+  inputs: { MS: num(ms) },
+});
+
+const armPose = (
+  t: number, o: number, d: number, g: number, ms: number, curve: ArmCurve = 'ease'
+): BlockNode => ({
+  type: 'rx_arm_pose',
+  fields: { CURVE: curve },
+  inputs: { T: num(t), O: num(o), D: num(d), G: num(g), MS: num(ms) },
+});
+
+const armAxis = (
+  axis: 0 | 1 | 2 | 3, angle: number, ms: number, curve: ArmCurve = 'ease'
+): BlockNode => ({
+  type: 'rx_arm_axis',
+  fields: { AXIS: String(axis), CURVE: curve },
+  inputs: { ANGLE: num(angle), MS: num(ms) },
+});
+
+const armGripper = (act: 'open' | 'close', ms: number): BlockNode => ({
+  type: 'rx_arm_gripper',
+  fields: { ACT: act },
+  inputs: { MS: num(ms) },
+});
+
+const armCubePick = (base: number, low: number): BlockNode => ({
+  type: 'rx_arm_cube_pick',
+  inputs: { BASE: num(base), LOW: num(low) },
+});
+
+const armCubePlace = (base: number, low: number): BlockNode => ({
+  type: 'rx_arm_cube_place',
+  inputs: { BASE: num(base), LOW: num(low) },
+});
+
+const armWave = (times: number): BlockNode => ({
+  type: 'rx_arm_wave',
+  inputs: { TIMES: num(times) },
+});
+
 // ════════════════════════════════════════════════════════════════════
 // 🦾 ROBOARM KİTİ — Taban GP0 · Omuz GP1 · Dirsek GP2 · Gripper GP3
 // ════════════════════════════════════════════════════════════════════
@@ -268,6 +313,42 @@ const ARM_PICK = program([
   servo(OMUZ, 90), waitS(0.4),
   servo(DIRSEK, 90), waitS(0.4),
   printText('Gorev tamamlandi!'),
+]);
+
+const ARM_CUBE_AUTO = program([
+  printText('Kup gorevi basliyor (otomatik hareket bloklari)'),
+  armHome(800),
+  // Onumuzden kupu al: yaklas -> yavas alcal -> kavra -> kaldir (tek blok!)
+  armCubePick(90, 55),
+  printText('Kup kavrandi, tasima...'),
+  // Yan tarafa tasi ve birak
+  armCubePlace(160, 60),
+  printText('Kup birakildi!'),
+  armHome(800),
+  armWave(2),
+  printText('Gorev tamamlandi'),
+]);
+
+const ARM_CURVES = program([
+  printText('Hareket egrisi deneyi: ayni poz, 4 farkli egri'),
+  armHome(700),
+  printText('1) DOGRUSAL — sabit hiz'),
+  armAxis(1, 140, 900, 'linear'),
+  armAxis(1, 90, 900, 'linear'),
+  printText('2) S EGRISI — yumusak kalkis ve inis'),
+  armAxis(1, 140, 900, 'ease'),
+  armAxis(1, 90, 900, 'ease'),
+  printText('3) YAVAS BASLA — sona dogru hizlanir'),
+  armAxis(1, 140, 900, 'easein'),
+  armAxis(1, 90, 900, 'easein'),
+  printText('4) YAVAS BITIR — hizli baslar, yumusak durur'),
+  armAxis(1, 140, 900, 'easeout'),
+  armAxis(1, 90, 900, 'easeout'),
+  printText('Fark ettin mi? Kupe inerken YAVAS BITIR en guvenlisi!'),
+  armPose(90, 120, 80, 40, 800, 'ease'),
+  armGripper('close', 350),
+  armGripper('open', 350),
+  armHome(700),
 ]);
 
 // ════════════════════════════════════════════════════════════════════
@@ -423,6 +504,18 @@ export const KITS: Kit[] = [
     emoji: '🦾',
     desc: '4 eksenli robot kol · servo GP0–GP3',
     files: [
+      {
+        id: 'arm-cube-auto', name: '🧊 Küp Görevi (Otomatik Bloklar)',
+        desc: 'Tek blokla bilimsel küp al/bırak — yeni 🦾 hareket blokları',
+        steps: ['Merkeze al', '"Küpü al" bloğu: yaklaş → yavaş alçal → kavra → kaldır', '"Küpü bırak" bloğu ile 160°\'ye taşı', 'Selam salla'],
+        blocks: ARM_CUBE_AUTO,
+      },
+      {
+        id: 'arm-curves', name: '〰 Hareket Eğrisi Deneyi',
+        desc: 'Aynı hareket 4 eğriyle: doğrusal · S eğrisi · yavaş başla · yavaş bitir',
+        steps: ['Omuz 90↔140 arası 4 farklı eğriyle', 'Farkları gözlemle ve karşılaştır', 'Küpe inişte hangi eğri güvenli? (yavaş bitir!)'],
+        blocks: ARM_CURVES,
+      },
       {
         id: 'arm-test', name: 'Kol Merkez ve Eksen Testi',
         desc: 'Tüm servoları merkezler, her ekseni sırayla test eder',

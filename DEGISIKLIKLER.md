@@ -55,3 +55,48 @@ yapıştıramıyorum" sorunu çözüldü:
   `src/styles.css`, `package.json`
 - Yeni: `src/config/teacherAuth.ts`, `src/library/kits-blocks.ts`,
   `src/components/TeacherLibraryPanel.tsx`
+
+---
+
+# RoboExx 2.13.0 — Ek Değişiklikler
+
+## 5) Arduino Zamanlama Düzeltmeleri (milisaniyeler artık TAM)
+- **Kök neden bulundu:** Blockly değişkenleri Arduino'da `float` üretiliyor;
+  `delay()` kesirli değeri AŞAĞI yuvarlıyordu. float 0.7 aslında 0.6999999…
+  olduğundan hesaplanan süreler sistematik 1 ms eksik çalışıyordu
+  (700 yerine 699 ms). Tüm bekleme/buzzer sürelerine **+0.5 yuvarlama** eklendi.
+- **Aralıklı derleme hatası giderildi:** Canlı klavye modunda `delay()` →
+  `rxDelay()` dönüşümü, yardımcı fonksiyonların tanım sırasına göre
+  "rxDelay not declared" hatası üretebiliyordu ("bazen yüklenmiyor"un nedeni).
+  Artık dosya başına **ileri bildirimler** ekleniyor + canlı tuş yardımcıları
+  her zaman en başa yazılıyor — sıra bağımsız, g++ ile test edildi.
+- **rxDelay hassaslaştırıldı:** bitişi millis() sınırında tam yakalar,
+  uzun beklemede CPU'yu boşa döndürmez, son milisaniyede ince taramaya geçer.
+
+## 6) Sabit Derleme Sunucusu + Arduino ile Simülasyon
+- Derleme adresi artık SORULMUYOR: `https://roboexx-arduino-compile.onrender.com`
+  sabit varsayılan. (İstenirse ?derleme= / ayarlar ile hâlâ değiştirilebilir.)
+- **Simülasyon Arduino bloklarıyla çalışmıyordu — düzeltildi:**
+  - Kök neden: `L9110 motor` bloklarının ve birkaç sensörün sim eşlemesi
+    yoktu / adları yanlıştı → kod üretici patlıyor, sim hiç başlamıyordu.
+  - L9110 blokları artık sim'de paletleri/tekerleri sürüyor (küçük IA = sol).
+  - **Klavye ile OYNAMA geldi:** `Tuş basılı mı?` blokları sim'de gerçek
+    WASD/ok tuşlarını okuyor — robot simülasyonda klavyeyle sürülebiliyor.
+  - Emniyet ağı: eşlenmemiş herhangi bir blok sim'i artık ASLA kilitlemez.
+
+## 7) 🦾 Robot Kol Otomatik Hareket Blokları (YENİ KATEGORİ)
+Blok menüsüne "🦾 Robot Kol" kategorisi eklendi — bilimsel hareket motoru:
+- **🦾 Kol pozu** — 4 ekseni AYNI ANDA, seçilen eğriyle yumuşakça götürür
+- **🦾 Kol ekseni** — tek ekseni eğriyle sür (taban/omuz/dirsek/gripper)
+- **Hareket eğrileri:** — doğrusal · 〰 S eğrisi · ◞ yavaş başla · ◠ yavaş bitir
+- **🧊 Küpü al** — tek blokla bilimsel kavrama dizisi: gripper aç → S
+  eğrisiyle yaklaş → "yavaş bitir" eğrisiyle çarpmadan alçal → kavra → kaldır
+- **🧊 Küpü bırak** — taşı, yumuşak alçal, bırak, kalk
+- **🦾 Kolu merkeze al · Gripper aç/kapa · Selam salla** — hazır hareketler
+- **🦾 Kol pinleri** — pin ayarı (varsayılan GP0-3; Arduino'da 3,5,6,9)
+- Hem MicroPython hem Arduino kod üretir; @SV telemetrisi sayesinde
+  **3D robot kol simülasyonu hareketleri canlı izler**.
+- Eğitmen Kütüphanesi'ne 2 yeni hazır ders: **🧊 Küp Görevi (Otomatik
+  Bloklar)** ve **〰 Hareket Eğrisi Deneyi** (4 eğriyi karşılaştırmalı dener).
+- Doğrulama: Python kütüphanesi çalıştırılarak, C++ kütüphanesi g++ ile
+  derlenerek, 13 hazır blok programının tamamı otomatik linter'la test edildi.

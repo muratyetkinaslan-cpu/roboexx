@@ -1466,3 +1466,184 @@ Blockly.Blocks['rx_play_song'] = {
     this.setTooltip('Seçilen hazır şarkıyı buzzer\'da çalar.');
   },
 };
+
+// ====================================================================
+// 🦾 ROBOT KOL — OTOMATİK HAREKETLER
+// Yumuşak eğrili (easing) poz geçişleri + bilimsel küp al/bırak dizileri.
+// Tüm eksenler eşzamanlı interpolasyonla hareket eder; @SV telemetrisi
+// sayesinde 3D robot kol simülasyonu hareketleri canlı takip eder.
+// ====================================================================
+
+/** Hareket eğrisi seçenekleri — tüm kol bloklarında ortak. */
+const _ARM_CURVES: [string, string][] = [
+  ['〰 S eğrisi (yumuşak)', 'ease'],
+  ['— doğrusal', 'linear'],
+  ['◞ yavaş başla', 'easein'],
+  ['◠ yavaş bitir', 'easeout'],
+];
+
+const _ARM_AXES: [string, string][] = [
+  ['Taban', '0'],
+  ['Omuz', '1'],
+  ['Dirsek', '2'],
+  ['Gripper', '3'],
+];
+
+Blockly.Blocks['rx_arm_pins'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Kol pinleri · taban')
+      .appendField(new Blockly.FieldNumber(0, 0, 53, 1), 'T')
+      .appendField('omuz')
+      .appendField(new Blockly.FieldNumber(1, 0, 53, 1), 'O')
+      .appendField('dirsek')
+      .appendField(new Blockly.FieldNumber(2, 0, 53, 1), 'D')
+      .appendField('gripper')
+      .appendField(new Blockly.FieldNumber(3, 0, 53, 1), 'G');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Robot kol servo pinlerini ayarlar (varsayılan GP0-GP3). Programın başına bir kez koy.');
+  },
+};
+
+Blockly.Blocks['rx_arm_pose'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Kol pozu · taban');
+    this.appendValueInput('T').setCheck('Number');
+    this.appendDummyInput().appendField('omuz');
+    this.appendValueInput('O').setCheck('Number');
+    this.appendDummyInput().appendField('dirsek');
+    this.appendValueInput('D').setCheck('Number');
+    this.appendDummyInput().appendField('gripper');
+    this.appendValueInput('G').setCheck('Number');
+    this.appendDummyInput().appendField('· süre');
+    this.appendValueInput('MS').setCheck('Number');
+    this.appendDummyInput()
+      .appendField('ms · eğri')
+      .appendField(new Blockly.FieldDropdown(_ARM_CURVES), 'CURVE');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('4 ekseni AYNI ANDA, seçilen eğriyle yumuşakça hedefe götürür. Süre = hareketin toplam ms cinsinden uzunluğu.');
+  },
+};
+
+Blockly.Blocks['rx_arm_axis'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Kol ekseni')
+      .appendField(new Blockly.FieldDropdown(_ARM_AXES), 'AXIS')
+      .appendField('açı');
+    this.appendValueInput('ANGLE').setCheck('Number');
+    this.appendDummyInput().appendField('° · süre');
+    this.appendValueInput('MS').setCheck('Number');
+    this.appendDummyInput()
+      .appendField('ms · eğri')
+      .appendField(new Blockly.FieldDropdown(_ARM_CURVES), 'CURVE');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Tek ekseni seçilen eğriyle yumuşakça hedef açıya götürür. Diğer eksenler yerinde kalır.');
+  },
+};
+
+Blockly.Blocks['rx_arm_home'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Kolu merkeze al · süre');
+    this.appendValueInput('MS').setCheck('Number');
+    this.appendDummyInput().appendField('ms');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Tüm eksenleri 90°-90°-90°, gripper\'ı açık konuma yumuşakça getirir. Her görevin başlangıcı.');
+  },
+};
+
+Blockly.Blocks['rx_arm_gripper'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Gripper')
+      .appendField(
+        new Blockly.FieldDropdown([
+          ['✋ aç', 'open'],
+          ['🤏 kapa (kavra)', 'close'],
+        ]),
+        'ACT'
+      )
+      .appendField('· süre');
+    this.appendValueInput('MS').setCheck('Number');
+    this.appendDummyInput().appendField('ms');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Gripper\'ı yumuşakça açar (40°) veya kavrama konumuna kapatır (100°).');
+  },
+};
+
+Blockly.Blocks['rx_arm_wave'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🦾 Selam salla');
+    this.appendValueInput('TIMES').setCheck('Number');
+    this.appendDummyInput().appendField('kez');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip('Omzu kaldırır, dirsekle el sallar, kolu indirir — hazır demo hareketi.');
+  },
+};
+
+Blockly.Blocks['rx_arm_cube_pick'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🧊 Küpü al · taban açısı');
+    this.appendValueInput('BASE').setCheck('Number');
+    this.appendDummyInput().appendField('° · alçalma omuz');
+    this.appendValueInput('LOW').setCheck('Number');
+    this.appendDummyInput().appendField('°');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'Bilimsel kavrama dizisi: gripper açılır → küpün üstüne S eğrisiyle yaklaşır → ' +
+      '"yavaş bitir" eğrisiyle çarpmadan alçalır → kavrar → yumuşakça kaldırır. ' +
+      'Taban açısı = küpün yönü, alçalma omuz = küpe inme derinliği (küçük değer = daha alçak).'
+    );
+  },
+};
+
+Blockly.Blocks['rx_arm_cube_place'] = {
+  init: function (this: Blockly.Block) {
+    this.appendDummyInput()
+      .appendField(icon(ICONS.servo))
+      .appendField('🧊 Küpü bırak · taban açısı');
+    this.appendValueInput('BASE').setCheck('Number');
+    this.appendDummyInput().appendField('° · alçalma omuz');
+    this.appendValueInput('LOW').setCheck('Number');
+    this.appendDummyInput().appendField('°');
+    this.setStyle('servo_blocks');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.setTooltip(
+      'Kavranan küpü hedefe taşır: tabanı çevirir → yumuşakça alçalır → gripper açılır → kalkar.'
+    );
+  },
+};

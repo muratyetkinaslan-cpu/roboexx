@@ -95,6 +95,49 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
     return () => window.removeEventListener('message', onMessage);
   }, [postToSim]);
 
+  // --- KLAVYE İLETİMİ: sayfadaki tuşları sim'e aktar (WASD ile oynama) ---
+  // Sim iframe'i odakta olmasa bile sürüş çalışsın diye basılı tuş set'i
+  // her değişimde rx:keys mesajıyla iframe'e gönderilir. Blok değerleriyle
+  // aynı eşleme: oklar \x11-\x14, boşluk, enter.
+  useEffect(() => {
+    const pressed = new Set<string>();
+    const norm = (e: KeyboardEvent): string | null => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) {
+        return null; // yazı alanlarında sürüşü tetikleme
+      }
+      const k = e.key;
+      if (k === 'ArrowUp') return '\x11';
+      if (k === 'ArrowDown') return '\x12';
+      if (k === 'ArrowLeft') return '\x13';
+      if (k === 'ArrowRight') return '\x14';
+      if (k === 'Enter') return '\n';
+      if (k === ' ') return ' ';
+      if (k.length === 1) return k.toLowerCase();
+      return null;
+    };
+    const send = () => postToSim({ type: 'rx:keys', down: Array.from(pressed) });
+    const onDown = (e: KeyboardEvent) => {
+      const k = norm(e);
+      if (k === null) return;
+      if (!pressed.has(k)) { pressed.add(k); send(); }
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const k = norm(e);
+      if (k === null) return;
+      if (pressed.delete(k)) send();
+    };
+    const onBlur = () => { if (pressed.size) { pressed.clear(); send(); } };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [postToSim]);
+
   // --- çalıştır / durdur ---
   const run = () => {
     setCodeError(null);

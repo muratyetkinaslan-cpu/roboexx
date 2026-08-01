@@ -15,6 +15,13 @@ const LS_KEY = 'roboexx.arduino-compile-url';
 const SS_DISCOVERED_KEY = 'roboexx.arduino-compile-url.discovered';
 
 /**
+ * SABİT VARSAYILAN DERLEME SUNUCUSU — kullanıcıya asla adres sorulmaz.
+ * localStorage / ?derleme= / env ile hâlâ değiştirilebilir (öncelik onlarda),
+ * ama hiçbiri ayarlı değilse doğrudan bu adres kullanılır.
+ */
+export const DEFAULT_COMPILE_URL = 'https://roboexx-arduino-compile.onrender.com';
+
+/**
  * Öğretmen için kolaylık: siteyi `?derleme=https://sunucu` (veya `?compile=`)
  * ile açmak URL'i kalıcı kaydeder. Sınıfa tek link paylaşmak yeterli olur.
  */
@@ -51,7 +58,8 @@ export function getCompileUrl(): string | null {
   } catch {
     /* yoksay */
   }
-  return null;
+  // Hiçbir ayar yoksa SABİT varsayılan sunucu — kullanıcıya adres sorulmaz.
+  return DEFAULT_COMPILE_URL;
 }
 
 /** Bir adayın gerçekten derleme sunucusu olup olmadığını hızlıca kontrol et. */

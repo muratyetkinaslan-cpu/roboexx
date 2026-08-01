@@ -134,6 +134,38 @@ export const toolboxXml = `
     </block>
   </category>
 
+  <category name="🦾 Robot Kol" categorystyle="servo_category">
+    <block type="rx_arm_home">
+      <value name="MS"><shadow type="math_number"><field name="NUM">800</field></shadow></value>
+    </block>
+    <block type="rx_arm_pose">
+      <value name="T"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
+      <value name="O"><shadow type="math_number"><field name="NUM">120</field></shadow></value>
+      <value name="D"><shadow type="math_number"><field name="NUM">80</field></shadow></value>
+      <value name="G"><shadow type="math_number"><field name="NUM">40</field></shadow></value>
+      <value name="MS"><shadow type="math_number"><field name="NUM">800</field></shadow></value>
+    </block>
+    <block type="rx_arm_axis">
+      <value name="ANGLE"><shadow type="math_number"><field name="NUM">120</field></shadow></value>
+      <value name="MS"><shadow type="math_number"><field name="NUM">600</field></shadow></value>
+    </block>
+    <block type="rx_arm_gripper">
+      <value name="MS"><shadow type="math_number"><field name="NUM">350</field></shadow></value>
+    </block>
+    <block type="rx_arm_cube_pick">
+      <value name="BASE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
+      <value name="LOW"><shadow type="math_number"><field name="NUM">55</field></shadow></value>
+    </block>
+    <block type="rx_arm_cube_place">
+      <value name="BASE"><shadow type="math_number"><field name="NUM">160</field></shadow></value>
+      <value name="LOW"><shadow type="math_number"><field name="NUM">60</field></shadow></value>
+    </block>
+    <block type="rx_arm_wave">
+      <value name="TIMES"><shadow type="math_number"><field name="NUM">3</field></shadow></value>
+    </block>
+    <block type="rx_arm_pins"></block>
+  </category>
+
   <category name="Buzzer" categorystyle="buzzer_category">
     <block type="rx_buzzer_tone">
       <value name="FREQ"><shadow type="math_number"><field name="NUM">440</field></shadow></value>
