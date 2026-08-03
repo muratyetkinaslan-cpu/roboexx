@@ -103,8 +103,32 @@ Supported" veriyordu. Çözüm (`ble-bridge.ts` + `App.tsx`):
   paket sınırı/MTU sorunu tamamen ortadan kalkar. (Firmware v2 çerçeveli ve
   ham protokolün ikisini de kabul eder; eski PicoBricks GO da çalışmaya devam eder.)
 
-Hâlâ bağlanamıyorsan: işletim sisteminin Bluetooth ayarlarından cihazı
-"unut", robotu kapat-aç, sayfayı yenile. macOS'ta BLE önbelleği inatçıdır.
+### v2.2 — yeteneğe göre keşif (kalıcı "Not Supported" için)
+
+"Not Supported" bağlantı aşamasında da gelebiliyor: bazı modüllerde RX/TX
+karakteristik ROLLERİ Nordic düzeninin tersidir ya da modül fabrika
+varsayılan servisiyle (FFE0/FFF0/FFE5, RN487x) açılır — o zaman köprü
+"notify" başlatmaya çalıştığı karakteristikte bu hatayı alır. v2.2'de köprü:
+
+- Bilinen tüm UART servislerini sırayla dener, bulamazsa cihazdaki servisleri tarar.
+- Karakteristikleri **UUID'ye değil yeteneğine göre** seçer: yazılabilir olan →
+  yazma kanalı, notify/indicate olan → bildirim kanalı (tek karakteristik
+  ikisini de taşıyorsa o kullanılır).
+- Bildirim aboneliği 2 denemede de olmazsa bağlantıyı KESMEZ; "iyimser mod"da
+  devam eder — kod yükleme yine çalışır, sadece durum onayları beklenmez.
+- Konsol paneline **teşhis logu** basar: bulunan servis, her karakteristiğin
+  UUID'si ve özellikleri (`[write,notify]` gibi), seçilen kanallar.
+
+Robot tarafında da `berrybot.py` v2.2: modül şeffaf moddaysa `+++` artık
+CRLF'siz ve bekleme süreli gönderilir; AT yanıt vermiyorsa (fabrika ayarı
+zaten doğru) yapılandırma atlanır — her açılışta reklam kesilip tarayıcı
+bağlantısı düşürülmez. **Modülleri Yükle'yi bir kez daha çalıştırıp robotu
+kapat-aç** ki bu sürüm robota geçsin.
+
+Hâlâ olmuyorsa: işletim sisteminin Bluetooth ayarlarından cihazı "unut",
+robotu kapat-aç, sayfayı yenile (macOS BLE önbelleği inatçıdır) ve konsol
+panelindeki "karakteristik …" satırlarını bize gönder — hangi modül olduğunu
+oradan birebir görürüz.
 
 ## Blok seti (v2.1) — ayrı kategoriler, alçak + yüksek seviye
 

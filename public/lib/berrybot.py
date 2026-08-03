@@ -677,18 +677,35 @@ class BLEModule:
                 resp += self.uart.read()
         return resp
 
+    def _exit_transparent(self):
+        """Şeffaf moddan çık: '+++' CRLF'siz, öncesi/sonrası sessizlik ister."""
+        time.sleep_ms(600)                   # guard time (öncesi)
+        while self.uart.any():
+            self.uart.read()
+        self.uart.write('+++')               # CRLF YOK — kritik!
+        time.sleep_ms(600)                   # guard time (sonrası)
+        while self.uart.any():
+            self.uart.read()
+
     def configure(self):
-        """Modülü isimlendir, Nordic UART UUID'lerini ayarla, şeffaf moda geç."""
-        self._at('+++', 200)                 # önce şeffaf moddan çık (varsa)
-        self._at('AT')
-        self._at('AT+BLENAME=' + self.name)
-        self._at('AT+BLESERUUID=6E400001B5A3F393E0A9E50E24DCCA9E')
-        self._at('AT+BLERXUUID=6E400002B5A3F393E0A9E50E24DCCA9E')
-        self._at('AT+BLETXUUID=6E400003B5A3F393E0A9E50E24DCCA9E')
-        self._at('AT+SYSIOMAP=1,4')          # bağlantı LED'i
-        self._at('AT+TRANSENTER')            # şeffaf mod: artık ham veri
+        """Modülü isimlendir, Nordic UART UUID'lerini ayarla, şeffaf moda geç.
+
+        Modül önceki açılıştan şeffaf modda kalmış olabilir; önce nazikçe
+        çıkılır, AT yanıt vermezse (fabrika ayarı zaten doğru demektir)
+        yapılandırma atlanır — böylece her açılışta reklamı kesip
+        tarayıcının bağlantısını düşürmeyiz.
+        """
+        self._exit_transparent()
+        ok = b'OK' in self._at('AT', 250)
+        if ok:
+            self._at('AT+BLENAME=' + self.name)
+            self._at('AT+BLESERUUID=6E400001B5A3F393E0A9E50E24DCCA9E')
+            self._at('AT+BLERXUUID=6E400002B5A3F393E0A9E50E24DCCA9E')
+            self._at('AT+BLETXUUID=6E400003B5A3F393E0A9E50E24DCCA9E')
+            self._at('AT+SYSIOMAP=1,4')      # bağlantı LED'i
+            self._at('AT+TRANSENTER')        # şeffaf mod: artık ham veri
         # AT cevap artıklarını temizle
-        time.sleep_ms(100)
+        time.sleep_ms(150)
         while self.uart.any():
             self.uart.read()
         self._buf = bytearray()

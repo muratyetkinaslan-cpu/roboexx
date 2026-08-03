@@ -38,6 +38,35 @@ const STATUS_ERROR = 0x13;
 // BLE paket boyutu — MTU genelde 247, header için 20 ayır
 const CHUNK_SIZE = 200;
 
+/**
+ * Aday UART servisleri. İlk sıra RoboExx/Nordic; gerisi BerryBot tarzı
+ * harici BLE-UART modüllerinin fabrika varsayılanları:
+ *  - 0xFFE0 / 0xFFE5: HM-10, JDY, MLT-BT05 klonları
+ *  - 0xFFF0: BT05/CC41 türevleri
+ *  - 49535343-…: Microchip RN4870/BM7x şeffaf UART
+ * requestDevice.optionalServices'te listelenmeyen servise erişilemez,
+ * o yüzden hepsi orada da geçer.
+ */
+const CANDIDATE_SERVICE_UUIDS: (string | number)[] = [
+  UART_SERVICE_UUID,
+  0xffe0,
+  0xfff0,
+  0xffe5,
+  '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+];
+
+/** Karakteristik özelliklerini okunur stringe çevir (teşhis logu için). */
+function propsToString(ch: BluetoothRemoteGATTCharacteristic): string {
+  const p = (ch as any).properties || {};
+  const out: string[] = [];
+  if (p.read) out.push('read');
+  if (p.write) out.push('write');
+  if (p.writeWithoutResponse) out.push('writeNR');
+  if (p.notify) out.push('notify');
+  if (p.indicate) out.push('indicate');
+  return out.join(',') || 'yok';
+}
+
 export interface BLEBridgePortInfo {
   friendlyName: string;
   deviceId: string;
@@ -73,6 +102,8 @@ export class BLEBridge {
    * verebilir. App, hedef 'berrybot' iken 20 yapar.
    */
   public maxGattWrite = 0;
+  /** Bildirim aboneliği kuruldu mu? Kurulamadıysa durumlar iyimser beklenir. */
+  private notifyOk = true;
   /**
    * Kod yükleme sonrası Pico reset olunca beklenen kopma.
    * true ise gattserverdisconnected'da cihazı UNUTMA — otomatik reconnect dene.
@@ -119,7 +150,7 @@ export class BLEBridge {
       // UUID'ye bağlantı sonrası optionalServices üzerinden erişiriz.
       const device = await (navigator as any).bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [UART_SERVICE_UUID],
+        optionalServices: CANDIDATE_SERVICE_UUIDS,
       });
 
       this.device = device;
@@ -138,51 +169,95 @@ export class BLEBridge {
 
       const server = await withTimeout(device.gatt!.connect(), 15000, 'GATT bağlantı');
 
-      // SERVİS KEŞFİ — bazen GATT bağlandıktan hemen sonra servisler henüz
-      // keşfedilmemiş olabiliyor. 3 kez dene, her başarısız arada 500ms bekle.
-      // Bu, macOS BLE cache ve Pico advertising-vs-GATT yarış durumlarını çözer.
+      // ── SERVİS KEŞFİ ────────────────────────────────────────────────
+      // Önce bilinen UART servislerini sırayla dene (RoboExx/Nordic +
+      // harici BLE-UART modüllerinin fabrika varsayılanları). Hiçbiri
+      // yoksa cihazdaki TÜM servisleri tara ve içinde yazılabilir
+      // karakteristik olan ilk servisi al.
       let service: BluetoothRemoteGATTService | null = null;
       let lastErr: Error | null = null;
-      for (let i = 1; i <= 3; i++) {
-        try {
-          service = await withTimeout(
-            server.getPrimaryService(UART_SERVICE_UUID), 4000, `Servis bulma (deneme ${i}/3)`
-          );
-          break;
-        } catch (e) {
-          lastErr = e as Error;
-          if (i < 3) {
-            this.onLog('system', `Servis henüz hazır değil, tekrar deneniyor… (${i}/3)`);
-            await new Promise((r) => setTimeout(r, 500));
+      for (let round = 1; round <= 2 && !service; round++) {
+        for (const uuid of CANDIDATE_SERVICE_UUIDS) {
+          try {
+            service = await withTimeout(
+              server.getPrimaryService(uuid as any), 3000, `Servis ${uuid}`
+            );
+            this.onLog('system', `Servis bulundu: ${service!.uuid}`);
+            break;
+          } catch (e) {
+            lastErr = e as Error;
           }
+        }
+        if (!service && round === 1) {
+          this.onLog('system', 'Bilinen servisler henüz hazır değil, tekrar deneniyor…');
+          await new Promise((r) => setTimeout(r, 700));
         }
       }
       if (!service) {
-        // 3 deneme de başarısız → muhtemelen Pico'da BLE bootloader yok ya da
-        // başka bir cihaz seçildi. Kullanıcıya net bir yön ver.
+        // Son çare: tüm servisleri tara (yalnızca optionalServices'tekilere
+        // erişim izni vardır; diğerleri zaten listeye gelmez)
+        try {
+          const all = await withTimeout(server.getPrimaryServices(), 5000, 'Servis taraması');
+          this.onLog('system', `Cihazdaki erişilebilir servisler: ${all.map((sv: any) => sv.uuid).join(', ') || 'yok'}`);
+          service = all[0] ?? null;
+        } catch (e) {
+          lastErr = e as Error;
+        }
+      }
+      if (!service) {
         throw new Error(
-          'RoboExx servisi bulunamadı. Pico W\'ye "Modülleri Yükle" ile main.py yüklü mü? ' +
-          'macOS Bluetooth ayarlarında cihazı "unut" ve tekrar dene. ' +
+          'UART servisi bulunamadı. Robota "Modülleri Yükle" yapıldı mı? ' +
+          'İşletim sistemi Bluetooth ayarlarında cihazı "unut", robotu kapat-aç ve tekrar dene. ' +
           `(${lastErr?.message ?? 'bilinmeyen hata'})`
         );
       }
 
-      this.rxChar = await withTimeout(
-        service.getCharacteristic(UART_RX_CHAR_UUID), 6000, 'RX karakteristik'
-      );
-      this.txChar = await withTimeout(
-        service.getCharacteristic(UART_TX_CHAR_UUID), 6000, 'TX karakteristik'
-      );
-      // Bildirim aboneliği — bazı BLE-UART modülleri (BerryBot dahil) CCCD'yi
-      // geç hazırlar; "Not Supported" gelirse kısa bekleyip bir kez daha dene.
-      try {
-        await withTimeout(this.txChar.startNotifications(), 6000, 'Bildirim');
-      } catch (ne) {
-        this.onLog('system', `Bildirim aboneliği ilk denemede olmadı (${(ne as Error).message}) — tekrar deneniyor…`);
-        await new Promise((r) => setTimeout(r, 600));
-        await withTimeout(this.txChar.startNotifications(), 6000, 'Bildirim (2. deneme)');
+      // ── KARAKTERİSTİK KEŞFİ — UUID'ye değil YETENEĞE göre ──────────
+      // Bazı modüllerde RX/TX rolleri Nordic düzeninin TERSİDİR ya da tek
+      // karakteristik hem write hem notify taşır (ör. FFE1). Bu yüzden
+      // "yazılabilir olan"ı ve "bildirim yapabilen"i özelliklerinden seçiyoruz.
+      const chars = await withTimeout(service.getCharacteristics(), 6000, 'Karakteristik listesi');
+      for (const ch of chars) {
+        this.onLog('system', `  karakteristik ${ch.uuid} [${propsToString(ch)}]`);
       }
-      this.txChar.addEventListener('characteristicvaluechanged', this._onNotify);
+      const writable = chars.filter((ch: any) =>
+        ch.properties?.write || ch.properties?.writeWithoutResponse);
+      const notifiable = chars.filter((ch: any) =>
+        ch.properties?.notify || ch.properties?.indicate);
+      // Nordic RX UUID'si yazılabilirse onu tercih et; değilse ilk yazılabilir
+      this.rxChar =
+        writable.find((ch: any) => ch.uuid === UART_RX_CHAR_UUID) ??
+        writable[0] ?? null;
+      this.txChar =
+        notifiable.find((ch: any) => ch.uuid === UART_TX_CHAR_UUID) ??
+        notifiable[0] ?? null;
+      if (!this.rxChar) {
+        throw new Error('Bu serviste yazılabilir karakteristik yok — yanlış cihaz seçilmiş olabilir');
+      }
+      this.onLog('system', `Yazma: ${this.rxChar.uuid} · Bildirim: ${this.txChar?.uuid ?? 'YOK'}`);
+
+      // ── BİLDİRİM ABONELİĞİ — başarısız olsa bile bağlantıyı KESME ──
+      // Bazı modüller CCCD'yi geç hazırlar ("Not Supported"): 2 deneme yap;
+      // yine olmazsa "iyimser mod"a geç — durum onayları beklenmez, yükleme
+      // yine çalışır (firmware kaydedip kendini resetler).
+      this.notifyOk = false;
+      if (this.txChar) {
+        for (let i = 1; i <= 2 && !this.notifyOk; i++) {
+          try {
+            await withTimeout(this.txChar.startNotifications(), 6000, `Bildirim (deneme ${i}/2)`);
+            this.notifyOk = true;
+          } catch (ne) {
+            this.onLog('system', `Bildirim aboneliği olmadı (${(ne as Error).message})${i < 2 ? ' — tekrar deneniyor…' : ''}`);
+            if (i < 2) await new Promise((r) => setTimeout(r, 700));
+          }
+        }
+        if (this.notifyOk) {
+          this.txChar.addEventListener('characteristicvaluechanged', this._onNotify);
+        }
+      }
+      if (!this.notifyOk) {
+        this.onLog('system', '⚠ Bildirimler kapalı — iyimser modda devam ediliyor (yükleme çalışır, durum onayı beklenmez)');
+      }
 
       // Disconnect listener'ı bağlantı KURULDUKTAN SONRA ekle —
       // başarısızlık durumunda artakalmasın.
@@ -274,11 +349,40 @@ export class BLEBridge {
         // Her adıma cömert timeout — sonsuz pending'i kes ama gerçek bağlantıya
         // yeterli süre tanı. macOS/Chrome bazen 6sn'e kadar sürebilir.
         const server = await withTimeout(this.device.gatt!.connect(), 8000);
-        const service = await withTimeout(server.getPrimaryService(UART_SERVICE_UUID), 5000);
-        this.rxChar = await withTimeout(service.getCharacteristic(UART_RX_CHAR_UUID), 5000);
-        this.txChar = await withTimeout(service.getCharacteristic(UART_TX_CHAR_UUID), 5000);
-        await withTimeout(this.txChar.startNotifications(), 5000);
-        this.txChar.addEventListener('characteristicvaluechanged', this._onNotify);
+        // İlk bağlantıdaki keşifle aynı mantık: bilinen servisleri dene,
+        // karakteristikleri YETENEĞE göre seç (Nordic olmayan modüller için)
+        let service: BluetoothRemoteGATTService | null = null;
+        for (const uuid of CANDIDATE_SERVICE_UUIDS) {
+          try {
+            service = await withTimeout(server.getPrimaryService(uuid as any), 3000);
+            break;
+          } catch { /* sıradakini dene */ }
+        }
+        if (!service) {
+          const all = await withTimeout(server.getPrimaryServices(), 5000);
+          service = all[0] ?? null;
+        }
+        if (!service) throw new Error('servis yok');
+        const chars = await withTimeout(service.getCharacteristics(), 5000);
+        const writable = chars.filter((ch: any) =>
+          ch.properties?.write || ch.properties?.writeWithoutResponse);
+        const notifiable = chars.filter((ch: any) =>
+          ch.properties?.notify || ch.properties?.indicate);
+        this.rxChar =
+          writable.find((ch: any) => ch.uuid === UART_RX_CHAR_UUID) ?? writable[0] ?? null;
+        this.txChar =
+          notifiable.find((ch: any) => ch.uuid === UART_TX_CHAR_UUID) ?? notifiable[0] ?? null;
+        if (!this.rxChar) throw new Error('yazılabilir karakteristik yok');
+        this.notifyOk = false;
+        if (this.txChar) {
+          try {
+            await withTimeout(this.txChar.startNotifications(), 5000);
+            this.notifyOk = true;
+            this.txChar.addEventListener('characteristicvaluechanged', this._onNotify);
+          } catch {
+            this.notifyOk = false;
+          }
+        }
 
         this._setState('connected');
         this.expectReconnect = false;
@@ -564,6 +668,12 @@ export class BLEBridge {
   };
 
   private async _waitStatus(expected: number, timeoutMs: number): Promise<void> {
+    // Bildirim aboneliği kurulamadıysa durum onayı hiç gelmez — kısa bir
+    // nefes payı bırakıp iyimser devam et (firmware yine de kaydeder).
+    if (!this.notifyOk) {
+      await new Promise((r) => setTimeout(r, 300));
+      return;
+    }
     if (this.lastStatus === expected) {
       this.lastStatus = null;
       return;

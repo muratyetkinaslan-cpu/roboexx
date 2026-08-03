@@ -1,3 +1,15 @@
+# 🍓 BerryBot v2.2 — BLE bağlantısı: yeteneğe göre keşif
+
+- Servis keşfi: Nordic UUID + FFE0/FFF0/FFE5/RN487x adayları, gerekirse tam tarama.
+- Karakteristikler UUID yerine **özelliklerine göre** seçiliyor (ters RX/TX ve
+  tek-karakteristikli modüller desteklenir); bulunanlar konsola loglanıyor.
+- Bildirim kurulamazsa bağlantı düşürülmüyor: iyimser modda yükleme sürüyor.
+- Otomatik yeniden bağlanma da aynı keşfi kullanıyor.
+- Firmware: `+++` artık CRLF'siz + guard-time'lı; modül zaten yapılandırılmışsa
+  AT adımları atlanıyor (her açılışta reklam kesintisi yok).
+
+---
+
 # 🍓 BerryBot v2.1 — BLE düzeltmesi + geniş blok seti
 
 - **"GATT Error: Not Supported" çözüldü**: yazmalar karakteristiğin gerçek
