@@ -18,7 +18,7 @@ import { FirmwareUploader } from './components/FirmwareUploader';
 import { ArduinoUploader } from './components/ArduinoUploader';
 import { arduinoLiveLink } from './arduino/livelink';
 import type { CodeTarget } from './blockly/codegen';
-import { prepareUpload as berrybotPrepareUpload, requestBattery as berrybotRequestBattery } from './bluetooth/berrybot-bridge';
+import { requestBattery as berrybotRequestBattery } from './bluetooth/berrybot-bridge';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
 import type { ThemeId } from './themes/types';
@@ -407,13 +407,6 @@ export default function App() {
     // Bloklar aynı; sadece üretilen kod dilini değiştir
     setTimeout(() => blocklyRef.current?.regenerate(), 0);
   };
-
-  // 🍓 BerryBot BLE modu: harici UART-BLE modülü için çerçeveli + 20 baytlık
-  // GATT yazmaları. Hedef değişir değişmez uygula (bağlanmadan önce de).
-  useEffect(() => {
-    bleBridge.frameOutgoing = codeTarget === 'berrybot';
-    bleBridge.maxGattWrite = codeTarget === 'berrybot' ? 20 : 0;
-  }, [codeTarget]);
 
   // 🍓 BerryBot pil yoklaması — BLE bağlıyken 10 sn'de bir sor
   useEffect(() => {
@@ -1334,14 +1327,8 @@ export default function App() {
       addLine('info', 'Yüklenecek kod yok');
       return;
     }
-    const targetName = connectionMode === 'ble' ? 'user_code.py' : 'main.py';
+    const targetName = 'user_code.py'; // v4: USB'de de BLE'de de kullanıcı kodu buraya
     addLine('system', `⬆ Yükleniyor (${activeCode.length} bayt → ${targetName}, ${connectionMode === 'ble' ? 'BLE' : 'USB'})`);
-    if (connectionMode === 'ble' && codeTarget === 'berrybot') {
-      // BerryBot: kullanıcı kodu çalışıyorsa bile garanti yükleme için önce
-      // temiz bootloader'a resetle (MSG_RESET → oto yeniden bağlan)
-      addLine('system', '🍓 BerryBot bootloader\'a hazırlanıyor…');
-      try { await berrybotPrepareUpload(bleBridge); } catch { /* firmware zaten kabul eder */ }
-    }
     setUploadProgress({ phase: 'uploading', pct: 0, bytesSent: 0, bytesTotal: activeCode.length, speedKBs: 0 });
 
     try {
@@ -1389,15 +1376,19 @@ export default function App() {
   const runUploadBerryBotLibrary = async () => {
     addLine('system', `🍓 BerryBot modülleri indiriliyor…`);
     let libCode: string;
+    let modesCode: string;
     let mainCode: string;
     try {
-      const [libRes, mainRes] = await Promise.all([
+      const [libRes, modesRes, mainRes] = await Promise.all([
         fetch(`${import.meta.env.BASE_URL}lib/berrybot.py`),
+        fetch(`${import.meta.env.BASE_URL}lib/berry_modes.py`),
         fetch(`${import.meta.env.BASE_URL}lib/berrybot_main.py`),
       ]);
       if (!libRes.ok) throw new Error(`berrybot.py HTTP ${libRes.status}`);
+      if (!modesRes.ok) throw new Error(`berry_modes.py HTTP ${modesRes.status}`);
       if (!mainRes.ok) throw new Error(`berrybot_main.py HTTP ${mainRes.status}`);
       libCode = await libRes.text();
+      modesCode = await modesRes.text();
       mainCode = await mainRes.text();
     } catch (e) {
       addLine('error', `Kütüphane dosyası okunamadı: ${(e as Error).message}`);
@@ -1418,11 +1409,25 @@ export default function App() {
       return;
     }
 
+    addLine('system', `⬆ berry_modes.py yükleniyor (${modesCode.length} bayt)`);
+    setUploadProgress({ phase: 'uploading', pct: 45, bytesSent: 0, bytesTotal: modesCode.length, speedKBs: 0 });
+    try {
+      await activeBridge.uploadLibrary('berry_modes.py', modesCode, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: 45 + p.pct * 0.2, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      addLine('system', '✓ berry_modes.py yüklendi');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `berry_modes.py yükleme hatası: ${err.message}`);
+      return;
+    }
+
     addLine('system', `⬆ main.py (BerryBot bootloader) yükleniyor (${mainCode.length} bayt)`);
-    setUploadProgress({ phase: 'uploading', pct: 45, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
+    setUploadProgress({ phase: 'uploading', pct: 65, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
     try {
       await activeBridge.uploadLibrary('main.py', mainCode, (p) => {
-        setUploadProgress({ phase: 'uploading', pct: 45 + p.pct * 0.5, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+        setUploadProgress({ phase: 'uploading', pct: 65 + p.pct * 0.3, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
       addLine('system', '✓ main.py yüklendi');
     } catch (e) {
@@ -1439,7 +1444,12 @@ export default function App() {
       });
       setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
       addLine('system', `✓ BerryBot modülleri hazır · Cihaz: "${deviceName}"`);
-      addLine('info', 'BerryBot\'u kapat/aç veya RESET\'e bas — sonra Bluetooth\'tan bağlanıp blok kodu kablosuz yükleyebilirsin');
+      if (connectionMode === 'ble') {
+        addLine('system', '⟳ Robot yeni bootloader ile yeniden başlatılıyor…');
+        try { await bleBridge.forceReset(); } catch { /* önemsiz */ }
+      } else {
+        addLine('info', 'BerryBot\'u kapat/aç veya RESET\'e bas — sonra Bluetooth\'tan bağlanıp blok kodu kablosuz yükleyebilirsin');
+      }
     } catch (e) {
       const err = e as Error;
       setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
@@ -1556,7 +1566,12 @@ export default function App() {
 
   const handleStop = async () => {
     if (connectionMode === 'ble') {
-      addLine('info', 'Bluetooth modunda Durdur yok. Yeni kod yükle veya Pico\'yu resetle.');
+      try {
+        await bleBridge.stopCode();
+        addLine('system', '⏹ Robot durduruldu — kod çalıştırılmadan bekliyor');
+      } catch (e) {
+        addLine('info', (e as Error).message);
+      }
       return;
     }
     try {

@@ -364,8 +364,16 @@ export class SerialBridge {
       await this._enterRaw();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
-      // 1) Dosyayı aç
-      await this._execRaw(`f=open('main.py','wb')\nprint('__OPEN__')\n`);
+      // 0) Bootloader'ın çekirdek-1 gözcüsünü durdur — flash'a yazarken
+      //    diğer çekirdek çalışmamalı (RP2040 XIP kısıtı). Bootloader yoksa
+      //    zararsız bir değişken ataması olur.
+      await this._stopWatcher();
+
+      // 1) Kullanıcı kodunu HER ZAMAN user_code.py'ye yaz. main.py bir
+      //    "çalıştırıcı"dır (BLE bootloader'ı ya da mini stub — ikisi de
+      //    BERRYBOT-BOOT imzalı). Eski davranış (kodu main.py'ye yazmak)
+      //    BLE bootloader'ını EZİYORDU.
+      await this._execRaw(`f=open('user_code.py','wb')\nprint('__OPEN__')\n`);
 
       // 2) Chunk'lar halinde yaz — Pico'nun RAM'i taşmasın
       let offset = 0;
@@ -387,7 +395,7 @@ export class SerialBridge {
 
       // 3) Kapat ve doğrula
       const { output, error } = await this._execRaw(
-        `f.close()\nimport os\nprint('__OK__',os.stat('main.py')[6])\n`
+        `f.close()\nimport os\nprint('__OK__',os.stat('user_code.py')[6])\n`
       );
 
       if (error && error.trim()) {
@@ -395,6 +403,34 @@ export class SerialBridge {
       }
       if (!output.includes('__OK__')) {
         throw new Error('Yazma doğrulaması başarısız');
+      }
+
+      // 4) main.py bir çalıştırıcı mı? (BLE bootloader veya stub — ikisi de
+      //    'BERRYBOT-BOOT' imzası taşır.) Değilse/yoksa user_code.py'yi
+      //    çalıştıran mini stub'ı yaz. Bootloader'a ASLA dokunma.
+      const probe = await this._execRaw(
+        `h=''\ntry:\n    f=open('main.py')\n    h=f.read(120)\n    f.close()\nexcept Exception:\n    pass\nprint('__BOOT__' if 'BERRYBOT-BOOT' in h else '__NOBOOT__')\n`
+      );
+      if (!probe.output.includes('__BOOT__')) {
+        const stub = [
+          '# BERRYBOT-BOOT stub — user_code.py calistirici (USB).',
+          '# BLE ile de yukleme icin "Modulleri Yukle" (tam bootloader kurulur).',
+          'try:',
+          "    with open('user_code.py') as _f:",
+          '        _c = _f.read()',
+          'except OSError:',
+          '    _c = None',
+          'if _c:',
+          "    exec(_c, {'__name__': '__main__'})",
+          '',
+        ].join('\n');
+        const stubLiteral = pythonBytesLiteralFromBytes(this.encoder.encode(stub));
+        const stubRes = await this._execRaw(
+          `f=open('main.py','wb')\nf.write(${stubLiteral})\nf.close()\nprint('__STUB__')\n`
+        );
+        if (!stubRes.output.includes('__STUB__')) {
+          throw new Error('main.py çalıştırıcısı yazılamadı');
+        }
       }
 
       const elapsed = (Date.now() - start) / 1000;
@@ -436,6 +472,7 @@ export class SerialBridge {
 
     try {
       await this._enterRaw();
+      await this._stopWatcher();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
       // 1) Dosyayı aç (boş)
@@ -485,6 +522,17 @@ export class SerialBridge {
   }
 
   // ====== Private ======
+
+  /** Bootloader v3/v4 gözcüsünü (çekirdek-1) durdur — flash yazımı öncesi. */
+  private async _stopWatcher(): Promise<void> {
+    try {
+      await this._execRaw(
+        `_watch_stop=True\nimport time as _t\n_t.sleep_ms(700)\nprint('__W__')\n`
+      );
+    } catch {
+      // gözcü yoksa / eski firmware — önemsiz
+    }
+  }
 
   private _setState(s: BridgeState) {
     if (this.state !== s) {

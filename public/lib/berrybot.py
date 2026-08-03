@@ -662,7 +662,7 @@ class BLEModule:
     def __init__(self, name="RoboExx-Berry", uart_id=0,
                  tx=PIN_BLE_TX, rx=PIN_BLE_RX, baud=115200):
         self.uart = UART(uart_id, baud, tx=Pin(tx), rx=Pin(rx),
-                         timeout=5, rxbuf=1024)
+                         timeout=5, rxbuf=4096)
         self.name = name
         self._buf = bytearray()
         self._last_rx = ticks_ms()
@@ -755,7 +755,8 @@ class BerryBot:
             _singleton = super().__new__(cls)
         return _singleton
 
-    def __init__(self, ble_name="RoboExx-Berry", start_matrix=True):
+    def __init__(self, ble_name="RoboExx-Berry", start_matrix=True,
+                 init_ble=True):
         if getattr(self, '_ready', False):
             return                      # singleton zaten kuruldu
         self._ready = True
@@ -769,7 +770,8 @@ class BerryBot:
         self.ir = IRRemote()
         self.battery = Battery()
         self.button = Pin(PIN_BUTTON, Pin.IN)
-        self.ble = BLEModule(name=ble_name)
+        # init_ble=False: bootloader UART0'ı kendi yönetir — dokunma.
+        self.ble = BLEModule(name=ble_name) if init_ble else None
 
     def stop_all(self):
         self.motors.stop()

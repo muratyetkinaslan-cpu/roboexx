@@ -1,3 +1,44 @@
+# 🍓 BerryBot v4 — Güvenilir BLE yükleme (roboexxkids mimarisi + iyileştirmeler)
+
+Kök neden bulundu: BerryBot'un BLE modülü **Pico'dan bağımsız beslenir** —
+Pico resetlense bile tarayıcı bağlantısı kopmaz. Eski akış ise yüklemeden
+önce robotu soğuk resetleyip AT yapılandırmasını yeniden çalıştırıyor, bu da
+reklamı kesip yüklemeyi kilitliyordu ("durum 11 beklendi" hatası).
+
+v4, roboexxkids'te kanıtlanmış v3 protokolünü temel alır ve geliştirir:
+
+- **REBOOTING el sıkışması**: kod çalışırken BEGIN gelirse gözcü (çekirdek-1)
+  0x17 yollar, watchdog **SCRATCH register'ına** işaret koyar ve resetler;
+  robot yükleme modunda açılır (AT yapılandırması ATLANIR — bağlantı canlı
+  kalır), tarayıcı BEGIN'i otomatik yeniden gönderir (10 deneme penceresi).
+- **Parça başına ACK + END'de checksum**: UART tamponu taşamaz; bozuk aktarım
+  diske asla yazılmaz, parça 3 kez yeniden denenir; MTU küçükse parça boyutu
+  otomatik yarıya iner (20 bayta kadar).
+- **Flash'a yalnız tek çekirdek çalışırken yazılır** (RP2040 XIP kısıtı);
+  USB tarafı da yazmadan önce gözcüyü durdurur (`_watch_stop`).
+- **USB/BLE birbirini bozmaz**: kullanıcı kodu her zaman `user_code.py`;
+  `main.py` BERRYBOT-BOOT imzalı çalıştırıcıdır (bootloader ya da USB stub).
+- **Durdur BLE'de çalışır** (MSG_STOP → kod başlatılmadan boşta bekleme).
+- **Protokol sürümü otomatik algılanır** (PING → READY_V2); eski bootloader
+  ve RoboExx Pico W ile v1 uyumu korunur.
+- kids'in zayıf yanı olan bağlantı kararsızlığı bizim v2.2 katmanıyla
+  kapatıldı: zaman aşımı sarmalayıcıları, aday servis listesi
+  (Nordic + FFE0/FFF0/FFE5 + RN487x), yeteneğe göre karakteristik seçimi,
+  notify'a 2 deneme + iyimser mod — otomatik yeniden bağlanma dahil.
+- **v4 ekleri (kids'te olmayan)**: boşta modunda hazır modlar (buton: IR /
+  çizgi / ışık / sonik / sumo — `berry_modes.py`), 5x5 ekranda yükleme
+  ilerlemesi + ✓/✗, PicoBricks GO (0x52) uyumu, WASD canlı sürüş (0x0B),
+  sensör paneli + **pil sorgusu kod çalışırken bile** (0x0C, gözcü yanıtlar),
+  uzun buton basışıyla pil göstergesi.
+- Masaüstü simülasyonla doğrulandı: ACK'lı yükleme, bozuk checksum reddi,
+  sensör/pil cevabı.
+
+**Kurulum:** uygulamayı yeni sürümle aç → robota bağlan (USB en garantisi) →
+"Modülleri Yükle" (artık berrybot.py + berry_modes.py + main.py yazar) →
+robot otomatik/elle resetlenir → BLE'de "✓ Güvenilir yükleme aktif" görünür.
+
+---
+
 # 🍓 BerryBot v2.2 — BLE bağlantısı: yeteneğe göre keşif
 
 - Servis keşfi: Nordic UUID + FFE0/FFF0/FFE5/RN487x adayları, gerekirse tam tarama.

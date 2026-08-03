@@ -1,585 +1,545 @@
-# ============================================================
-# RoboExx BerryBot Firmware — v2.0.0  (main.py)
-# ------------------------------------------------------------
-# Açılışta:
-#   1) BLE modülü yapılandırılır, RoboExx bootloader servisi
-#      bir donanım timer'ına bağlanır (HER ZAMAN dinlemede)
-#   2) user_code.py varsa çalıştırılır (yoksa hazır modlar)
+# BERRYBOT-BOOT v4 — BLE Boot Loader (bu satırdaki imza silinmemeli!)
+######################################################################
+#  BerryBot — BLE Boot Loader v4  (harici UART BLE modülü için)
 #
-# Tarayıcı (roboexx ble-bridge.ts) AYNI protokolle konuşur:
-#   MSG_BEGIN/CHUNK/END/PING/RESET/KEY/SENSOR_REQ
-#   STATUS_READY/RECEIVING/SAVED/ERROR, SENSOR_REPLY
-# Pico W sürümünden tek fark: veri GATT IRQ yerine UART'tan
-# (şeffaf BLE modülü) gelir.
+#  v3'ün (kanıtlanmış) çekirdeği + RoboExx özellikleri:
+#   • v3 mimarisi: flash'a YALNIZCA tek çekirdek çalışırken yazılır.
+#     - YÜKLEME/BOŞTA MODU (çekirdek-0): tam protokol — BEGIN /
+#       ACK'lı CHUNK2 / checksum'lu END2. Dosyalar burada yazılır.
+#     - ÇALIŞMA MODU: kullanıcı kodu çekirdek-0'da; çekirdek-1'de GÖZCÜ
+#       BLE'yi dinler. Gözcü ASLA flash'a yazmaz — yükleme isteği gelince
+#       STATUS_REBOOTING yollar, watchdog SCRATCH register'ına işaret
+#       koyar ve resetler. Robot yükleme modunda açılır; tarayıcı BEGIN'i
+#       yeniden gönderir. BLE modülü Pico'dan bağımsız beslendiği için
+#       bu resetlerde tarayıcı bağlantısı KOPMAZ.
+#   • İşaretli (sıcak) açılışlarda AT yapılandırması atlanır — modül
+#     zaten canlı ve şeffaf modda; yeniden yapılandırmak bağlantıyı bozar.
+#   • v4 ekleri (boşta modunda): hazır modlar (buton ile: IR kumanda,
+#     çizgi, ışık, sonik, sumo), 5x5 ekran ikonları + yükleme ilerlemesi,
+#     RGB halka, uzun buton basışıyla pil göstergesi, PicoBricks GO
+#     uygulaması (0x52 paketleri), canlı WASD sürüş (MSG_KEY) ve sensör
+#     paneli + pil sorgusu (MSG_SENSOR_REQ) — sensör sorguları gözcüde de
+#     çalışır (kod koşarken bile pil rozeti güncellenir).
 #
-# Ek olarak resmi PicoBricks GO uygulamasının 0x52 paketleri
-# de desteklenir — eski uygulama da çalışmaya devam eder.
-#
-# Buton: kısa bas -> mod değiştir, uzun bas (1sn) -> pil göstergesi
-# ============================================================
+#  Protokol (tarayıcı → robot):
+#    MSG_BEGIN   0x01  name_len(1) + name + total(4, LE)
+#    MSG_CHUNK   0x02  offset(4, LE) + data              (v1 uyumu)
+#    MSG_END     0x03                                     (v1 uyumu)
+#    MSG_PING    0x04  → STATUS_READY_V2
+#    MSG_RESET   0x05  → machine.reset()
+#    MSG_CHUNK2  0x06  offset(4, LE) + len(2, LE) + data → STATUS_ACK
+#    MSG_END2    0x07  checksum(4, LE) → doğrula + kaydet
+#    MSG_STOP    0x08  → kod çalıştırmadan boşta bekle
+#    MSG_KEY     0x0B  len(1) + ascii basılı tuşlar (WASD canlı sürüş)
+#    MSG_SENSOR  0x0C  n(1) + n×(tip,pin1,pin2) → 0x14 + n×uint16 LE
+#      tipler: 1 dijital · 2 analog · 3 ultrasonik · 4 iç sıcaklık ·
+#              5 pil yüzdesi (yoksa 0xFFFF)
+#    0x52 ...          PicoBricks GO uygulaması paketleri (eski uyum)
+#  Robot → tarayıcı: READY 0x10 · RECEIVING 0x11 · SAVED 0x12 ·
+#    ERROR 0x13 · SENSOR_REPLY 0x14(+payload) · ACK 0x15 ·
+#    READY_V2 0x16 · REBOOTING 0x17
+######################################################################
 
+import machine
 import os
 import time
-import struct
-import machine
-from machine import Timer
-from utime import ticks_ms, ticks_diff
+import _thread
+from machine import Pin, UART, mem32
 
-from berrybot import BerryBot, constrain, STOP, FWD, BWD, RIGHT, LEFT
+# ---- BLE modülü (UART0) ----
+_TX_PIN = 0
+_RX_PIN = 1
+_BAUD = 115200
 
-# ---------------- Protokol sabitleri (ble-bridge.ts ile birebir) ---------
-MSG_BEGIN       = 0x01
-MSG_CHUNK       = 0x02
-MSG_END         = 0x03
-MSG_PING        = 0x04
-MSG_RESET       = 0x05
-MSG_KEY         = 0x06
-MSG_SENSOR_REQ  = 0x07
-MSG_SENSOR_REPLY = 0x14
+# ---- NUS UUID'leri (ble-bridge ile aynı) ----
+_BLE_SERVICE_UUID = "6E400001B5A3F393E0A9E50E24DCCA9E"
+_BLE_RX_UUID = "6E400002B5A3F393E0A9E50E24DCCA9E"
+_BLE_TX_UUID = "6E400003B5A3F393E0A9E50E24DCCA9E"
+_DEFAULT_NAME = "RoboExx-Berry"
 
-STATUS_READY     = 0x10
+# ---- Protokol ----
+MSG_BEGIN = 0x01
+MSG_CHUNK = 0x02
+MSG_END = 0x03
+MSG_PING = 0x04
+MSG_RESET = 0x05
+MSG_CHUNK2 = 0x06
+MSG_END2 = 0x07
+MSG_STOP = 0x08
+MSG_KEY = 0x0B
+MSG_SENSOR = 0x0C
+MSG_LEGACY = 0x52          # PicoBricks GO ('R')
+
+STATUS_READY = 0x10
 STATUS_RECEIVING = 0x11
-STATUS_SAVED     = 0x12
-STATUS_ERROR     = 0x13
+STATUS_SAVED = 0x12
+STATUS_ERROR = 0x13
+STATUS_SENSOR_REPLY = 0x14
+STATUS_ACK = 0x15
+STATUS_READY_V2 = 0x16
+STATUS_REBOOTING = 0x17
 
-SENSOR_DIGITAL   = 0x01
-SENSOR_ANALOG    = 0x02
-SENSOR_ULTRASONIC = 0x03
-SENSOR_TEMP_INT  = 0x04
-SENSOR_BATTERY   = 0x05   # RoboExx eki: pil yüzdesi (0xFFFF = ölçüm yok)
+CHUNK_SIZE = 200            # v1 uyumu — ble-bridge.ts ile aynı
 
-# Opsiyonel çerçeveli sarmalayıcı (berrybot-frame.ts): BB 66 len_lo len_hi payload chk
-FRAME_MAGIC0 = 0xBB
-FRAME_MAGIC1 = 0x66
+# ---- Watchdog SCRATCH0: resetler arası hayatta kalan işaret ----
+# (RP2040 donanım register'ı — flash'a/RAM'e yazmadan mod taşır.
+#  pico-sdk SCRATCH4-7'yi kullanır; SCRATCH0 boştur. Güç kesilince sıfırlanır.)
+_WD_SCRATCH0 = 0x4005800C
+MAGIC_UPLOAD = 0x51CA0001   # gözcü: "yükleme isteği var, yükleme modunda aç"
+MAGIC_NORUN = 0x51CA0002    # "Durdur": kodu çalıştırmadan boşta bekle
+MAGIC_FAST = 0x51CA0003     # az önce kod kaydedildi: modül canlı, config atla
 
-STAY_FLAG = '.stay_bootloader'   # varsa: user_code çalıştırılmaz (tek seferlik)
 
-CHUNK_SIZE = 200                 # tarayıcı sabiti — akış çözümlemede kullanılır
+def _scratch_read():
+    return mem32[_WD_SCRATCH0] & 0x7FFFFFFF
 
-# ---------------- Donanım ----------------
+
+def _scratch_write(v):
+    mem32[_WD_SCRATCH0] = v
+
+
 def _read_device_name():
-    """device_name.txt'den BLE cihaz adını oku (Modülleri Yükle yazar)."""
     try:
-        with open('device_name.txt', 'r') as f:
-            n = f.read().strip()
-        # BLE reklam sınırı: en fazla 20 karakter, ASCII'ye indir
-        n = ''.join(c if ord(c) < 128 else '_' for c in n)[:20]
-        return n if n else 'RoboExx-Berry'
+        with open("device_name.txt", "r") as f:
+            name = f.read().strip()
+        if name:
+            return "".join(c if ord(c) < 128 else "_" for c in name)[:20]
     except Exception:
-        return 'RoboExx-Berry'
+        pass
+    return _DEFAULT_NAME
 
 
-bot = BerryBot(ble_name=_read_device_name())
-bot.ble.configure()
-
-rgb_value = [[0, 0, 127]] * 7    # varsayılan mavi tema
-
-
-# ============================================================
-# BLE Bootloader servisi — timer'dan beslenir, her yerde aktif
-# ============================================================
-class BLEService:
-    def __init__(self, bot):
-        self.bot = bot
-        self.uploading = False
-        # dosya alma durumu
-        self._fname = None
-        self._total = 0
-        self._buf = None
-        self._got = 0
-        # canlı klavye
-        self.pressed_keys = ''
-        self.keys_at = 0
-        # eski GO uygulaması durumu
-        self.legacy_mode = 0        # 0 yok, 1 sonic, 2 çizgi, 3 ışık, 4 sumo
-        self.legacy_active = False
-        # akış tamponu (deterministik CHUNK çözümü için)
-        self._stream = bytearray()
-
-    # ---------- gönderim ----------
-    def notify(self, data):
-        try:
-            self.bot.ble.write(data)
-        except Exception:
-            pass
-
-    def status(self, code):
-        self.notify(bytes([code]))
-
-    # ---------- ana giriş: timer her 20ms çağırır ----------
-    def poll(self, _t=None):
-        try:
-            burst = self.bot.ble.read_burst()
-            if burst:
-                self._handle_burst(burst)
-        except Exception as e:
-            print("[BLE] poll hata:", e)
-
-    def _handle_burst(self, data):
-        # Yükleme sırasında CHUNK'lar arka arkaya UART'ta birleşebilir;
-        # akış tamponuna ekle ve deterministik çöz.
-        self._stream += data
-        while self._stream:
-            consumed = self._parse_one(self._stream)
-            if consumed <= 0:
-                break
-            self._stream = self._stream[consumed:]
-        # Çözümlenemeyen artık — bir sonraki patlamada sınır kaybolmasın
-        if len(self._stream) > 4096:
-            self._stream = bytearray()
-
-    def _parse_one(self, b):
-        """Tampondan tek mesaj işle; tüketilen bayt sayısını döndür.
-        0 = eksik veri (bekle), tam çözülemeyen tekil baytlar 1 tüketir."""
-        t = b[0]
-
-        # --- çerçeveli sarmalayıcı ---
-        if t == FRAME_MAGIC0:
-            if len(b) < 4:
-                return 0
-            if b[1] != FRAME_MAGIC1:
-                return 1
-            ln = b[2] | (b[3] << 8)
-            if len(b) < 4 + ln + 1:
-                return 0
-            payload = bytes(b[4:4 + ln])
-            chk = b[4 + ln]
-            x = 0
-            for v in payload:
-                x ^= v
-            if x == chk:
-                self._dispatch(payload)
-            else:
-                self.status(STATUS_ERROR)
-            return 4 + ln + 1
-
-        # --- ham protokol ---
-        if t == MSG_PING or t == MSG_END or t == MSG_RESET:
-            self._dispatch(bytes(b[0:1]))
-            return 1
-
-        if t == MSG_BEGIN:
-            # [01][name_len][name][size:4]
-            if len(b) < 2:
-                return 0
-            nl = b[1]
-            need = 2 + nl + 4
-            if len(b) < need:
-                return 0
-            self._dispatch(bytes(b[:need]))
-            return need
-
-        if t == MSG_CHUNK:
-            # [02][offset:4][data] — veri uzunluğu: min(CHUNK_SIZE, kalan)
-            if self._buf is None or len(b) < 5:
-                return 0 if len(b) < 5 else 1
-            offset = struct.unpack("<I", b[1:5])[0]
-            dlen = min(CHUNK_SIZE, self._total - offset)
-            if dlen < 0:
-                return 1
-            need = 5 + dlen
-            if len(b) < need:
-                return 0
-            self._dispatch(bytes(b[:need]))
-            return need
-
-        if t == MSG_KEY or t == MSG_SENSOR_REQ or t == 0x52:
-            # Uzunluk bilgisi yok — patlama sınırı = mesaj sınırı varsayılır.
-            self._dispatch(bytes(b))
-            return len(b)
-
-        return 1  # tanınmayan bayt — atla
-
-    # ---------- mesaj işleyiciler ----------
-    def _dispatch(self, data):
-        t = data[0]
-        if t == MSG_PING:
-            self.status(STATUS_READY)
-        elif t == MSG_RESET:
-            # Bootloader'da kal (user_code'u bir kereliğine atla) ve resetle
-            try:
-                with open(STAY_FLAG, 'w') as f:
-                    f.write('1')
-            except Exception:
-                pass
-            self.bot.stop_all()
-            time.sleep_ms(100)
-            machine.reset()
-        elif t == MSG_BEGIN:
-            self._on_begin(data)
-        elif t == MSG_CHUNK:
-            self._on_chunk(data)
-        elif t == MSG_END:
-            self._on_end()
-        elif t == MSG_KEY:
-            self._on_keys(data)
-        elif t == MSG_SENSOR_REQ:
-            self._on_sensors(data)
-        elif t == 0x52:
-            self._on_legacy(data)
-
-    def _on_begin(self, data):
-        try:
-            nl = data[1]
-            self._fname = data[2:2 + nl].decode()
-            self._total = struct.unpack("<I", data[2 + nl:2 + nl + 4])[0]
-            self._buf = bytearray(self._total)
-            self._got = 0
-            self.uploading = True
-            self.bot.stop_all()                    # güvenlik: motorları durdur
-            if self.bot.matrix:
-                self.bot.matrix.progress(0)
-            print("[BLE] Yeni dosya:", self._fname, self._total, "bayt")
-            self.status(STATUS_RECEIVING)
-        except Exception as e:
-            print("[BLE] BEGIN hata:", e)
-            self.status(STATUS_ERROR)
-
-    def _on_chunk(self, data):
-        if self._buf is None:
-            self.status(STATUS_ERROR)
-            return
-        try:
-            offset = struct.unpack("<I", data[1:5])[0]
-            chunk = data[5:]
-            end = offset + len(chunk)
-            if end > self._total:
-                raise ValueError("chunk taşması")
-            self._buf[offset:end] = chunk
-            self._got += len(chunk)
-            if self.bot.matrix and self._total:
-                self.bot.matrix.progress(self._got * 100 // self._total)
-        except Exception as e:
-            print("[BLE] CHUNK hata:", e)
-            self.status(STATUS_ERROR)
-
-    def _on_end(self):
-        if self._buf is None or self._fname is None:
-            self.status(STATUS_ERROR)
-            return
-        fname, buf = self._fname, self._buf
-        self._fname = None; self._buf = None
-        try:
-            with open(fname, 'wb') as f:
-                f.write(buf)
-            try:
-                os.sync()
-            except AttributeError:
-                pass
-            sz = os.stat(fname)[6]
-            print("[BLE] Kaydedildi:", fname, sz, "/", len(buf))
-            if sz != len(buf):
-                raise OSError("boyut uyuşmadı")
-            self.status(STATUS_SAVED)
-            if self.bot.matrix:
-                self.bot.matrix.show('yes')
-            self.bot.buzzer.beep(80, 1500)
-            time.sleep_ms(300)                     # tarayıcı SAVED'i alsın
-            machine.reset()                        # yeni kodla yeniden başla
-        except Exception as e:
-            print("[BLE] END hata:", e)
-            self.uploading = False
-            self.status(STATUS_ERROR)
-            if self.bot.matrix:
-                self.bot.matrix.show('no')
-
-    def _on_keys(self, data):
-        try:
-            self.pressed_keys = bytes(data[1:]).decode('ascii', 'ignore').lower()
-            self.keys_at = ticks_ms()
-        except Exception:
-            self.pressed_keys = ''
-
-    def drive_from_keys(self):
-        """W-A-S-D canlı kontrol. Ana döngüden çağrılır."""
-        # 600ms'dir tuş verisi gelmediyse güvenli dur
-        if not self.pressed_keys or ticks_diff(ticks_ms(), self.keys_at) > 600:
-            return False
-        k = self.pressed_keys
-        y = 100 if 'w' in k else (-100 if 's' in k else 0)
-        x = 60 if 'd' in k else (-60 if 'a' in k else 0)
-        left = constrain(y + x, -100, 100)
-        right = constrain(y - x, -100, 100)
-        self.bot.motors.drive(left, right)
+def _has_user_code():
+    try:
+        os.stat("user_code.py")
         return True
-
-    def _on_sensors(self, req):
-        reply = bytearray([MSG_SENSOR_REPLY])
-        i = 1
-        while i + 2 < len(req):
-            stype, p1, p2 = req[i], req[i + 1], req[i + 2]
-            value = 0xFFFF
-            try:
-                if stype == SENSOR_DIGITAL:
-                    value = machine.Pin(p1, machine.Pin.IN,
-                                        machine.Pin.PULL_UP).value()
-                elif stype == SENSOR_ANALOG:
-                    value = machine.ADC(p1).read_u16() if 26 <= p1 <= 29 else 0xFFFE
-                elif stype == SENSOR_ULTRASONIC:
-                    value = self.bot.sonar.distance_mm()
-                elif stype == SENSOR_TEMP_INT:
-                    raw = machine.ADC(4).read_u16()
-                    temp = 27 - (raw * 3.3 / 65535 - 0.706) / 0.001721
-                    value = max(0, min(65535, int(temp * 100)))
-                elif stype == SENSOR_BATTERY:
-                    pct = self.bot.battery.percent()
-                    value = pct if pct is not None else 0xFFFF
-                else:
-                    value = 0xFFFD
-            except Exception:
-                value = 0xFFFC
-            reply.append(value & 0xFF)
-            reply.append((value >> 8) & 0xFF)
-            i += 3
-        self.notify(bytes(reply))
-
-    # ---------- Eski PicoBricks GO paketleri (0x52 ...) ----------
-    def _on_legacy(self, b):
-        global rgb_value
-        if len(b) < 3:
-            return
-        if b[1] == 2:                               # tekil komutlar / modlar
-            c = b[2]
-            if c == 99:                             # mod çıkışı
-                self.legacy_mode = 0
-                self.bot.motors.stop()
-            elif c == 1:
-                self.bot.ring.off()
-            elif c == 90:
-                self.bot.ring.set_all(rgb_value); self.bot.ring.show()
-            elif c == 2:
-                self.bot.buzzer.horn()
-            elif c == 4:
-                self.legacy_mode = 1
-            elif c == 8:
-                self.legacy_mode = 2
-            elif c == 16:
-                self.legacy_mode = 3
-            elif c == 32:
-                self.legacy_mode = 4
-        elif b[1] == 3 and len(b) >= 4:             # joystick
-            self.legacy_mode = 0
-            if b[2] == 0 and b[3] == 0:
-                self.bot.motors.stop()
-            else:
-                self.bot.motors.joystick(b[2], b[3])
-        elif b[1] == 7 and len(b) >= 6:             # tek RGB LED rengi
-            idx = constrain(b[2] - 1, 0, 6)
-            rgb_value[idx] = [b[3], b[4], b[5]]
-            self.bot.ring.set_all(rgb_value); self.bot.ring.show()
-        elif b[1] == 6 and len(b) >= 7:             # kullanıcı matris deseni
-            if self.bot.matrix:
-                self.bot.matrix.show(list(b[2:7]))
-
-
-svc = BLEService(bot)
-ble_timer = Timer(-1)
-ble_timer.init(period=20, mode=Timer.PERIODIC, callback=svc.poll)
-
-
-# Pil göstergesi artık kütüphanede: bot.show_battery()
-def show_battery():
-    bot.show_battery()
+    except OSError:
+        return False
 
 
 # ============================================================
-# Hazır modlar (buton ile gezilir)
+#  BLE modül katmanı (UART0)
 # ============================================================
-Max, Mid, Low = 100, 76, 72             # yüzde hızlar
-TRACKER_TH = 50000
-LDR_TH = 250
-LDR_TOL = 5000
+class BleUartModule:
+    def __init__(self):
+        # rxbuf BÜYÜK olmalı: flash yazarken gelen baytlar varsayılan
+        # minicik tamponda kayboluyordu → bozuk yüklemeler.
+        self.uart = UART(0, _BAUD, parity=None, stop=1, bits=8,
+                         tx=Pin(_TX_PIN), rx=Pin(_RX_PIN),
+                         rxbuf=4096, txbuf=512, timeout=20)
 
-_line_dir = [STOP]
-
-
-def mode_ir():
-    code = bot.ir.read()
-    if code is None:
-        return
-    IR = bot.ir
-    if code == IR.KEY_UP:
-        bot.motors.move(FWD, Max); time.sleep_ms(500); bot.motors.stop()
-    elif code == IR.KEY_DOWN:
-        bot.motors.move(BWD, Max); time.sleep_ms(500); bot.motors.stop()
-    elif code == IR.KEY_LEFT:
-        bot.motors.move(LEFT, Max); time.sleep_ms(130); bot.motors.stop()
-    elif code == IR.KEY_RIGHT:
-        bot.motors.move(RIGHT, Max); time.sleep_ms(130); bot.motors.stop()
-    else:
-        bot.motors.stop()
-
-
-def mode_line():
-    l_on, r_on = bot.line.on_line()
-    if l_on and r_on:
-        d = FWD
-    elif r_on:
-        d = RIGHT
-    elif l_on:
-        d = LEFT
-    elif _line_dir[0] != STOP:
-        d = BWD
-    else:
-        d = STOP
-    if d != _line_dir[0]:
-        _line_dir[0] = d
-        bot.motors.move(d, Low if d == BWD else Mid)
-    time.sleep_ms(15)
-
-
-def mode_light():
-    L, R = bot.light.raw()
-    dist = bot.sonar.distance_cm()
-    if L >= LDR_TH and R >= LDR_TH:
-        if dist < 10:
-            bot.motors.stop(); time.sleep_ms(20)
-            bot.motors.move(LEFT, Mid); time.sleep_ms(500)
-            bot.motors.stop()
-        elif R - L >= LDR_TOL:
-            bot.motors.move(RIGHT, Mid)
-        elif L - R >= LDR_TOL:
-            bot.motors.move(LEFT, Mid)
-        elif L >= 10000 and R >= 10000:
-            bot.motors.move(FWD, Max)
-        else:
-            bot.motors.stop()
-    else:
-        bot.motors.stop()
-    time.sleep_ms(20)
-
-
-_sumo_cnt = [0]
-
-
-def mode_sumo():
-    dist = bot.sonar.distance_cm()
-    l_on, r_on = bot.line.on_line()
-    if l_on or r_on:                       # kenar çizgisi -> geri kaç
-        bot.motors.move(BWD, Mid)
-        time.sleep_ms(500 if dist <= 15 else 100)
-    elif dist <= 15:                       # rakip önde -> it!
-        bot.motors.move(FWD, Max)
-        time.sleep_ms(300)
-    else:                                  # rakibi ara
-        _sumo_cnt[0] += 1
-        if _sumo_cnt[0] >= 3:
-            _sumo_cnt[0] = 0
-            bot.motors.move(FWD, Mid); time.sleep_ms(100)
-        else:
-            bot.motors.move(LEFT, Mid); time.sleep_ms(100)
-            bot.motors.stop()
-    time.sleep_ms(15)
-
-
-_sonic_left = [0]
-
-
-def mode_sonic():
-    if bot.sonar.distance_cm(samples=3) > 12:
-        bot.motors.move(FWD, Max)
-    else:
-        bot.motors.stop(); time.sleep_ms(300)
-        bot.motors.move(BWD, Max); time.sleep_ms(120)
-        bot.motors.stop(); time.sleep_ms(150)
-        bot.motors.move(LEFT, Mid)
-        time.sleep_ms(500 if _sonic_left[0] == 0 else 1000)
-        _sonic_left[0] ^= 1
-        bot.motors.stop(); time.sleep_ms(200)
-
-
-MODES = [
-    (None,       'bluetooth'),   # 0: BLE / boşta
-    (mode_ir,    'ir'),
-    (mode_line,  'tracker'),
-    (mode_light, 'sunny'),
-    (mode_sonic, 'sonic'),
-    (mode_sumo,  'triangle'),
-]
-berry_mode = [0]
-
-
-# --- buton: kısa = mod, uzun (1sn) = pil göstergesi ---
-def check_button():
-    if not bot.button.value():
-        return
-    t0 = ticks_ms()
-    while bot.button.value():
-        if ticks_diff(ticks_ms(), t0) > 1000:
-            bot.stop_all()
-            show_battery()
-            while bot.button.value():
-                time.sleep_ms(20)
-            bot.matrix.show(MODES[berry_mode[0]][1])
-            return
-        time.sleep_ms(20)
-    bot.stop_all()
-    berry_mode[0] = (berry_mode[0] + 1) % len(MODES)
-    bot.matrix.show(MODES[berry_mode[0]][1])
-    bot.buzzer.beep(40, 1200)
-    time.sleep_ms(150)
-
-
-# ============================================================
-# Açılış
-# ============================================================
-def _boot():
-    bot.ring.set_all(rgb_value); bot.ring.show()
-    bot.buzzer.boot_jingle()
-
-    # STAY bayrağı: tarayıcı MSG_RESET gönderdiyse user_code'u atla
-    stay = STAY_FLAG in os.listdir()
-    if stay:
+    def flush_rx(self):
         try:
-            os.remove(STAY_FLAG)
+            while self.uart.any() > 0:
+                self.uart.read(64)
         except Exception:
             pass
 
-    # Kullanıcı kodu varsa çalıştır (bootloader timer'ı arka planda
-    # dinlemeye devam eder — kod çalışırken bile yeni yükleme alınır)
-    if not stay and 'user_code.py' in os.listdir():
-        bot.matrix.show('smile')
+    def _at(self, cmd):
+        self.uart.write(cmd)
+        time.sleep_ms(350)
+        self.flush_rx()
+
+    def configure(self, name):
+        # Şeffaf moddan çıkmayı dene (önceki oturumdan kalmış olabilir)
+        self._at("+++\r\n")
+        time.sleep_ms(300)
+        self._at("AT+BLENAME={}\r\n".format(name))
+        self._at("AT+BLESERUUID={}\r\n".format(_BLE_SERVICE_UUID))
+        self._at("AT+BLERXUUID={}\r\n".format(_BLE_RX_UUID))
+        self._at("AT+BLETXUUID={}\r\n".format(_BLE_TX_UUID))
+        self._at("AT+SYSIOMAP=1,4\r\n")
+        self._at("AT+TRANSENTER\r\n")   # şeffaf moda gir → ham veri köprüsü
+        time.sleep_ms(300)
+        self.flush_rx()
+
+    # ---- Şeffaf modda ham veri ----
+    def send(self, data):
         try:
-            print("[BOOT] user_code.py çalıştırılıyor")
-            import user_code                       # noqa: F401
-        except Exception as e:
-            print("[BOOT] user_code hatası:", e)
-            bot.stop_all()
-            bot.matrix.show('no')
-            time.sleep(1)
-        # Kod bittiğinde/bozulduğunda hazır modlara düş
-        bot.matrix.show(MODES[berry_mode[0]][1])
+            self.uart.write(data)
+        except Exception:
+            pass
 
-    # ---- hazır modlar + BLE canlı kontrol döngüsü ----
-    bot.matrix.show(MODES[berry_mode[0]][1])
+    def read_exact(self, n, timeout_ms=4000):
+        """UART'tan tam n bayt oku. Zaman aşımında None döner."""
+        buf = bytearray()
+        deadline = None if timeout_ms is None else time.ticks_add(time.ticks_ms(), timeout_ms)
+        while len(buf) < n:
+            if self.uart.any() > 0:
+                chunk = self.uart.read(n - len(buf))
+                if chunk:
+                    buf += chunk
+            else:
+                if deadline is not None and time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                    return None
+                time.sleep_ms(2)
+        return bytes(buf)
+
+
+def _u32le(b):
+    return b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)
+
+
+def _u16le(b):
+    return b[0] | (b[1] << 8)
+
+
+# ============================================================
+#  Sensör sorgusu (0x0C) — hem gözcü hem boşta modu kullanır.
+#  Flash'a DOKUNMAZ → çekirdek-1'de de güvenlidir.
+# ============================================================
+def _handle_sensor_req(mod):
+    head = mod.read_exact(1, timeout_ms=800)
+    if head is None:
+        return
+    n = head[0]
+    if n > 16:
+        return
+    body = mod.read_exact(3 * n, timeout_ms=800)
+    if body is None:
+        return
+    reply = bytearray([STATUS_SENSOR_REPLY])
+    for i in range(n):
+        stype = body[3 * i]
+        p1 = body[3 * i + 1]
+        p2 = body[3 * i + 2]
+        value = 0xFFFF
+        try:
+            if stype == 1:      # dijital
+                value = machine.Pin(p1, machine.Pin.IN, machine.Pin.PULL_UP).value()
+            elif stype == 2:    # analog
+                value = machine.ADC(p1).read_u16() if 26 <= p1 <= 29 else 0xFFFE
+            elif stype == 3:    # ultrasonik (mm)
+                trig = machine.Pin(p1, machine.Pin.OUT)
+                echo = machine.Pin(p2, machine.Pin.IN)
+                trig.value(0); time.sleep_us(4)
+                trig.value(1); time.sleep_us(10)
+                trig.value(0)
+                dur = machine.time_pulse_us(echo, 1, 15000)
+                value = 0xFFFF if dur < 0 else min(int(dur * 0.343 / 2), 65000)
+            elif stype == 4:    # iç sıcaklık ×100
+                raw = machine.ADC(4).read_u16()
+                t = 27 - (raw * 3.3 / 65535 - 0.706) / 0.001721
+                value = max(0, min(65535, int(t * 100)))
+            elif stype == 5:    # pil yüzdesi
+                try:
+                    from berrybot import Battery
+                    p = Battery().percent()
+                    value = 0xFFFF if p is None else p
+                except Exception:
+                    value = 0xFFFF
+        except Exception:
+            value = 0xFFFC
+        reply.append(value & 0xFF)
+        reply.append((value >> 8) & 0xFF)
+    mod.send(bytes(reply))
+
+
+# ============================================================
+#  YÜKLEME / BOŞTA MODU — tek çekirdek → flash yazımı GÜVENLİ
+#  Mesaj beklerken hazır modları (IR/çizgi/ışık/sonik/sumo) çalıştırır.
+# ============================================================
+def _idle_mode(mod, forever):
+    """Tam protokolü konuş; dosyaları al/yaz; boşta hazır modları koştur.
+    forever=False → gözcü isteğiyle girildi; 25 sn sessizlik olur ve
+    kullanıcı kodu varsa normal moda dön."""
+    print("[Boot] Yükleme/boşta modu" + ("" if forever else " (25sn pencere)"))
+
+    # --- Donanımı hazırla (matris ikonu, RGB, modlar) ---
+    bot = None
+    modes = None
+    try:
+        from berrybot import BerryBot
+        bot = BerryBot(init_ble=False)      # UART'a DOKUNMA — mod bizim
+        import berry_modes
+        modes = berry_modes.Modes(bot, mod)
+    except Exception as e:
+        print("[Boot] Donanım katmanı yüklenemedi (yalın bootloader):", e)
+
+    filename = None
+    total = 0
+    buffer = None
+    idle_ms = 0
+    uploading = False
+
     while True:
-        if svc.uploading:                          # yükleme sürüyor: dokunma
-            time.sleep_ms(50)
+        first = mod.read_exact(1, timeout_ms=20 if (modes and not uploading) else 1000)
+        if first is None:
+            if modes and not uploading:
+                try:
+                    modes.step()            # buton + aktif mod + WASD zaman aşımı
+                except Exception:
+                    pass
+                idle_ms += 20
+            else:
+                idle_ms += 1000
+            if not forever and idle_ms >= 25000 and _has_user_code():
+                print("[Boot] Sessizlik — normal moda dönülüyor")
+                _scratch_write(MAGIC_FAST)
+                machine.reset()
             continue
-        check_button()
-        if berry_mode[0] == 0:
-            # BLE modu: klavye (WASD) canlıysa sür, eski GO modu seçiliyse çalıştır
-            if not svc.drive_from_keys():
-                if svc.legacy_mode == 1:
-                    mode_sonic()
-                elif svc.legacy_mode == 2:
-                    mode_line()
-                elif svc.legacy_mode == 3:
-                    mode_light()
-                elif svc.legacy_mode == 4:
-                    mode_sumo()
-                else:
-                    time.sleep_ms(10)
-        else:
-            fn = MODES[berry_mode[0]][0]
-            if fn:
-                fn()
-        time.sleep_ms(2)
+        idle_ms = 0
+        msg = first[0]
+
+        try:
+            if msg == MSG_PING:
+                mod.send(bytes([STATUS_READY_V2]))
+
+            elif msg == MSG_RESET:
+                time.sleep_ms(120)
+                machine.reset()
+
+            elif msg == MSG_STOP:
+                forever = True
+                if bot:
+                    bot.stop_all()
+
+            elif msg == MSG_BEGIN:
+                hdr = mod.read_exact(1)
+                if hdr is None:
+                    continue
+                name_b = mod.read_exact(hdr[0])
+                size_b = mod.read_exact(4)
+                if name_b is None or size_b is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                filename = name_b.decode()
+                total = _u32le(size_b)
+                if total > 128 * 1024:
+                    mod.send(bytes([STATUS_ERROR]))
+                    filename = None
+                    buffer = None
+                    continue
+                buffer = bytearray(total)
+                uploading = True
+                if bot:
+                    bot.stop_all()
+                    if bot.matrix:
+                        bot.matrix.progress(0)
+                    bot.buzzer.beep(80, 880)
+                mod.send(bytes([STATUS_RECEIVING]))
+
+            elif msg == MSG_CHUNK2:
+                # v2: açık uzunluk + her parçaya ACK → akış kontrolü
+                head = mod.read_exact(6)
+                if head is None or buffer is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                offset = _u32le(head)
+                dlen = _u16le(head[4:6])
+                data = mod.read_exact(dlen)
+                if data is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                end = offset + len(data)
+                if end <= total:
+                    buffer[offset:end] = data
+                if bot and bot.matrix and total:
+                    bot.matrix.progress(min(end, total) * 100 // total)
+                mod.send(bytes([STATUS_ACK]))
+
+            elif msg == MSG_CHUNK:
+                # v1 (eski tarayıcı uyumu): uzunluk örtük, ACK yok
+                off_b = mod.read_exact(4)
+                if off_b is None or buffer is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                offset = _u32le(off_b)
+                dlen = total - offset
+                if dlen > CHUNK_SIZE:
+                    dlen = CHUNK_SIZE
+                data = mod.read_exact(dlen)
+                if data is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                end = offset + len(data)
+                if end <= total:
+                    buffer[offset:end] = data
+                if bot and bot.matrix and total:
+                    bot.matrix.progress(min(end, total) * 100 // total)
+
+            elif msg == MSG_END2:
+                sum_b = mod.read_exact(4)
+                if sum_b is None or buffer is None or filename is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                expect = _u32le(sum_b)
+                s = 0
+                for byt in buffer:
+                    s = (s + byt) & 0xFFFFFFFF
+                if s != expect:
+                    # Bozuk aktarım → dosya YAZILMAZ; tarayıcı tekrar dener
+                    mod.send(bytes([STATUS_ERROR]))
+                    if bot and bot.matrix:
+                        bot.matrix.show('no')
+                    filename = None
+                    buffer = None
+                    uploading = False
+                    continue
+                _save(filename, buffer, mod, bot)
+                filename = None
+                buffer = None
+                uploading = False
+
+            elif msg == MSG_END:
+                # v1: checksum yok
+                if buffer is None or filename is None:
+                    mod.send(bytes([STATUS_ERROR]))
+                    continue
+                _save(filename, buffer, mod, bot)
+                filename = None
+                buffer = None
+                uploading = False
+
+            elif msg == MSG_KEY:
+                ln = mod.read_exact(1, timeout_ms=300)
+                if ln is None:
+                    continue
+                keys = mod.read_exact(ln[0], timeout_ms=300) if ln[0] else b""
+                if modes and not uploading:
+                    modes.set_keys(keys)
+
+            elif msg == MSG_SENSOR:
+                _handle_sensor_req(mod)
+
+            elif msg == MSG_LEGACY:
+                if modes and not uploading:
+                    modes.handle_legacy(mod)
+
+            # tanınmayan bayt → yoksay (şeffaf mod çöpü olabilir)
+        except Exception as e:
+            print("[Boot] mesaj hatası:", e)
+            try:
+                mod.send(bytes([STATUS_ERROR]))
+            except Exception:
+                pass
+            filename = None
+            buffer = None
+            uploading = False
 
 
-try:
-    _boot()
-except KeyboardInterrupt:
-    bot.stop_all()
-    ble_timer.deinit()
-    raise
+def _save(filename, buffer, mod, bot=None):
+    """Dosyayı yaz (tek çekirdek — güvenli). user_code.py ise resetle."""
+    try:
+        with open(filename, "wb") as f:
+            f.write(buffer)
+    except Exception:
+        mod.send(bytes([STATUS_ERROR]))
+        return
+    mod.send(bytes([STATUS_SAVED]))
+    if bot:
+        if bot.matrix:
+            bot.matrix.show('yes')
+        bot.buzzer.beep(90, 1319)
+        bot.buzzer.beep(140, 1760)
+    if filename == "user_code.py":
+        # SAVED baytı UART→modül→BLE yolunu tamamlasın, sonra temiz reset.
+        # MAGIC_FAST: modül canlı → açılışta AT yapılandırması atlanır,
+        # tarayıcı bağlantısı korunur.
+        time.sleep_ms(450)
+        _scratch_write(MAGIC_FAST)
+        machine.reset()
+    # Kütüphane dosyaları: reset YOK — "Modülleri Yükle" zinciri bozulmasın.
+    # Zincirin sonunda tarayıcı MSG_RESET gönderir.
+
+
+# ============================================================
+#  GÖZCÜ — çekirdek-1, kullanıcı kodu koşarken. ASLA flash'a yazmaz!
+# ============================================================
+# USB tarafı flash'a yazmadan önce bu bayrağı True yapar (raw REPL'den
+# `_watch_stop = True`) — gözcü çekirdek-1'den çekilir.
+_watch_stop = False
+
+
+def _watcher(mod):
+    while not _watch_stop:
+        b = mod.read_exact(1, timeout_ms=400)
+        if b is None:
+            continue
+        c = b[0]
+        if c == MSG_PING:
+            mod.send(bytes([STATUS_READY_V2]))
+        elif c == MSG_BEGIN:
+            # Yükleme isteği: flash'a burada DOKUNMA. Tarayıcıya
+            # "yeniden başlıyorum" de, SCRATCH'e işaret koy, resetle.
+            mod.send(bytes([STATUS_REBOOTING]))
+            time.sleep_ms(150)          # bayt hattı tamamlasın
+            _scratch_write(MAGIC_UPLOAD)
+            machine.reset()
+        elif c == MSG_STOP:
+            mod.send(bytes([STATUS_REBOOTING]))
+            time.sleep_ms(120)
+            _scratch_write(MAGIC_NORUN)
+            machine.reset()
+        elif c == MSG_RESET:
+            time.sleep_ms(120)
+            machine.reset()
+        elif c == MSG_SENSOR:
+            # Pil rozeti + sensör paneli kod koşarken de çalışsın.
+            # Flash'a dokunmaz → çekirdek-1'de güvenli.
+            try:
+                _handle_sensor_req(mod)
+            except Exception:
+                pass
+        elif c == MSG_KEY:
+            # Tuş verisini akıştan temizle (kod koşarken sürüş gözcüde yapılmaz)
+            ln = mod.read_exact(1, timeout_ms=200)
+            if ln is not None and ln[0]:
+                mod.read_exact(ln[0], timeout_ms=200)
+        # diğer baytlar (yarım kalmış akış çöpü) → yoksay
+
+
+# ============================================================
+#  Kullanıcı kodu (çekirdek-0)
+# ============================================================
+def _run_user_code():
+    try:
+        print("[Boot] user_code.py çalıştırılıyor...")
+        with open("user_code.py") as f:
+            code = f.read()
+        exec(code, {"__name__": "__main__"})
+        print("[Boot] user_code.py bitti — robot boşta, BLE dinleniyor")
+    except Exception as e:
+        print("[Boot] user_code.py HATA:", e)
+    # KeyboardInterrupt (USB Ctrl-C) bilerek YAKALANMAZ → REPL'e düşer.
+
+
+# ============================================================
+#  BAŞLANGIÇ
+# ============================================================
+print("BerryBot — BLE bootloader v4 başlıyor...")
+_magic = _scratch_read()
+_scratch_write(0)   # işaret tek kullanımlık
+_name = _read_device_name()
+
+_mod = BleUartModule()
+if _magic in (MAGIC_UPLOAD, MAGIC_NORUN, MAGIC_FAST):
+    # Bu açılışa bir BLE mesajı sebep oldu → modül canlı, yapılandırılmış
+    # ve şeffaf modda. Tekrar AT göndermek hem yavaş hem bağlantıyı bozar.
+    print("[BLE] Hızlı açılış — modül yapılandırması atlandı")
+    _mod.flush_rx()
+else:
+    print("[BLE] Cihaz adı:", _name, "— modül yapılandırılıyor...")
+    time.sleep_ms(800)          # soğuk açılışta modülün açılmasını bekle
+    _mod.configure(_name)
+
+if _magic == MAGIC_UPLOAD:
+    _idle_mode(_mod, forever=not _has_user_code())       # tek çekirdek
+elif _magic == MAGIC_NORUN:
+    print("[Boot] Durduruldu — kod otomatik başlatılmayacak")
+    _idle_mode(_mod, forever=True)                       # tek çekirdek
+elif _has_user_code():
+    # ÇALIŞMA MODU: gözcü çekirdek-1'de, kullanıcı kodu çekirdek-0'da.
+    try:
+        _thread.start_new_thread(_watcher, (_mod,))
+        print("[BLE] Gözcü aktif — kod çalışırken bile yükleme yapılabilir")
+    except Exception as e:
+        print("[BLE] Gözcü başlatılamadı:", e)
+    _run_user_code()
+    # Kod bitti/çöktü → boşta bekle (yeniden başlatma YOK). Gözcü hâlâ
+    # dinliyor; yeni yükleme gelirse yükleme moduna resetler.
+    while True:
+        time.sleep_ms(500)
+else:
+    # Hiç kod yok → doğrudan boşta modunda süresiz dinle (tek çekirdek)
+    _idle_mode(_mod, forever=True)

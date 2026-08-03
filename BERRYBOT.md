@@ -103,6 +103,19 @@ Supported" veriyordu. Çözüm (`ble-bridge.ts` + `App.tsx`):
   paket sınırı/MTU sorunu tamamen ortadan kalkar. (Firmware v2 çerçeveli ve
   ham protokolün ikisini de kabul eder; eski PicoBricks GO da çalışmaya devam eder.)
 
+### v4 — güvenilir yükleme ("durum 11 beklendi" çözümü)
+
+Bağlantı kurulduğu hâlde yükleme "BLE zaman aşımı: durum 11 beklendi" ile
+düşüyorsa: robot kod çalıştırıyordur ve eski akış yüklemeden önce robotu
+soğuk resetleyip AT yapılandırmasını yeniden çalıştırarak bağlantıyı
+bozuyordu. v4'te (roboexxkids'in kanıtlanmış mimarisi geliştirmelerle):
+kod çalışırken BEGIN gelirse robot 0x17 REBOOTING yollar, watchdog SCRATCH
+işaretiyle yükleme modunda yeniden açılır (AT atlanır, bağlantı kopmaz) ve
+tarayıcı BEGIN'i otomatik tekrarlar; parçalar ACK'lı, dosya checksum'lı
+gider. **Modülleri Yükle'yi bir kez çalıştırınca** robot v4'e geçer ve
+konsolda "✓ Güvenilir yükleme aktif" görünür. v4 zinciri artık üç dosya
+yazar: `berrybot.py` + `berry_modes.py` + `main.py`.
+
 ### v2.2 — yeteneğe göre keşif (kalıcı "Not Supported" için)
 
 "Not Supported" bağlantı aşamasında da gelebiliyor: bazı modüllerde RX/TX
