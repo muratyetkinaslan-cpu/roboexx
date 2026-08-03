@@ -195,13 +195,32 @@ export class WebUSBSerialPort implements SerialPortLike {
  * SerialBridge, masaüstünde gerçek Web Serial'ı, tablette bunu kullanır.
  */
 export const webusbSerialShim = {
-  async requestPort(opts?: { filters?: Array<{ usbVendorId?: number }> }): Promise<WebUSBSerialPort> {
+  /** Tanılama loglarını buraya bağla (SerialBridge onLog'u verir). */
+  log: null as null | ((kind: 'system' | 'info' | 'error', msg: string) => void),
+
+  async requestPort(_opts?: { filters?: Array<{ usbVendorId?: number }> }): Promise<WebUSBSerialPort> {
     const usb: any = (navigator as any).usb;
-    const filters = (opts?.filters ?? [])
-      .filter((f) => f.usbVendorId !== undefined)
-      .map((f) => ({ vendorId: f.usbVendorId! }));
-    const device = await usb.requestDevice({ filters: filters.length ? filters : undefined });
-    return new WebUSBSerialPort(device);
+    const say = (k: 'system' | 'info' | 'error', m: string) => { try { this.log?.(k, m); } catch { /* yut */ } };
+    // BİLEREK filtresiz: bazı tablet/kablo kombinasyonlarında cihaz beklenmedik
+    // kimlikle görünebiliyor; boş liste görüp "okumuyor" sanılmasın.
+    // Listede "RP2", "Board in FS mode", "MicroPython" veya "Pico" görünür.
+    say('system', 'USB cihaz seçici açılıyor — listede "RP2 / Pico / MicroPython Board" seç');
+    try {
+      const device = await usb.requestDevice({ filters: [] });
+      return new WebUSBSerialPort(device);
+    } catch (e) {
+      const err = e as Error;
+      // Cihaz listede hiç yoktu ya da kullanıcı vazgeçti → yol göster
+      let granted = 0;
+      try { granted = (await usb.getDevices()).length; } catch { /* yut */ }
+      say('error', `USB cihaz seçilemedi (${err?.message ?? err}). Daha önce izin verilen cihaz: ${granted}`);
+      say('info', 'Liste BOŞSA sırayla kontrol et:');
+      say('info', '1) Robotun güç anahtarı AÇIK mı? (USB takılı olsa da robot pilden açık olmalı)');
+      say('info', '2) Kablo VERİ kablosu mu? Bazı "Mac/şarj" C-C kablolar tablette veri taşımaz — en garantisi: USB-C→USB-A OTG adaptörü + normal USB kablo');
+      say('info', "3) Casper ve bazı tabletlerde OTG AYARI vardır ve KENDİNİ KAPATIR: Ayarlar → Bağlantılar/Diğer → 'OTG' anahtarını AÇ, sonra kabloyu çıkarıp tekrar tak");
+      say('info', '4) Kabloyu taktıktan sonra sayfayı yenileyip tekrar Bağlan de');
+      throw new Error('USB cihazı bulunamadı/seçilmedi — konsoldaki OTG ve kablo adımlarını uygula');
+    }
   },
 
   async getPorts(): Promise<WebUSBSerialPort[]> {

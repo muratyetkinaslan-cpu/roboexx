@@ -109,6 +109,7 @@ export class SerialBridge {
     if (typeof navigator !== 'undefined' && 'serial' in navigator) {
       return (navigator as unknown as { serial: SerialAPI }).serial;
     }
+    webusbSerialShim.log = (k, m) => this.onLog(k, m);
     return webusbSerialShim as unknown as SerialAPI;
   }
 

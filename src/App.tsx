@@ -360,6 +360,14 @@ export default function App() {
     bleBridge.onStateChange = setBridgeState;
     bleBridge.onLog = (kind, message) => addLine(kind, message);
 
+    addLine('system', 'RoboExx · BerryBot sürümü v4.2');
+    if ('serial' in navigator) {
+      addLine('system', 'USB modu: Web Serial (bilgisayar)');
+    } else if ('usb' in navigator) {
+      addLine('system', 'USB modu: 📱 WebUSB (tablet) — OTG kablosu gerekir');
+    } else {
+      addLine('error', 'Bu tarayıcıda USB erişimi yok (iPad?) — Bluetooth kullanın');
+    }
     addLine('system', 'RoboExx · Pico / ESP32 bağlantısı bekleniyor');
     serialBridge.tryAutoConnect().then((info) => {
       if (info) addLine('info', 'Önceden tanınan cihaz otomatik bağlandı');

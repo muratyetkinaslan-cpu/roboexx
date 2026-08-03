@@ -135,22 +135,62 @@ class BleUartModule:
         except Exception:
             pass
 
-    def _at(self, cmd):
+    def _at(self, cmd, wait_ms=350):
         self.uart.write(cmd)
-        time.sleep_ms(350)
-        self.flush_rx()
+        time.sleep_ms(wait_ms)
+        resp = b""
+        try:
+            while self.uart.any() > 0:
+                d = self.uart.read(64)
+                if d:
+                    resp += d
+        except Exception:
+            pass
+        return resp
+
+    def _wait_module_awake(self, max_ms=6000):
+        """Modül 'AT' → 'OK' diyene kadar bekle (soğuk açılışta geç uyanır).
+        Erken gönderilen komutlar (TRANSENTER dahil) yoksa KAYBOLUR ve
+        modül AT modunda kalır → BLE iki yönde de ölü görünür."""
+        waited = 0
+        while waited < max_ms:
+            if b"OK" in self._at("AT\r\n", 250):
+                return True
+            time.sleep_ms(150)
+            waited += 400
+        return False
+
+    def ensure_transparent(self, max_tries=3):
+        """Şeffaf modda mıyız? DOĞRULA; değilsek gir.
+        Test: AT modundaysa 'AT' yerel 'OK' döndürür; şeffaf moddaysa
+        baytlar havaya gider, yerel cevap GELMEZ. ('AT\r\n' baytları
+        tarayıcı tarafında durum filtresine takılır — zararsız.)"""
+        for _ in range(max_tries):
+            resp = self._at("AT\r\n", 300)
+            if b"OK" not in resp:
+                return True              # yerel cevap yok → şeffaf mod ✓
+            # Hâlâ AT modunda → şeffafa geçmeyi dene
+            self._at("AT+TRANSENTER\r\n", 400)
+        # Son kontrol
+        return b"OK" not in self._at("AT\r\n", 300)
 
     def configure(self, name):
         # Şeffaf moddan çıkmayı dene (önceki oturumdan kalmış olabilir)
         self._at("+++\r\n")
         time.sleep_ms(300)
+        if not self._wait_module_awake():
+            print("[BLE] UYARI: modül 'OK' demedi — yine de deneniyor")
         self._at("AT+BLENAME={}\r\n".format(name))
         self._at("AT+BLESERUUID={}\r\n".format(_BLE_SERVICE_UUID))
         self._at("AT+BLERXUUID={}\r\n".format(_BLE_RX_UUID))
         self._at("AT+BLETXUUID={}\r\n".format(_BLE_TX_UUID))
         self._at("AT+SYSIOMAP=1,4\r\n")
         self._at("AT+TRANSENTER\r\n")   # şeffaf moda gir → ham veri köprüsü
-        time.sleep_ms(300)
+        if self.ensure_transparent():
+            print("[BLE] Şeffaf mod DOĞRULANDI")
+        else:
+            print("[BLE] UYARI: şeffaf moda geçilemedi!")
+        time.sleep_ms(200)
         self.flush_rx()
 
     # ---- Şeffaf modda ham veri ----
@@ -261,6 +301,7 @@ def _idle_mode(mod, forever):
     buffer = None
     idle_ms = 0
     uploading = False
+    ping_beeped = False
 
     while True:
         first = mod.read_exact(1, timeout_ms=20 if (modes and not uploading) else 1000)
@@ -284,6 +325,13 @@ def _idle_mode(mod, forever):
         try:
             if msg == MSG_PING:
                 mod.send(bytes([STATUS_READY_V2]))
+                if not ping_beeped and bot:
+                    # Tarayıcı bağlandı ve ilk PING ulaştı → çift blip.
+                    # Bip duyuluyorsa telefon→robot hattı KESİN çalışıyor.
+                    ping_beeped = True
+                    bot.buzzer.beep(35, 1568)
+                    time.sleep_ms(40)
+                    bot.buzzer.beep(35, 2093)
 
             elif msg == MSG_RESET:
                 time.sleep_ms(120)
@@ -518,9 +566,13 @@ if _magic in (MAGIC_UPLOAD, MAGIC_NORUN, MAGIC_FAST):
     # ve şeffaf modda. Tekrar AT göndermek hem yavaş hem bağlantıyı bozar.
     print("[BLE] Hızlı açılış — modül yapılandırması atlandı")
     _mod.flush_rx()
+    # Ucuz sigorta: şeffaf mod gerçekten açık mı? Değilse düzelt.
+    if not _mod.ensure_transparent(max_tries=2):
+        print("[BLE] Sıcak açılışta şeffaf mod kayıptı — yeniden yapılandırılıyor")
+        _mod.configure(_name)
 else:
     print("[BLE] Cihaz adı:", _name, "— modül yapılandırılıyor...")
-    time.sleep_ms(800)          # soğuk açılışta modülün açılmasını bekle
+    time.sleep_ms(1500)         # soğuk açılışta modülün açılmasını bekle
     _mod.configure(_name)
 
 if _magic == MAGIC_UPLOAD:

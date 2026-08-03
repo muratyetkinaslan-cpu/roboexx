@@ -1,3 +1,38 @@
+# 🍓 v4.2 — Şeffaf mod sigortası + sesli kanıt + Casper/tablet tanılaması
+
+**BLE'nin "bazen oluyor bazen olmuyor" kökü:** modül soğuk açılışta geç
+uyanınca `AT+TRANSENTER` komutu boşa gidiyor ve modül **AT modunda takılı
+kalıyordu** — o anda telefon→robot ve robot→telefon iki yön birden ölü
+görünür; bir sonraki açılışta şans eseri düzelir. v4.2 firmware'i:
+
+- Modül **'OK' diyene kadar bekler** (6 sn'ye dek), yapılandırmayı ondan
+  sonra yollar; soğuk açılış beklemesi 1.5 sn'ye çıktı.
+- **Şeffaf modu DOĞRULAR**: 'AT' yerel 'OK' döndürüyorsa hâlâ AT modundadır
+  → TRANSENTER 3 denemeye kadar tekrarlanır; sonuç konsola yazılır.
+  Sıcak (SCRATCH işaretli) açılışlarda da aynı ucuz doğrulama yapılır —
+  mod kaybolduysa kendini onarır. (Masaüstü simülasyonuyla test edildi.)
+- **Sesli kanıt**: robot boştayken tarayıcı bağlanıp ilk PING ulaştığında
+  robot **çift bip** çalar → telefon→robot hattının fiziksel kanıtı.
+  Dosya kaydında zaten melodi + ekranda ✓ vardı; kör mod mesajları artık
+  "melodi yoksa kapat-aç ve tekrar dene" diye net yönlendiriyor.
+
+**Tablet (Casper) tarafı:**
+
+- WebUSB seçici artık **filtresiz** — cihaz beklenmedik kimlikle görünse de
+  listede çıkar ("RP2 / Pico / MicroPython Board" seçilir).
+- Seçim başarısız olursa konsola adım adım tanılama yazılır: robot gücü,
+  **veri kablosu** uyarısı (bazı "Mac/şarj" C-C kablolar tablette veri
+  taşımaz; en garantisi USB-C→USB-A OTG adaptörü + normal kablo) ve
+  **Casper'ların kendini kapatan OTG ayarı** (Ayarlar → OTG anahtarı).
+- Açılışta sürüm + USB modu banner'ı: "RoboExx · BerryBot sürümü v4.2" ve
+  "USB modu: Web Serial (bilgisayar) / 📱 WebUSB (tablet)" — eski build'le
+  yeni build bir bakışta ayrılır.
+
+**Kurulum:** Modülleri Yükle'yi bir kez daha çalıştır (yeni firmware robota
+geçsin), robotu kapat-aç. Bağlanınca çift bip bekle.
+
+---
+
 # 📱 Tablet desteği — WebUSB (CDC) fallback
 
 Android tablette Chrome, **Web Serial API'yi desteklemez** (yalnız masaüstü);

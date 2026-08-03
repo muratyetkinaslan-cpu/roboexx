@@ -364,7 +364,7 @@ export class BLEBridge {
     this.notifyAvailable = false;
     this.onLog('system',
       '⚠ Robottan durum baytı alınamıyor (modül notify iletmiyor) — KÖR MOD: ' +
-      'yükleme beklemesiz, hız sınırlı gidecek. Robot dosyayı alınca melodi çalar ve ekranda ✓ gösterir.');
+      'yükleme beklemesiz, hız sınırlı gidecek. İPUCU: robot boştayken bağlanınca ÇİFT BİP duyman lazım — duyuyorsan telefon→robot hattı sağlam demektir.');
   }
 
   async disconnect(): Promise<void> {
@@ -647,7 +647,8 @@ export class BLEBridge {
     if (!this.notifyAvailable) {
       // Kor mod: onay goremiyoruz ama robot aldiysa melodi + ekranda ✓
       // gosterir ve yeni kodu calistirmak icin kendini resetler.
-      this.onLog('system', '✓ Kod gönderildi (kör mod) — robot melodi çalıp ekranda ✓ gösterdiyse kayıt başarılı, yeni kod çalışıyor');
+      this.onLog('system', '✓ Kod gönderildi (kör mod) — robot MELODİ çalıp ekranda ✓ gösterdiyse kayıt başarılı');
+      this.onLog('info', 'Melodi YOKSA dosya robota ulaşmadı: robotu KAPAT-AÇ (şeffaf mod sigortası devreye girer, çift bip bekle) ve tekrar yükle');
       return;
     }
 

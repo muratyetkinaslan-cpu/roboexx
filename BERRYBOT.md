@@ -61,6 +61,16 @@ test edildi). `CHUNK_SIZE`'ı web tarafında değiştirirseniz `main.py` içinde
 | Buton | GP10 |
 | 5x5 LED matris | Satır: 7,11,12,13,17 — Sütun: 18,19,16,2,3 |
 
+## Sesli teşhis rehberi (v4.2)
+
+- **Bağlanınca çift bip** (robot boştayken): telefon→robot hattı sağlam.
+  Bip yoksa modül şeffaf moda geçememiş olabilir → robotu kapat-aç
+  (v4.2 sigortası açılışta modu doğrulayıp onarır), konsolda
+  "[BLE] Şeffaf mod DOĞRULANDI" satırını USB monitörden görebilirsin.
+- **Yükleme sonunda melodi + ekranda ✓**: dosya kaydedildi, yeni kod çalışıyor.
+- Melodi yok ama tarayıcı "gönderildi" diyorsa (kör mod): dosya ulaşmadı →
+  kapat-aç, çift bipi bekle, tekrar yükle.
+
 ## 📱 Tablette kullanım (Android)
 
 Android Chrome'da Web Serial yoktur ama **WebUSB vardır** — RoboExx bunu
@@ -73,6 +83,13 @@ BerryBot'un USB'sine):
    seçicisinden BerryBot'u seç. Konsolda "📱 Tablet modu" görünür.
 3. İlk kurulumda **Modülleri Yükle** → sonrasında kablo gerekmez, her şey
    Bluetooth'tan (kod yükleme, WASD, sensör paneli, pil rozeti).
+
+**Casper tabletler:** çoğunda OTG ayarı vardır ve **kendini kapatır** —
+Ayarlar → Bağlantılar/Diğer → OTG anahtarını AÇ, kabloyu çıkar-tak, sonra
+Bağlan'a bas. Kablo mutlaka **veri** taşımalı: bazı "Mac/şarj" C-C kablolar
+tablette veri vermez; en garantili düzen **USB-C→USB-A OTG adaptörü +
+normal USB kablo**dur. Seçici listesi boş kalırsa konsol sana bu adımları
+sırayla yazdırır.
 
 Notlar: iPad USB yolunu desteklemez (Apple WebUSB/Web Serial vermez) —
 iPad'de yalnız Bluetooth kullanılabilir; ilk kurulum bir Android cihaz ya
