@@ -13,7 +13,7 @@
 
 // ── Serialization tipleri ────────────────────────────────────────────
 
-interface BlockNode {
+export interface BlockNode {
   type: string;
   fields?: Record<string, unknown>;
   inputs?: Record<string, unknown>;
@@ -26,6 +26,8 @@ interface BlockNode {
 
 export interface WorkspaceStateJson {
   blocks: { languageVersion: 0; blocks: BlockNode[] };
+  /** Değişken kullanan programlar için Blockly değişken kayıtları */
+  variables?: Array<{ name: string; id: string }>;
 }
 
 export interface KitBlockFile {
@@ -405,7 +407,7 @@ const BERRY_KEYBOARD = program([
 ]);
 
 const BERRY_OBSTACLE = program([
-  bbIcon('sonic'),
+  bbIcon('triangle'),
   printText('Engelden kacan robot basladi!'),
   forever([
     ifElse(
@@ -424,7 +426,7 @@ const BERRY_OBSTACLE = program([
 ]);
 
 const BERRY_LINE = program([
-  bbIcon('tracker'),
+  bbIcon('forward'),
   printText('Cizgi izleme basladi!'),
   forever([
     ifChain(
@@ -442,7 +444,7 @@ const BERRY_LINE = program([
 ]);
 
 const BERRY_IR = program([
-  bbIcon('ir'),
+  bbIcon('bluetooth'),
   printText('Kumandayla sur: ok tuslari, OK = korna'),
   forever([
     ifChain(
@@ -646,3 +648,9 @@ export const KITS: Kit[] = [
     ],
   },
 ];
+
+// 🪖 BerryTank LMS cevap anahtarı — ayrı dosyadan eklenir.
+// (Dinamik import yerine altta senkron push: panel KITS'i map'lediği için
+//  liste dolu geldiği sürece hiçbir UI değişikliği gerekmez.)
+import { BERRYTANK_SOLUTIONS } from './berrytank-solutions';
+KITS.push(BERRYTANK_SOLUTIONS);
