@@ -9,6 +9,8 @@
  * Kategori renkleri actuator_category (turuncu) ve sensor_category (mavi)
  * style'larını paylaşır — tema paletinden gelir.
  */
+import { berrybotToolboxCategory } from './berrybot-blocks';
+
 export const toolboxXml = `
 <xml id="roboexx-toolbox" style="display: none">
 
@@ -255,6 +257,8 @@ export const toolboxXml = `
     <block type="rx_oled_show"></block>
   </category>
 
+  <sep></sep>
+${berrybotToolboxCategory}
   <sep></sep>
 
   <category name="Buton" categorystyle="button_category">

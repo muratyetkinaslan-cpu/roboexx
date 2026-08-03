@@ -9,6 +9,7 @@
 - **Canlı klavye + gamepad kontrolü** — robotu W-A-S-D veya Xbox/PS kumandasıyla sür
 - **36 hazır şarkı** — buzzerdan çalınabilir
 - **Sensörler ve aktüatörler** — LED, RGB (WS2812), buzzer, servo, DC motor, ultrasonik mesafe, LDR, buton
+- **🍓 BerryBot desteği** — Robotistan BerryBot için özel blok seti, kablosuz kod yükleme ve pil göstergesi (bkz. BERRYBOT.md)
 
 ## Tarayıcı gereksinimleri
 

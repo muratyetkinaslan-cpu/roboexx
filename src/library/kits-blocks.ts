@@ -356,83 +356,116 @@ const ARM_CURVES = program([
 // Echo GP2, çizgi sensörleri GP26 / GP27
 // ════════════════════════════════════════════════════════════════════
 
+// ── 🍓 BerryBot yardımcıları (gerçek robot blokları: rx_bb_*) ────────
+const bbMove = (dir: 'FWD' | 'BWD' | 'LEFT' | 'RIGHT', speed: number): BlockNode => ({
+  type: 'rx_bb_move', fields: { DIR: dir }, inputs: { SPEED: num(speed) },
+});
+const bbDrive = (l: number, r: number): BlockNode => ({
+  type: 'rx_bb_drive', inputs: { L: num(l), R: num(r) },
+});
+const bbStop = (): BlockNode => ({ type: 'rx_bb_stop' });
+const bbIcon = (i: string): BlockNode => ({ type: 'rx_bb_matrix_icon', fields: { ICON: i } });
+const bbHorn = (): BlockNode => ({ type: 'rx_bb_horn' });
+const bbShowBattery = (): BlockNode => ({ type: 'rx_bb_show_battery' });
+const bbRainbow = (): BlockNode => ({ type: 'rx_bb_ring_rainbow' });
+const bbDistance = () => ({ block: { type: 'rx_bb_distance' } });
+const bbLine = (side: 'L' | 'R') => ({ block: { type: 'rx_bb_line', fields: { SIDE: side } } });
+const bbIr = (k: string) => ({ block: { type: 'rx_bb_ir_pressed', fields: { KEY: k } } });
+
 const BERRY_TEST = program([
+  bbIcon('smile'),
   printText('Ileri'),
-  dcMotor(1, 'forward', 60), dcMotor(2, 'forward', 60), waitS(1.5),
-  dcStopAll(), waitS(0.5),
+  bbMove('FWD', 70), waitS(1.5), bbStop(), waitS(0.5),
   printText('Geri'),
-  dcMotor(1, 'backward', 60), dcMotor(2, 'backward', 60), waitS(1.5),
-  dcStopAll(), waitS(0.5),
+  bbMove('BWD', 70), waitS(1.5), bbStop(), waitS(0.5),
   printText('Sola donus'),
-  dcMotor(1, 'backward', 60), dcMotor(2, 'forward', 60), waitS(1),
-  dcStopAll(), waitS(0.5),
+  bbMove('LEFT', 60), waitS(1), bbStop(), waitS(0.5),
   printText('Saga donus'),
-  dcMotor(1, 'forward', 60), dcMotor(2, 'backward', 60), waitS(1),
-  dcStopAll(),
+  bbMove('RIGHT', 60), waitS(1), bbStop(),
+  bbHorn(),
+  bbIcon('heart'),
   printText('Test bitti!'),
 ]);
 
 const BERRY_KEYBOARD = program([
+  bbIcon('bluetooth'),
   printText('WASD ile sur! Tusu birakinca durur'),
   forever([
     ifChain(
       [
-        { cond: keyPressed('w'), then: [dcMotor(1, 'forward', 70), dcMotor(2, 'forward', 70)] },
-        { cond: keyPressed('s'), then: [dcMotor(1, 'backward', 70), dcMotor(2, 'backward', 70)] },
-        { cond: keyPressed('a'), then: [dcMotor(1, 'backward', 55), dcMotor(2, 'forward', 55)] },
-        { cond: keyPressed('d'), then: [dcMotor(1, 'forward', 55), dcMotor(2, 'backward', 55)] },
+        { cond: keyPressed('w'), then: [bbDrive(80, 80), bbIcon('forward')] },
+        { cond: keyPressed('s'), then: [bbDrive(-80, -80), bbIcon('backward')] },
+        { cond: keyPressed('a'), then: [bbDrive(-55, 55), bbIcon('left')] },
+        { cond: keyPressed('d'), then: [bbDrive(55, -55), bbIcon('right')] },
       ],
-      [dcStopAll()]
+      [bbStop(), bbIcon('smile')]
     ),
-    waitMs(50),
+    waitMs(20),
   ]),
 ]);
 
 const BERRY_OBSTACLE = program([
+  bbIcon('sonic'),
   printText('Engelden kacan robot basladi!'),
   forever([
     ifElse(
-      compare(ultrasonic(3, 2), 'LT', num(15)),
+      compare(bbDistance(), 'LT', num(15)),
       [
         // Engel! Dur → geri → sola dön
-        dcStopAll(), waitMs(200),
-        dcMotor(1, 'backward', 60), dcMotor(2, 'backward', 60), waitS(0.5),
-        dcMotor(1, 'backward', 60), dcMotor(2, 'forward', 60), waitS(0.6),
-        dcStopAll(), waitMs(100),
+        bbStop(), bbIcon('no'), waitMs(200),
+        bbMove('BWD', 70), waitS(0.4),
+        bbMove('LEFT', 60), waitS(0.6),
+        bbStop(), waitMs(100),
       ],
-      [
-        dcMotor(1, 'forward', 60), dcMotor(2, 'forward', 60),
-      ]
+      [bbMove('FWD', 80), bbIcon('forward')]
     ),
     waitMs(50),
   ]),
 ]);
 
-/** Çizgi sensörü analog okuma — PIN dropdown STRING ister ('26'|'27'|'28'). */
-const analogRead = (pin: 26 | 27 | 28) => ({
-  block: { type: 'rx_analog_read', fields: { PIN: String(pin) } },
-});
-
 const BERRY_LINE = program([
+  bbIcon('tracker'),
   printText('Cizgi izleme basladi!'),
   forever([
     ifChain(
       [
-        {
-          // Çizgi solda kaldı → sola kıvrıl
-          cond: compare(analogRead(26), 'GT', num(30000)),
-          then: [dcMotor(1, 'forward', 0), dcMotor(2, 'forward', 60)],
-        },
-        {
-          // Çizgi sağda kaldı → sağa kıvrıl
-          cond: compare(analogRead(27), 'GT', num(30000)),
-          then: [dcMotor(1, 'forward', 60), dcMotor(2, 'forward', 0)],
-        },
+        // Çizgi solda kaldı → sola kıvrıl
+        { cond: bbLine('L'), then: [bbDrive(10, 70)] },
+        // Çizgi sağda kaldı → sağa kıvrıl
+        { cond: bbLine('R'), then: [bbDrive(70, 10)] },
       ],
       // Çizgi ortada → düz git
-      [dcMotor(1, 'forward', 55), dcMotor(2, 'forward', 55)]
+      [bbDrive(60, 60)]
     ),
-    waitMs(20),
+    waitMs(15),
+  ]),
+]);
+
+const BERRY_IR = program([
+  bbIcon('ir'),
+  printText('Kumandayla sur: ok tuslari, OK = korna'),
+  forever([
+    ifChain(
+      [
+        { cond: bbIr('UP'), then: [bbMove('FWD', 90), waitMs(400), bbStop()] },
+        { cond: bbIr('DOWN'), then: [bbMove('BWD', 90), waitMs(400), bbStop()] },
+        { cond: bbIr('LEFT'), then: [bbMove('LEFT', 70), waitMs(150), bbStop()] },
+        { cond: bbIr('RIGHT'), then: [bbMove('RIGHT', 70), waitMs(150), bbStop()] },
+        { cond: bbIr('OK'), then: [bbHorn()] },
+      ]
+    ),
+    waitMs(10),
+  ]),
+]);
+
+const BERRY_PARTY = program([
+  printText('Parti modu! Butona basinca pil gosterilir'),
+  forever([
+    bbRainbow(),
+    ifChain(
+      [{ cond: { block: { type: 'rx_bb_button' } }, then: [bbStop(), bbShowBattery()] }]
+    ),
+    waitMs(10),
   ]),
 ]);
 
@@ -546,31 +579,43 @@ export const KITS: Kit[] = [
     id: 'berrybot',
     name: 'BerryBot Kiti',
     emoji: '🍓',
-    desc: '2 tekerlekli robot · DC Motor 1-2',
+    desc: 'Robotistan BerryBot · gerçek robot blokları (rx_bb_*)',
     files: [
       {
-        id: 'berry-test', name: 'Motor Testi',
-        desc: 'İleri / geri / dönüşler — teker yönlerini doğrular',
-        steps: ['1.5 sn ileri', '1.5 sn geri', 'Sola ve sağa dönüş', 'Dur'],
+        id: 'berry-test', name: 'Motor + Ekran Testi',
+        desc: 'İleri / geri / dönüşler, korna ve ekran ikonları',
+        steps: ['1.5 sn ileri, 1.5 sn geri', 'Sola ve sağa dönüş', 'Korna + kalp ikonu'],
         blocks: BERRY_TEST,
       },
       {
         id: 'berry-keyboard', name: 'Klavye ile Sürüş (WASD)',
-        desc: 'W/A/S/D ile canlı sürüş, tuş bırakınca durur',
-        steps: ['Sürekli döngü', 'if/değilse-eğer zinciri: W-S-A-D', 'Hiçbiri basılı değilse: tüm motorları durdur'],
+        desc: 'BLE bağlıyken W/A/S/D ile canlı sürüş, ekranda yön oku',
+        steps: ['Sürekli döngü', 'W-S-A-D → tank sürüşü', 'Tuş yoksa dur + gülümse'],
         blocks: BERRY_KEYBOARD,
       },
       {
         id: 'berry-obstacle', name: 'Engelden Kaçan Robot',
-        desc: 'Ultrasonik (Trig 3 / Echo 2) engel görünce kaçar',
+        desc: 'Ultrasonik sensörle engel görünce geri gelip döner',
         steps: ['Mesafe < 15 cm ise', 'Dur → geri gel → sola dön', 'Değilse düz git'],
         blocks: BERRY_OBSTACLE,
       },
       {
         id: 'berry-line', name: 'Çizgi İzleyen Robot',
-        desc: 'GP26/GP27 analog sensörlerle siyah çizgi takibi',
+        desc: 'Alt çizgi sensörleriyle siyah çizgi takibi',
         steps: ['Sol sensör çizgide → sola kıvrıl', 'Sağ sensör çizgide → sağa kıvrıl', 'İkisi de değilse düz git'],
         blocks: BERRY_LINE,
+      },
+      {
+        id: 'berry-ir', name: 'Kumanda ile Sürüş (IR)',
+        desc: 'Kızılötesi kumandanın ok tuşlarıyla sür, OK = korna',
+        steps: ['⬆⬇ ileri/geri', '⬅➡ dönüşler', 'OK tuşu kornayı çalar'],
+        blocks: BERRY_IR,
+      },
+      {
+        id: 'berry-party', name: 'Parti + Pil Göstergesi',
+        desc: 'Halkada gökkuşağı; butona basınca ekranda pil yüzdesi',
+        steps: ['Sürekli gökkuşağı animasyonu', 'Butona basılınca dur', 'Ekranda pil çubuğu + %'],
+        blocks: BERRY_PARTY,
       },
     ],
   },

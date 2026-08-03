@@ -1,3 +1,32 @@
+# 🍓 BerryBot Entegrasyonu
+
+**Robotistan BerryBot artık RoboExx'in yerlisi.** Üst bardaki hedef anahtarına
+**🍓 BerryBot** eklendi; seçilince:
+
+- Araç kutusunda **🍓 BerryBot kategorisi**: sür/dön, tank sürüşü, 5x5 ekran
+  (ikon · piksel · kayan yazı), RGB halka (boya · gökkuşağı), korna, mesafe,
+  çizgi, ışık, IR kumanda tuşu, buton, **pil yüzdesi** ve **ekranda pil göster** blokları.
+- **Modülleri Yükle** artık BerryBot paketini yazar: `berrybot.py` (v2 kütüphane)
+  + `main.py` (UART-BLE bootloader) + cihaz adı.
+- **Bluetooth'tan kod yükleme**: BerryBot Pico W değildir — BLE'si UART'a bağlı
+  şeffaf modüldür ama aynı Nordic UART UUID'lerini kullandığı için mevcut
+  `ble-bridge.ts` değişmeden çalışır; robot tarafındaki yeni bootloader aynı
+  MSG_* protokolünü UART akışından deterministik çözer. Yükleme, kullanıcı kodu
+  çalışırken bile alınır; uygulama yüklemeden önce robotu otomatik resetler.
+- **Pil göstergesi**: BLE bağlıyken üst barda 🔋 rozeti (10 sn'de bir sorgulanır,
+  SENSOR_BATTERY=0x05), robotta uzun buton basışıyla ekranda çubuk + % gösterimi.
+  Not: BerryBot kartında hazır VBAT-ADC hattı yoksa `berrybot.py` içinde
+  `PIN_BATTERY` ayarlanana kadar "—" gösterilir (bkz. BERRYBOT.md).
+- **Eğitmen Kütüphanesi**: BerryBot Kiti gerçek `rx_bb_*` bloklarıyla yeniden
+  yazıldı + 2 yeni örnek (IR kumanda, parti + pil).
+- Resmi PicoBricks GO uygulaması da çalışmaya devam eder (0x52 paketleri
+  bootloader'da desteklenir).
+- Resmi BerryBot yazılımındaki hatalar kütüphanede giderildi: ters motor yönü
+  (joystick), bloklayan BLE okuması (0.5 sn), matris timer'ındaki sleep,
+  filtresiz ultrasonik. Ayrıntı: **BERRYBOT.md**.
+
+---
+
 # RoboExx 2.12.0 — Değişiklik Notları
 
 ## 1) Pico Yükleme Sorunu Çözüldü (artık RESET tuşuna gerek yok)

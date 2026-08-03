@@ -40,10 +40,12 @@ interface Props {
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
-  /** Kod hedefi — MicroPython (Pico / ESP32) veya Arduino */
-  codeTarget: 'micropython' | 'arduino';
+  /** Kod hedefi — MicroPython (Pico / ESP32), Arduino veya BerryBot */
+  codeTarget: 'micropython' | 'arduino' | 'berrybot';
   /** Kod hedefini değiştir */
-  onTargetChange: (target: 'micropython' | 'arduino') => void;
+  onTargetChange: (target: 'micropython' | 'arduino' | 'berrybot') => void;
+  /** 🍓 BerryBot pil yüzdesi (BLE bağlıyken) — null: bilinmiyor/ölçüm yok */
+  batteryPct?: number | null;
   /** Arduino'ya derle+yükle popup'ını aç */
   onArduinoUpload: () => void;
 
@@ -103,6 +105,14 @@ export function Toolbar(props: Props) {
             🐍 MicroPython
           </button>
           <button
+            className={`target-switch-btn ${props.codeTarget === 'berrybot' ? 'is-active' : ''}`}
+            onClick={() => props.onTargetChange('berrybot')}
+            data-tooltip="BerryBot · MicroPython"
+            data-tooltip-detail="Robotistan BerryBot için kod üret — Bluetooth ile kablosuz yükle, hazır BerryBot blokları"
+          >
+            🍓 BerryBot
+          </button>
+          <button
             className={`target-switch-btn ${props.codeTarget === 'arduino' ? 'is-active' : ''}`}
             onClick={() => props.onTargetChange('arduino')}
             data-tooltip="Arduino · C++"
@@ -114,6 +124,25 @@ export function Toolbar(props: Props) {
       </div>
 
       <div className="toolbar-section toolbar-right">
+        {/* 🍓 BerryBot pil göstergesi (BLE bağlıyken) */}
+        {props.codeTarget === 'berrybot' && props.batteryPct !== undefined && (
+          <span
+            className="berrybot-battery-badge"
+            data-tooltip="BerryBot pili"
+            data-tooltip-detail={props.batteryPct === null
+              ? 'Pil ölçümü yok — berrybot.py içinde PIN_BATTERY ayarlanmalı (bkz. BERRYBOT.md)'
+              : 'Robottan 10 saniyede bir okunur'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 12, fontSize: 12,
+              background: props.batteryPct === null ? 'rgba(128,128,128,.18)'
+                : props.batteryPct < 20 ? 'rgba(220,60,60,.22)' : 'rgba(60,180,90,.18)',
+            }}
+          >
+            🔋 {props.batteryPct === null ? '—' : `%${props.batteryPct}`}
+          </span>
+        )}
+
         {/* Açık/koyu tema geçiş butonu */}
         <button
           className="theme-toggle-btn"
@@ -213,7 +242,7 @@ export function Toolbar(props: Props) {
         {/* GRUP 2: Çalıştırma — modülleri yükle + çalıştır/durdur + yükle */}
         <div className="toolbar-group toolbar-group-actions">
           {/* Firmware (MicroPython UF2) Yükle — yeni Pico için ilk adım (sadece Pico hedefi) */}
-          {props.codeTarget === 'micropython' && (
+          {props.codeTarget !== 'arduino' && (
           <button
             className="btn btn-ghost btn-icon-only btn-firmware"
             onClick={props.onFirmwareUpload}
@@ -226,13 +255,15 @@ export function Toolbar(props: Props) {
           </button>
           )}
 
-          {props.codeTarget === 'micropython' && (
+          {props.codeTarget !== 'arduino' && (
           <button
             className="btn btn-ghost btn-icon-only btn-upload-lib"
             onClick={props.onUploadLibrary}
             disabled={!isConnected || isBusy}
             data-tooltip="Modülleri Yükle"
-            data-tooltip-detail="RoboExx kütüphanesini karta (Pico / ESP32) yazar. Bir kez yapman yeter."
+            data-tooltip-detail={props.codeTarget === 'berrybot'
+              ? 'BerryBot kütüphanesi + bootloader\'ı robota yazar. Bir kez yapman yeter.'
+              : 'RoboExx kütüphanesini karta (Pico / ESP32) yazar. Bir kez yapman yeter.'}
           >
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
               <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -285,7 +316,7 @@ export function Toolbar(props: Props) {
           </button>
 
           {/* Çalıştır — sadece USB modunda + Pico hedefinde (BLE'de canlı çıktı pratik değil) */}
-          {props.codeTarget === 'micropython' && props.connectionMode === 'usb' && (
+          {props.codeTarget !== 'arduino' && props.connectionMode === 'usb' && (
             isBusy ? (
               <button className="btn btn-stop" onClick={props.onStop} title="Çalışan programı durdur (Ctrl+C)">
                 <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
@@ -308,7 +339,7 @@ export function Toolbar(props: Props) {
             )
           )}
 
-          {props.codeTarget === 'micropython' ? (
+          {props.codeTarget !== 'arduino' ? (
             <button
               className="btn btn-primary"
               onClick={props.onUpload}

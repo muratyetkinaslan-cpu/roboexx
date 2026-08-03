@@ -4,6 +4,7 @@ import 'blockly/blocks';
 import { SimpleMultiselect } from '../blockly/multiselect';
 import { toolboxXml } from '../blockly/toolbox';
 import '../blockly/blocks';
+import '../blockly/berrybot-blocks';
 import { generateForTarget, type CodeTarget } from '../blockly/codegen';
 import type { RoboExxTheme } from '../themes/types';
 import { buildBlocklyTheme } from '../themes/registry';

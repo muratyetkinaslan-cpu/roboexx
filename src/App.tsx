@@ -18,6 +18,7 @@ import { FirmwareUploader } from './components/FirmwareUploader';
 import { ArduinoUploader } from './components/ArduinoUploader';
 import { arduinoLiveLink } from './arduino/livelink';
 import type { CodeTarget } from './blockly/codegen';
+import { prepareUpload as berrybotPrepareUpload, requestBattery as berrybotRequestBattery } from './bluetooth/berrybot-bridge';
 import type { AppMode } from './components/ModeTabs';
 import { applyThemeVars, defaultThemeId, themes } from './themes/registry';
 import type { ThemeId } from './themes/types';
@@ -165,6 +166,8 @@ export default function App() {
   };
 
   const [bridgeState, setBridgeState] = useState<BridgeState>('disconnected');
+  /** 🍓 BerryBot pil yüzdesi (BLE bağlıyken 10 sn'de bir yoklanır; null = bilinmiyor) */
+  const [batteryPct, setBatteryPct] = useState<number | null>(null);
   const [portInfo, setPortInfo] = useState<PortInfo | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   /** "Modülleri Yükle" basınca açılan kit seçim popup'ı görünür mü? */
@@ -393,7 +396,8 @@ export default function App() {
   useEffect(() => arduinoLiveLink.onStateChange((st) => setArduinoLiveOpen(st === 'open')), []);
   const [codeTarget, setCodeTarget] = useState<CodeTarget>(() => {
     const saved = localStorage.getItem('roboexx.code-target');
-    return saved === 'arduino' ? 'arduino' : 'micropython';
+    if (saved === 'arduino' || saved === 'berrybot') return saved;
+    return 'micropython';
   });
 
   // Hedef değişince kodu yeniden üret (MicroPython ↔ Arduino)
@@ -403,6 +407,22 @@ export default function App() {
     // Bloklar aynı; sadece üretilen kod dilini değiştir
     setTimeout(() => blocklyRef.current?.regenerate(), 0);
   };
+
+  // 🍓 BerryBot pil yoklaması — BLE bağlıyken 10 sn'de bir sor
+  useEffect(() => {
+    if (codeTarget !== 'berrybot' || connectionMode !== 'ble' || bridgeState !== 'connected') {
+      setBatteryPct(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      const pct = await berrybotRequestBattery(bleBridge).catch(() => null);
+      if (!cancelled) setBatteryPct(pct);
+    };
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [codeTarget, connectionMode, bridgeState]);
 
   useEffect(() => {
     // 'connected' → normal kontrol; 'busy' → USB'de canlı "Çalıştır" sürüyor,
@@ -1309,6 +1329,12 @@ export default function App() {
     }
     const targetName = connectionMode === 'ble' ? 'user_code.py' : 'main.py';
     addLine('system', `⬆ Yükleniyor (${activeCode.length} bayt → ${targetName}, ${connectionMode === 'ble' ? 'BLE' : 'USB'})`);
+    if (connectionMode === 'ble' && codeTarget === 'berrybot') {
+      // BerryBot: kullanıcı kodu çalışıyorsa bile garanti yükleme için önce
+      // temiz bootloader'a resetle (MSG_RESET → oto yeniden bağlan)
+      addLine('system', '🍓 BerryBot bootloader\'a hazırlanıyor…');
+      try { await berrybotPrepareUpload(bleBridge); } catch { /* firmware zaten kabul eder */ }
+    }
     setUploadProgress({ phase: 'uploading', pct: 0, bytesSent: 0, bytesTotal: activeCode.length, speedKBs: 0 });
 
     try {
@@ -1346,7 +1372,79 @@ export default function App() {
    *  - main.py (BLE bootloader)
    *  - device_name.txt (BLE cihaz adı)
    */
+  /**
+   * 🍓 BerryBot modüllerini yükler:
+   *  - berrybot.py  (BerryBot donanım kütüphanesi v2)
+   *  - main.py      (berrybot_main.py — UART-BLE bootloader + hazır modlar)
+   *  - device_name.txt (BLE cihaz adı)
+   * USB veya BLE üzerinden çalışır (BLE'de kütüphane OTA güncellenebilir).
+   */
+  const runUploadBerryBotLibrary = async () => {
+    addLine('system', `🍓 BerryBot modülleri indiriliyor…`);
+    let libCode: string;
+    let mainCode: string;
+    try {
+      const [libRes, mainRes] = await Promise.all([
+        fetch(`${import.meta.env.BASE_URL}lib/berrybot.py`),
+        fetch(`${import.meta.env.BASE_URL}lib/berrybot_main.py`),
+      ]);
+      if (!libRes.ok) throw new Error(`berrybot.py HTTP ${libRes.status}`);
+      if (!mainRes.ok) throw new Error(`berrybot_main.py HTTP ${mainRes.status}`);
+      libCode = await libRes.text();
+      mainCode = await mainRes.text();
+    } catch (e) {
+      addLine('error', `Kütüphane dosyası okunamadı: ${(e as Error).message}`);
+      return;
+    }
+
+    addLine('system', `⬆ berrybot.py yükleniyor (${libCode.length} bayt)`);
+    setUploadProgress({ phase: 'uploading', pct: 0, bytesSent: 0, bytesTotal: libCode.length, speedKBs: 0 });
+    try {
+      await activeBridge.uploadLibrary('berrybot.py', libCode, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: p.pct * 0.45, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      addLine('system', '✓ berrybot.py yüklendi');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `berrybot.py yükleme hatası: ${err.message}`);
+      return;
+    }
+
+    addLine('system', `⬆ main.py (BerryBot bootloader) yükleniyor (${mainCode.length} bayt)`);
+    setUploadProgress({ phase: 'uploading', pct: 45, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
+    try {
+      await activeBridge.uploadLibrary('main.py', mainCode, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: 45 + p.pct * 0.5, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      addLine('system', '✓ main.py yüklendi');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `main.py yükleme hatası: ${err.message}`);
+      return;
+    }
+
+    addLine('system', `⬆ Cihaz adı yazılıyor: "${deviceName}"`);
+    try {
+      await activeBridge.uploadLibrary('device_name.txt', deviceName, (p) => {
+        setUploadProgress({ phase: 'uploading', pct: 95 + p.pct * 0.05, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
+      });
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
+      addLine('system', `✓ BerryBot modülleri hazır · Cihaz: "${deviceName}"`);
+      addLine('info', 'BerryBot\'u kapat/aç veya RESET\'e bas — sonra Bluetooth\'tan bağlanıp blok kodu kablosuz yükleyebilirsin');
+    } catch (e) {
+      const err = e as Error;
+      setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+      addLine('error', `Cihaz adı yükleme hatası: ${err.message}`);
+    }
+  };
+
   const runUploadLibrary = async () => {
+    if (codeTarget === 'berrybot') {
+      await runUploadBerryBotLibrary();
+      return;
+    }
     addLine('system', `📚 RoboExx modülleri indiriliyor…`);
     let libCode: string;
     let mainCode: string;
@@ -1647,6 +1745,7 @@ export default function App() {
         onSensorPanel={() => setSensorPanelOpen(true)}
         onFirmwareUpload={() => setFirmwareUploaderOpen(true)}
         codeTarget={codeTarget}
+        batteryPct={batteryPct}
         onTargetChange={handleTargetChange}
         onArduinoUpload={() => setArduinoUploaderOpen(true)}
         onRobotArm={() => { setRobotArmOpen((o) => !o); setRoboBotOpen(false); setRoboBotFullscreen(false); }}
@@ -1752,12 +1851,12 @@ export default function App() {
                   <button
                     className="preview-show-btn"
                     onClick={() => setPreviewOpen(true)}
-                    title={`${codeTarget === 'arduino' ? 'Arduino' : 'MicroPython'} kod önizlemesini göster`}
+                    title={`${codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'BerryBot MicroPython' : 'MicroPython'} kod önizlemesini göster`}
                   >
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                       <path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <span>{codeTarget === 'arduino' ? 'Arduino' : 'MicroPython'}</span>
+                    <span>{codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'BerryBot 🍓' : 'MicroPython'}</span>
                   </button>
                 )}
               </div>
@@ -1771,7 +1870,7 @@ export default function App() {
                 <div className="code-editor-header">
                   <span className="code-editor-title">
                     <span className="dot-indicator" />
-                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : 'MicroPython · main.py'}
+                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : codeTarget === 'berrybot' ? 'BerryBot · user_code.py' : 'MicroPython · main.py'}
                     {codeWasEdited && <span className="edited-badge">düzenlendi</span>}
                   </span>
                   <span className="code-editor-hint">
