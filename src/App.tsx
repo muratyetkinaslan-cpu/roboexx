@@ -408,6 +408,13 @@ export default function App() {
     setTimeout(() => blocklyRef.current?.regenerate(), 0);
   };
 
+  // 🍓 BerryBot BLE modu: harici UART-BLE modülü için çerçeveli + 20 baytlık
+  // GATT yazmaları. Hedef değişir değişmez uygula (bağlanmadan önce de).
+  useEffect(() => {
+    bleBridge.frameOutgoing = codeTarget === 'berrybot';
+    bleBridge.maxGattWrite = codeTarget === 'berrybot' ? 20 : 0;
+  }, [codeTarget]);
+
   // 🍓 BerryBot pil yoklaması — BLE bağlıyken 10 sn'de bir sor
   useEffect(() => {
     if (codeTarget !== 'berrybot' || connectionMode !== 'ble' || bridgeState !== 'connected') {

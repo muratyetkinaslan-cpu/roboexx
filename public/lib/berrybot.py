@@ -124,6 +124,14 @@ class Motors:
         self.pwm_b.duty_u16(self._duty(pct))
 
     # --- yüksek seviye ---
+    def left(self, pct):
+        """Sadece sol motor: -100..100 (%)."""
+        self._set_left(constrain(pct, -100, 100))
+
+    def right(self, pct):
+        """Sadece sağ motor: -100..100 (%)."""
+        self._set_right(constrain(pct, -100, 100))
+
     def drive(self, left_pct, right_pct):
         """Tank sürüşü: her motor -100..100."""
         self._set_left(constrain(left_pct, -100, 100))
@@ -246,6 +254,11 @@ class Matrix5x5:
             else:
                 self.buf[y] &= ~(1 << x) & 0x1F
 
+    def set_row(self, y, bits):
+        """Bir satırı 5 bitlik desenle doldur (bit0 = en soldaki sütun)."""
+        if 0 <= y < 5:
+            self.buf[y] = bits & 0x1F
+
     def bar(self, n):
         """Alttan yukarı n satır dolu (0..5). Pil göstergesi için ideal."""
         n = constrain(n, 0, 5)
@@ -351,6 +364,11 @@ class NeoRing:
         self.fill((0, 0, 0))
         self.show()
 
+    def set_brightness(self, pct):
+        """Parlaklık: 0-100 (%). Bir sonraki show() ile uygulanır."""
+        self.brightness = max(0, min(100, pct)) / 100
+        self.show()
+
     @staticmethod
     def wheel(pos):
         pos = pos % 256
@@ -447,6 +465,10 @@ class Ultrasonic:
         vals.sort()
         return vals[len(vals) // 2]
 
+    def obstacle(self, cm=15):
+        """Önünde cm'den yakın engel var mı? (3 örnekli, güvenilir)"""
+        return self.distance_cm(samples=3) < cm
+
     def distance_mm(self):
         t = self._pulse()
         return 0xFFFF if t < 0 else min(int(t * 0.343 / 2), 65000)
@@ -477,6 +499,16 @@ class LightSensors:
 
     def raw(self):
         return self.left.read_u16(), self.right.read_u16()
+
+    def diff(self):
+        """Sağ - sol ışık farkı. Pozitif = sağ taraf daha aydınlık."""
+        l, r = self.raw()
+        return r - l
+
+    def is_bright(self, threshold=10000):
+        """Ortam eşikten aydınlık mı? (iki LDR ortalaması)"""
+        l, r = self.raw()
+        return (l + r) // 2 >= threshold
 
 
 # ============================================================
@@ -730,6 +762,11 @@ class BerryBot:
         """Pil yüzdesi (0-100). Ölçüm donanımı yoksa -1."""
         p = self.battery.percent()
         return -1 if p is None else p
+
+    def battery_v(self):
+        """Pil voltajı (V, ondalıklı). Ölçüm donanımı yoksa -1."""
+        v = self.battery.voltage()
+        return -1 if v is None else round(v, 2)
 
     def show_battery(self):
         """5x5 ekranda pil göstergesi: çubuk grafik + kayan yüzde."""

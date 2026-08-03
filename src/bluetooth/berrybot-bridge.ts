@@ -21,7 +21,9 @@ import { BLEBridge } from './ble-bridge';
 const MSG_RESET = 0x05;
 const SENSOR_BATTERY = 0x05; // firmware'e eklenen RoboExx sensör tipi
 
-/** Payload'ı [0xBB 0x66 len_lo len_hi payload xor] çerçevesine sarar. */
+/** Payload'ı [0xBB 0x66 len_lo len_hi payload xor] çerçevesine sarar.
+ *  NOT: BLEBridge.frameOutgoing=true iken köprü bunu zaten kendisi yapar;
+ *  bu fonksiyon yalnızca özel/dış kullanım için burada durur. */
 export function frame(payload: Uint8Array): Uint8Array {
   const out = new Uint8Array(payload.length + 5);
   out[0] = 0xbb;

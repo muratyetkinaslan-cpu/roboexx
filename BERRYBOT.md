@@ -86,6 +86,44 @@ test edildi). `CHUNK_SIZE`'ı web tarafında değiştirirseniz `main.py` içinde
 - Resmi **PicoBricks GO uygulaması da çalışmaya devam eder** (0x52 paketleri:
   joystick, modlar, korna, RGB, matris deseni desteklenir).
 
+## BLE "GATT Error: Not Supported" düzeltmesi (v2.1)
+
+BerryBot'un harici BLE-UART modülünde iki kısıt var: RX karakteristiği çoğu
+üretimde **write-without-response desteklemez** ve BLE paket boyutu **20 bayt**
+(MTU 23) ile sınırlıdır. Eski köprü 200 baytlık paketleri
+`writeValueWithoutResponse` ile yazmaya çalışınca Chrome "GATT Error: Not
+Supported" veriyordu. Çözüm (`ble-bridge.ts` + `App.tsx`):
+
+- Yazma yöntemi artık karakteristiğin **properties**'ine bakılarak seçilir;
+  yine de hata gelirse yanıtlı `writeValue`'ya düşülür.
+- Bildirim aboneliği (CCCD) başarısız olursa 600 ms sonra bir kez daha denenir.
+- Hedef **🍓 BerryBot** iken köprü otomatik olarak: her mesajı sağlamalı
+  `[BB 66 len payload xor]` çerçevesine sarar ve **20 baytlık GATT yazmaları**
+  halinde gönderir. Firmware çerçeveleri UART akışından deterministik çözer —
+  paket sınırı/MTU sorunu tamamen ortadan kalkar. (Firmware v2 çerçeveli ve
+  ham protokolün ikisini de kabul eder; eski PicoBricks GO da çalışmaya devam eder.)
+
+Hâlâ bağlanamıyorsan: işletim sisteminin Bluetooth ayarlarından cihazı
+"unut", robotu kapat-aç, sayfayı yenile. macOS'ta BLE önbelleği inatçıdır.
+
+## Blok seti (v2.1) — ayrı kategoriler, alçak + yüksek seviye
+
+Araç kutusunda artık 9 ayrı 🍓 kategori var; her birinde önce yüksek seviye
+(çocuk dostu) bloklar, altında "Alçak seviye" etiketiyle ham bloklar bulunur:
+
+- **Motor**: yön+hız, süreli git (X sn gidip dur), tank sürüşü (sol/sağ %),
+  dur · alçak: tek motor (-100..100)
+- **LED Matris**: ikon, kayan yazı, çubuk (0-5), % dolum, temizle · alçak:
+  piksel (x,y), satır deseni (5 bit sayı)
+- **RGB LED**: paletle boya, tek LED, gökkuşağı, söndür, parlaklık % · alçak:
+  R,G,B sayılarıyla boya / tek LED
+- **Ses**: korna, nota (Do-Si dropdown) · alçak: frekans+süre, sesi kes
+- **Mesafe**: engel var mı? (<X cm, 3 örnekli), mesafe cm · alçak: mesafe mm
+- **Çizgi**: çizgide mi? (bool) · alçak: ham analog, eşik ayarla
+- **Işık (LDR)**: aydınlık mı? (eşikli bool), ışık farkı (sağ-sol) · alçak: ham analog
+- **Kumanda + Buton**: IR tuşuna basıldı mı?, buton · alçak: son tuş kodu
+- **Pil**: pil yüzdesi, ekranda pili göster · alçak: pil voltajı (V)
+
 ## Pil (şarj) göstergesi — dürüst durum
 
 Gösterge yazılımı hazır: **butona 1 sn uzun basınca** ekranda 5 çubuklu pil
@@ -103,6 +141,24 @@ hattı görünmüyor. Bu yüzden:
   ile pile bağlarsanız) `PIN_BATTERY = 28` gibi ayarlayın ve
   `BATTERY_DIVIDER` oranını girin — gösterge anında gerçek yüzdeyle çalışır
   (Li-ion 3.3 V–4.2 V eğrisi, 8 örnek ortalamalı, motor gürültüsüne dayanıklı).
+
+### Nasıl denerim? (adım adım)
+
+1. Robotu **pilden** çalıştır, USB'yi veri için bağla.
+2. RoboExx'te USB bağlan → `public/lib/berrybot_batt_test.py` içeriğini kod
+   editörüne yapıştırıp **Çalıştır** (veya Thonny ile çalıştır). Script 4 ADC
+   kanalını 10 sn boyunca yazdırır.
+3. Sensörlerin önünde el salla, tekerlere hafif yük bindir:
+   - El salladıkça **oynayan** kanallar sensördür.
+   - **Sabit duran** ve motor yükünde 0.1-0.3 V **düşen** kanal pil hattıdır.
+4. Multimetreyle pil uçlarını ölç, script'in gösterdiği ADC voltajına böl →
+   `BATTERY_DIVIDER` oranın budur. `berrybot.py` başında `PIN_BATTERY` ve
+   oranı gir, **Modülleri Yükle** ile tekrar yaz — rozet ve ekran göstergesi
+   anında gerçek değeri gösterir.
+5. Hiçbir kanal pil gibi davranmıyorsa kartta hazır hat yok: en temiz çözüm
+   sağ LDR'yi feda etmek — `BAT+ → 100kΩ → GP28 → 100kΩ → GND` bölücüsü
+   lehimle, `PIN_BATTERY = 28`, `BATTERY_DIVIDER = 2.0`. (3.3 V üstünü asla
+   bölücüsüz ADC'ye verme.)
 
 ## Resmi kodda bulunup düzeltilen hatalar
 

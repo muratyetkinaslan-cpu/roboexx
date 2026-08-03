@@ -1,3 +1,18 @@
+# 🍓 BerryBot v2.1 — BLE düzeltmesi + geniş blok seti
+
+- **"GATT Error: Not Supported" çözüldü**: yazmalar karakteristiğin gerçek
+  yeteneklerine göre seçiliyor; BerryBot hedefinde tüm mesajlar sağlamalı
+  çerçeveyle **20 baytlık** GATT yazmaları halinde gidiyor (harici BLE-UART
+  modüllerinin MTU 23 sınırıyla uyumlu). Bildirim aboneliği hata verirse
+  otomatik ikinci deneme yapılıyor.
+- **9 ayrı 🍓 kategori**: Motor, LED Matris, RGB LED, Ses, Mesafe, Çizgi,
+  Işık (LDR), Kumanda+Buton, Pil — her birinde yüksek seviye + "Alçak seviye"
+  etiketli ham bloklar (18 yeni blok).
+- **Pil testi**: `public/lib/berrybot_batt_test.py` — pil hattını ADC
+  taramasıyla bulma prosedürü (bkz. BERRYBOT.md).
+
+---
+
 # 🍓 BerryBot Entegrasyonu
 
 **Robotistan BerryBot artık RoboExx'in yerlisi.** Üst bardaki hedef anahtarına

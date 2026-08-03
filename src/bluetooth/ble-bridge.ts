@@ -60,6 +60,20 @@ export class BLEBridge {
   /** Sensör cevap callback'i — payload byte'ları gelir */
   public onSensorReply: ((payload: Uint8Array) => void) | null = null;
   /**
+   * 🍓 BerryBot modu: giden her mesajı [BB 66 len payload xor] çerçevesine
+   * sarar. BerryBot'un UART-BLE modülü paket sınırlarını korumadığı için
+   * firmware çerçeveleri deterministik çözer. App, hedef 'berrybot' iken
+   * true yapar.
+   */
+  public frameOutgoing = false;
+  /**
+   * GATT yazma başına en fazla bayt (0 = sınırsız). Harici BLE-UART
+   * modülleri çoğunlukla 20 baytlık BLE paketleriyle çalışır (MTU 23);
+   * daha büyük writeValue "GATT Error: Not Supported/Invalid length"
+   * verebilir. App, hedef 'berrybot' iken 20 yapar.
+   */
+  public maxGattWrite = 0;
+  /**
    * Kod yükleme sonrası Pico reset olunca beklenen kopma.
    * true ise gattserverdisconnected'da cihazı UNUTMA — otomatik reconnect dene.
    */
@@ -159,7 +173,15 @@ export class BLEBridge {
       this.txChar = await withTimeout(
         service.getCharacteristic(UART_TX_CHAR_UUID), 6000, 'TX karakteristik'
       );
-      await withTimeout(this.txChar.startNotifications(), 6000, 'Bildirim');
+      // Bildirim aboneliği — bazı BLE-UART modülleri (BerryBot dahil) CCCD'yi
+      // geç hazırlar; "Not Supported" gelirse kısa bekleyip bir kez daha dene.
+      try {
+        await withTimeout(this.txChar.startNotifications(), 6000, 'Bildirim');
+      } catch (ne) {
+        this.onLog('system', `Bildirim aboneliği ilk denemede olmadı (${(ne as Error).message}) — tekrar deneniyor…`);
+        await new Promise((r) => setTimeout(r, 600));
+        await withTimeout(this.txChar.startNotifications(), 6000, 'Bildirim (2. deneme)');
+      }
       this.txChar.addEventListener('characteristicvaluechanged', this._onNotify);
 
       // Disconnect listener'ı bağlantı KURULDUKTAN SONRA ekle —
@@ -469,11 +491,53 @@ export class BLEBridge {
 
   private async _writeRaw(data: Uint8Array): Promise<void> {
     if (!this.rxChar) throw new Error('RX karakteristik yok');
-    // BLE write without response — daha hızlı
-    if ((this.rxChar as any).writeValueWithoutResponse) {
-      await (this.rxChar as any).writeValueWithoutResponse(data);
-    } else {
-      await this.rxChar.writeValue(data);
+
+    // 🍓 Çerçeveleme: [0xBB 0x66 len_lo len_hi payload xor]
+    let out = data;
+    if (this.frameOutgoing) {
+      const f = new Uint8Array(data.length + 5);
+      f[0] = 0xbb; f[1] = 0x66;
+      f[2] = data.length & 0xff; f[3] = (data.length >> 8) & 0xff;
+      f.set(data, 4);
+      let chk = 0;
+      for (const b of data) chk ^= b;
+      f[f.length - 1] = chk;
+      out = f;
+    }
+
+    // Parçala: harici BLE-UART modülleri için ≤maxGattWrite baytlık yazmalar
+    const step = this.maxGattWrite > 0 ? this.maxGattWrite : out.length;
+    for (let off = 0; off < out.length; off += step) {
+      const slice = out.subarray(off, Math.min(off + step, out.length));
+      await this._gattWrite(slice);
+    }
+  }
+
+  /** Tek GATT yazması — karakteristiğin GERÇEK yeteneklerine göre.
+   *  writeValueWithoutResponse fonksiyonu Chrome'da hep vardır ama
+   *  karakteristik desteklemiyorsa "GATT Error: Not Supported" fırlatır;
+   *  bu yüzden önce properties'e bakılır, yine de hata gelirse
+   *  writeValue (yanıtlı) ile tekrar denenir. */
+  private async _gattWrite(data: Uint8Array): Promise<void> {
+    const ch = this.rxChar!;
+    const props = (ch as any).properties;
+    const canWWR = !!props?.writeWithoutResponse
+      && typeof (ch as any).writeValueWithoutResponse === 'function';
+    try {
+      if (canWWR) {
+        await (ch as any).writeValueWithoutResponse(data);
+      } else if (typeof (ch as any).writeValueWithResponse === 'function') {
+        await (ch as any).writeValueWithResponse(data);
+      } else {
+        await ch.writeValue(data);
+      }
+    } catch (e) {
+      // Son çare: yanıtlı klasik yazma
+      if ((e as Error)?.name === 'NotSupportedError' && canWWR) {
+        await ch.writeValue(data);
+      } else {
+        throw e;
+      }
     }
   }
 
