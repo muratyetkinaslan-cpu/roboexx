@@ -1,3 +1,24 @@
+# 🍓 BerryBot v4.1 — Ölü bildirim hattı için üç kademeli savunma
+
+Sahadan gelen log kesinleştirdi: bu modülde telefon→robot yönü çalışıyor,
+ama robot→telefon **notify hiç iletilmiyor** (abonelik "başarılı" görünse de
+tek bir durum baytı gelmiyor). v4.1 bağlanınca hattı gerçekten test eder:
+
+1. **Notify canlılık testi**: PING'e 3 denemede yanıt yoksa hat ölü sayılır.
+2. **Okuma yoklaması (read-polling)**: bildirim karakteristiğinde `read`
+   varsa 250 ms'de bir okunur; içerik değiştikçe durum baytları ve sensör
+   cevapları bu yoldan işlenir (bazı modüller notify yerine sadece değer
+   günceller). Çalışırsa konsolda "✓ Durum baytları okuma yoklamasıyla
+   alınıyor" görünür ve ACK'lı güvenilir yükleme normal sürer.
+3. **Kör mod**: o da sessizse köprü beklemeden, hız sınırlı yükler
+   (roboexxkids'i "biraz da olsa" çalıştıran yol — artık bilinçli ve
+   sağlamlaştırılmış): BEGIN aralıklı 3 kez gönderilir (koşan koddan
+   yükleme moduna reset penceresini kapsar), parçalar yanıtlı yazma +
+   bekleme ile gider. Robot dosyayı alınca **melodi çalar ve ekranda ✓**
+   gösterir — başarı onayı robotun kendisidir.
+
+---
+
 # 🍓 BerryBot v4 — Güvenilir BLE yükleme (roboexxkids mimarisi + iyileştirmeler)
 
 Kök neden bulundu: BerryBot'un BLE modülü **Pico'dan bağımsız beslenir** —

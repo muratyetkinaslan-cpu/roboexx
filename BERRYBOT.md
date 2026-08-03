@@ -103,6 +103,18 @@ Supported" veriyordu. Çözüm (`ble-bridge.ts` + `App.tsx`):
   paket sınırı/MTU sorunu tamamen ortadan kalkar. (Firmware v2 çerçeveli ve
   ham protokolün ikisini de kabul eder; eski PicoBricks GO da çalışmaya devam eder.)
 
+### v4.1 — "Robot yanıt vermedi" (ölü notify hattı) çözümü
+
+Bağlantı kuruluyor ama robot HİÇBİR duruma yanıt vermiyorsa (ne READY ne
+RECEIVING): modül, telefon→robot yönünü taşıyor ama robot→telefon notify'ını
+hiç iletmiyor demektir. v4.1 bunu bağlanır bağlanmaz ölçer ve sırayla:
+(1) notify canlılık testi, (2) bildirim karakteristiği `read` destekliyorsa
+**okuma yoklaması** (250 ms'de bir readValue, değişen içerik işlenir),
+(3) ikisi de sessizse **kör mod** — beklemesiz, hız sınırlı yükleme;
+BEGIN üç kez aralıklı gönderilir, robot dosyayı alınca **melodi + ekranda ✓**
+ile kendi onayını verir ve yeni kodu çalıştırır. Konsolda hangi kademenin
+devrede olduğu açıkça yazar.
+
 ### v4 — güvenilir yükleme ("durum 11 beklendi" çözümü)
 
 Bağlantı kurulduğu hâlde yükleme "BLE zaman aşımı: durum 11 beklendi" ile

@@ -103,6 +103,11 @@ export class BLEBridge {
   private rxChar: BluetoothRemoteGATTCharacteristic | null = null;
   private txChar: BluetoothRemoteGATTCharacteristic | null = null;
   private notifyAvailable = false;
+  /** Robottan (notify VEYA read-yoklama ile) en az bir gecerli bayt geldi mi? */
+  private linkAlive = false;
+  /** Bildirimler olu cikarsa devreye giren read-yoklama zamanlayicisi */
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPollHex: string | null = null;
   /** Gelen durum baytları (notify) — FIFO kuyruk */
   private statusQueue: number[] = [];
   private statusWaiter: { resolve: (s: number) => void; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -199,6 +204,7 @@ export class BLEBridge {
     if (!this.device) { this.disconnect(); return; }
     this.reconnecting = true;
     this._setState('connecting');
+    this._stopReadPolling();
     this._clearStatus();
 
     // İlk deneme çabuk (modül genelde hemen advertising'e döner),
@@ -313,25 +319,58 @@ export class BLEBridge {
     }
   }
 
-  /** PING at, yanıta göre protokol sürümünü belirle. */
+  /**
+   * PING at; protokol surumunu VE bildirim hattinin canliligini belirle.
+   * Bazi moduller CCCD aboneligini kabul eder ama hic notify GONDERMEZ —
+   * once read-yoklama denenir, o da sessizse KOR MODa gecilir
+   * (durum beklemeden, hiz sinirli yukleme).
+   */
   private async _detectProtocol(): Promise<void> {
     this.protoV2 = false;
+    this.linkAlive = false;
     if (!this.rxChar) return;
-    this._clearStatus();
-    try {
-      await this._writeRaw(new Uint8Array([MSG_PING]));
-      if (!this.notifyAvailable) return; // yanıtı göremeyiz → v1 (kör mod)
-      const s = await this._nextStatus(1500);
-      if (s === STATUS_READY_V2) this.protoV2 = true;
-    } catch {
-      // yanıt yok → v1 varsay (robot user code çalıştırıyor olabilir;
-      // v2 bootloader'da dinleyici her zaman açık olduğundan yanıt gelirdi)
+    if (!this.notifyAvailable) return; // abonelik zaten yok -> kor mod
+    // 1) Notify ile 3 deneme
+    for (let i = 1; i <= 3; i++) {
+      this._clearStatus();
+      try {
+        await this._writeRaw(new Uint8Array([MSG_PING]));
+        const st = await this._nextStatus(1200);
+        if (st === STATUS_READY_V2) { this.protoV2 = true; return; }
+        if (st >= 0x10 && st <= 0x17) return; // v1 ama hat CANLI
+      } catch { /* sessiz — tekrar dene */ }
     }
+    // 2) Hic bayt gelmedi -> read-yoklamayi baslat, bir tur daha dene
+    this.onLog('system', 'Bildirim hattı sessiz — okuma yoklaması deneniyor…');
+    this._startReadPolling();
+    for (let i = 1; i <= 3; i++) {
+      this._clearStatus();
+      try {
+        await this._writeRaw(new Uint8Array([MSG_PING]));
+        const st = await this._nextStatus(1200);
+        if (st === STATUS_READY_V2) {
+          this.protoV2 = true;
+          this.onLog('system', '✓ Durum baytları okuma yoklamasıyla alınıyor');
+          return;
+        }
+        if (st >= 0x10 && st <= 0x17) {
+          this.onLog('system', '✓ Durum baytları okuma yoklamasıyla alınıyor');
+          return;
+        }
+      } catch { /* sessiz */ }
+    }
+    // 3) Robot->telefon yonu tamamen olu -> kor mod
+    this._stopReadPolling();
+    this.notifyAvailable = false;
+    this.onLog('system',
+      '⚠ Robottan durum baytı alınamıyor (modül notify iletmiyor) — KÖR MOD: ' +
+      'yükleme beklemesiz, hız sınırlı gidecek. Robot dosyayı alınca melodi çalar ve ekranda ✓ gösterir.');
   }
 
   async disconnect(): Promise<void> {
     this.expectReconnect = false;
     this.reconnecting = false;
+    this._stopReadPolling();
     this._clearStatus();
     if (this.device?.gatt?.connected) {
       try { this.device.gatt.disconnect(); } catch {}
@@ -414,13 +453,18 @@ export class BLEBridge {
    */
   private async _beginHandshake(begin: Uint8Array): Promise<void> {
     if (!this.notifyAvailable) {
-      // Kör mod: durum baytlarını göremeyiz. Robot koşan koddan yükleme
-      // moduna geçiyor olabilir → BEGIN'i bekleyip bir kez daha gönder.
+      // Kor mod: durum baytlarini goremeyiz. Robot kosan koddan yukleme
+      // moduna resetleniyor olabilir (REBOOTING'i goremeyiz) -> BEGIN'i
+      // aralikli 3 kez gonder; v4 bootloader tekrarlanan BEGIN'e dayanikli.
+      this.onLog('system', 'Kör mod: robot yükleme moduna alınıyor…');
       await this._writeRaw(begin);
-      await sleep(3000);
+      await sleep(2500);                 // gozcu REBOOTING + yeniden acilis
       this._clearStatus();
       await this._writeRaw(begin);
-      await sleep(500);
+      await sleep(1200);
+      this._clearStatus();
+      await this._writeRaw(begin);
+      await sleep(600);
       return;
     }
 
@@ -600,6 +644,13 @@ export class BLEBridge {
       return;
     }
 
+    if (!this.notifyAvailable) {
+      // Kor mod: onay goremiyoruz ama robot aldiysa melodi + ekranda ✓
+      // gosterir ve yeni kodu calistirmak icin kendini resetler.
+      this.onLog('system', '✓ Kod gönderildi (kör mod) — robot melodi çalıp ekranda ✓ gösterdiyse kayıt başarılı, yeni kod çalışıyor');
+      return;
+    }
+
     // v1 (eski bootloader / RoboExx Pico W): cihaz resetlenir, bağlantı düşer.
     this._setState('connecting');
     this.onLog('system', '⚙ Cihaz yeni kodu çalıştırmak için yeniden başlıyor…');
@@ -686,8 +737,14 @@ export class BLEBridge {
     const target = event.target as BluetoothRemoteGATTCharacteristic;
     const value = target.value;
     if (!value || value.byteLength < 1) return;
+    this._ingest(value);
+  };
+
+  /** Gelen baytlari isle — notify'dan da read-yoklamadan da cagrilir. */
+  private _ingest(value: DataView): void {
     // Sensör cevabı (0x14 + payload) — durum kuyruğuna KARIŞTIRMA
     if (value.getUint8(0) === MSG_SENSOR_REPLY) {
+      this.linkAlive = true;
       if (this.onSensorReply) {
         const payload = new Uint8Array(value.buffer, value.byteOffset + 1, value.byteLength - 1);
         try { this.onSensorReply(payload); } catch { /* yut */ }
@@ -700,6 +757,7 @@ export class BLEBridge {
     for (let i = 0; i < value.byteLength; i++) {
       const status = value.getUint8(i);
       if (status < 0x10 || status > 0x17) continue;
+      this.linkAlive = true;
       if (this.statusWaiter) {
         const w = this.statusWaiter;
         this.statusWaiter = null;
@@ -710,7 +768,40 @@ export class BLEBridge {
         if (this.statusQueue.length > 64) this.statusQueue.shift();
       }
     }
-  };
+  }
+
+  /**
+   * Bildirimler olu: bazi moduller CCCD aboneligini kabul eder ama hic
+   * notify GONDERMEZ. Karakteristikte 'read' varsa 250 ms'de bir okuyup
+   * DEGISEN icerigi bayt akisi gibi isleriz — durum baytlari ve sensor
+   * cevaplari bu yoldan da akar.
+   */
+  private _startReadPolling(): void {
+    if (this.pollTimer || !this.txChar) return;
+    const p: any = (this.txChar as any).properties || {};
+    if (!p.read) return;
+    this.lastPollHex = null;
+    this.pollTimer = setInterval(async () => {
+      const ch = this.txChar;
+      if (!ch || this.state === 'disconnected') { this._stopReadPolling(); return; }
+      try {
+        const v = await ch.readValue();
+        if (!v || v.byteLength < 1) return;
+        let hex = '';
+        for (let i = 0; i < v.byteLength; i++) hex += v.getUint8(i).toString(16).padStart(2, '0');
+        if (hex === this.lastPollHex) return;   // ayni icerik — yeni veri yok
+        this.lastPollHex = hex;
+        this._ingest(v);
+      } catch { /* okuma anlik basarisiz olabilir */ }
+    }, 250);
+  }
+
+  private _stopReadPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
 
   /** Canlı klavye (WASD): basılı tuşları gönder. [0x0B][len][ascii] */
   async sendKeys(keys: string): Promise<void> {
