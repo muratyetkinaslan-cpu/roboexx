@@ -9,6 +9,7 @@ import {
   isEsp32Like,
   isUartBridge,
 } from './types';
+import { webusbSerialShim, isWebUSBSupported } from './webusb-cdc';
 
 // Web Serial type stubs (Chrome only API, not in standard lib.dom)
 interface SerialPortLike {
@@ -94,7 +95,21 @@ export class SerialBridge {
   // ====== Public API ======
 
   isWebSerialSupported(): boolean {
-    return typeof navigator !== 'undefined' && 'serial' in navigator;
+    // Gerçek Web Serial (masaüstü) YA DA WebUSB CDC yolu (Android tablet)
+    return (typeof navigator !== 'undefined' && 'serial' in navigator) || isWebUSBSupported();
+  }
+
+  /** Android tablette miyiz? (Web Serial yok ama WebUSB var → CDC şimi) */
+  usingWebUSB(): boolean {
+    return !(typeof navigator !== 'undefined' && 'serial' in navigator) && isWebUSBSupported();
+  }
+
+  /** Ortama göre doğru seri API'yi döndür. */
+  private _serialApi(): SerialAPI {
+    if (typeof navigator !== 'undefined' && 'serial' in navigator) {
+      return (navigator as unknown as { serial: SerialAPI }).serial;
+    }
+    return webusbSerialShim as unknown as SerialAPI;
   }
 
   /**
@@ -107,10 +122,14 @@ export class SerialBridge {
       return { ok: false, message: 'Tarayıcı ortamı bulunamadı.' };
     }
     if (!('serial' in navigator)) {
+      if (isWebUSBSupported()) {
+        // Android tablet: Web Serial yok ama WebUSB var — CDC şimiyle çalışırız
+        return { ok: true };
+      }
       return {
         ok: false,
         message:
-          'Bu tarayıcıda Web Serial yok. Chrome veya Edge kullanın (Firefox ve Safari desteklemiyor).',
+          "Bu tarayıcıda USB erişimi yok. Bilgisayarda Chrome/Edge kullanın; Android tablette Chrome (WebUSB) çalışır. iPad USB desteklemez — orada Bluetooth ile bağlanın.",
       };
     }
     if (typeof window !== 'undefined' && window.isSecureContext === false) {
@@ -129,7 +148,7 @@ export class SerialBridge {
   async tryAutoConnect(): Promise<PortInfo | null> {
     if (!this.isWebSerialSupported()) return null;
     try {
-      const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+      const serial = this._serialApi();
       const ports = await serial.getPorts();
       // Önce Pico'yu, yoksa desteklenen herhangi bir kartı (ESP32) dene
       const devicePort =
@@ -151,9 +170,12 @@ export class SerialBridge {
    */
   async requestAndConnect(): Promise<PortInfo> {
     if (!this.isWebSerialSupported()) {
-      throw new Error('Web Serial bu tarayıcıda desteklenmiyor. Chrome veya Edge kullan.');
+      throw new Error('Bu tarayıcıda USB erişimi yok. Bilgisayarda Chrome/Edge; Android tablette Chrome kullanın.');
     }
-    const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+    if (this.usingWebUSB()) {
+      this.onLog('system', '📱 Tablet modu: USB bağlantısı WebUSB (CDC) üzerinden kurulacak');
+    }
+    const serial = this._serialApi();
     let port: SerialPortLike;
     try {
       port = await serial.requestPort({
@@ -659,7 +681,7 @@ export class SerialBridge {
       this.port = null;
 
       // 3) Kart yeniden numaralandırılana kadar portu ara (en fazla 12sn)
-      const serial = (navigator as unknown as { serial: SerialAPI }).serial;
+      const serial = this._serialApi();
       const deadline = Date.now() + 12000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 500));

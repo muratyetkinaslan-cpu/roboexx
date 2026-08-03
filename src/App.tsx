@@ -365,7 +365,7 @@ export default function App() {
       if (info) addLine('info', 'Önceden tanınan cihaz otomatik bağlandı');
     });
 
-    if ('serial' in navigator) {
+    if ('serial' in navigator || 'usb' in navigator) {
       const onConnect = () => {
         if (serialBridge.state === 'disconnected') {
           serialBridge.tryAutoConnect().then((info) => {

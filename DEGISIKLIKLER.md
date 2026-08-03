@@ -1,3 +1,25 @@
+# 📱 Tablet desteği — WebUSB (CDC) fallback
+
+Android tablette Chrome, **Web Serial API'yi desteklemez** (yalnız masaüstü);
+BerryBot bu yüzden tablette "okunmuyordu". Çözüm: Android Chrome **WebUSB**
+destekler ve Pico standart bir USB CDC cihazıdır → `src/serial/webusb-cdc.ts`
+şimi, SerialBridge'in kullandığı port yüzeyini (open/readable/writable/
+setSignals…) bir USBDevice üzerinde birebir taklit eder. Böylece:
+
+- `navigator.serial` yoksa köprü otomatik WebUSB'ye düşer — Bağlan'a basınca
+  Android'in USB cihaz seçici çıkar, öğrenci BerryBot'u seçer, aynı raw-REPL
+  yüklemesi çalışır. Konsolda "📱 Tablet modu: WebUSB (CDC)" görünür.
+- **Ekstra donanım/uygulama gerekmez** — yalnız OTG (USB-C→USB) kablosu.
+- DTR/RTS SET_CONTROL_LINE_STATE ile kaldırılır (MicroPython DTR'siz çıktı
+  basmaz); baud SET_LINE_CODING ile gönderilir; stall'da clearHalt yapılır.
+- Masaüstü davranışı değişmez (gerçek Web Serial öncelikli); iPad'de USB
+  yolu yoktur — orada Bluetooth kullanılır.
+
+Tablet akışı: OTG ile bağla → Chrome'da RoboExx (HTTPS) → USB Bağlan →
+"Modülleri Yükle" (ilk kurulum) → sonrası tamamen kablosuz (BLE).
+
+---
+
 # 🍓 BerryBot v4.1 — Ölü bildirim hattı için üç kademeli savunma
 
 Sahadan gelen log kesinleştirdi: bu modülde telefon→robot yönü çalışıyor,

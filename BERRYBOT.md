@@ -61,6 +61,24 @@ test edildi). `CHUNK_SIZE`'ı web tarafında değiştirirseniz `main.py` içinde
 | Buton | GP10 |
 | 5x5 LED matris | Satır: 7,11,12,13,17 — Sütun: 18,19,16,2,3 |
 
+## 📱 Tablette kullanım (Android)
+
+Android Chrome'da Web Serial yoktur ama **WebUSB vardır** — RoboExx bunu
+otomatik algılar ve USB bağlantısını WebUSB-CDC şimi üzerinden kurar.
+Öğrenci için gerekli tek şey **OTG kablosu** (tabletin USB-C'sinden
+BerryBot'un USB'sine):
+
+1. BerryBot'u OTG ile tablete tak, robotu aç.
+2. Chrome'da RoboExx'i aç (HTTPS şart) → **Bağlan** → çıkan Android USB
+   seçicisinden BerryBot'u seç. Konsolda "📱 Tablet modu" görünür.
+3. İlk kurulumda **Modülleri Yükle** → sonrasında kablo gerekmez, her şey
+   Bluetooth'tan (kod yükleme, WASD, sensör paneli, pil rozeti).
+
+Notlar: iPad USB yolunu desteklemez (Apple WebUSB/Web Serial vermez) —
+iPad'de yalnız Bluetooth kullanılabilir; ilk kurulum bir Android cihaz ya
+da bilgisayarla bir kez yapılır. Bazı tabletlerde OTG beslemesi zayıftır:
+robot pili açık olsun.
+
 ## Kurulum akışı (kullanıcı, sizin sitenizden)
 
 1. Firmware UF2'yi BOOTSEL ile yükle (sitemizden indirilir).
