@@ -1593,7 +1593,13 @@ export default function App() {
         await bleBridge.stopCode();
         addLine('system', '⏹ Robot durduruldu — kod çalıştırılmadan bekliyor');
       } catch (e) {
+        // Eski bootloader (v1) veya takılı yükleme — yine de süren işlemi
+        // İPTAL ET ve resetle; kullanıcı enerji kesmek zorunda kalmasın.
         addLine('info', (e as Error).message);
+        try {
+          await bleBridge.forceReset();
+          addLine('system', '⏹ Süren işlem iptal edildi, robota reset gönderildi');
+        } catch { /* yoksay */ }
       }
       return;
     }

@@ -79,6 +79,21 @@ export class SerialBridge {
   private rebooting = false;
 
   /**
+   * İPTAL BAYRAĞI — "Durdur"/"Kes"/kurtarma basıldığında true olur.
+   * Süren işlemin (enterRaw strateji zinciri, exec stream beklemesi,
+   * buffer beklemeleri) TÜM bekleme noktaları bunu kontrol eder ve
+   * anında hata fırlatıp finally→_forceIdle üzerinden temiz çıkar.
+   * Eskiden "Durdur" sadece Ctrl-C yazıp state'i değiştiriyordu ama
+   * arka plandaki işlem 30+ sn sürmeye devam ediyor, ikinci tıkla
+   * ÇAKIŞIP protokolü bozuyordu → "meşgulde kalıyor" şikayeti.
+   */
+  private cancelled = false;
+
+  /** Başlatılan işlem sayacı — interrupt'ın gecikmeli güvenlik ağı,
+   *  aradan YENİ bir işlem başladıysa ona dokunmasın diye kullanılır. */
+  private opCount = 0;
+
+  /**
    * Read loop jenerasyon sayacı. Yazılımsal reset sonrası eski read loop'un
    * yeni portu ele geçirmesini önler: her _startReadLoop çağrısı sayacı
    * artırır, eski loop kendi jenerasyonu eskiyince sessizce çıkar.
@@ -208,6 +223,7 @@ export class SerialBridge {
   }
 
   async disconnect(): Promise<void> {
+    this.cancelled = true; // süren işlemler temiz düşsün
     this._setState('disconnected');
     this.liveRun = false;
     this.readLoopGen++; // aktif read loop'u geçersiz kıl
@@ -243,14 +259,23 @@ export class SerialBridge {
    */
   async interrupt(): Promise<void> {
     if (!this.writer) return;
-    await this._write('\r\x03\x03');
-    // Eğer busy state'de takılı kalmışsak zorla resetle
-    this._forceIdle();
+    // 1) Süren işlemi (enterRaw/exec/upload) İPTAL ET — tüm bekleme
+    //    noktaları 50ms içinde hata fırlatır, finally→_forceIdle temiz çıkar.
+    this.cancelled = true;
+    // 2) Karta hard interrupt gönder
+    try { await this._write('\r\x03\x03'); } catch {}
+    // 3) İşlemin kendini toplaması için kısa bekle; AYNI işlem hâlâ busy
+    //    ise zorla idle. (opCount kontrolü: aradan yeni Run/Yükle başladıysa
+    //    ona dokunma — yoksa yeni işlemi yanlışlıkla düşürürdük.)
+    const myOp = this.opCount;
+    setTimeout(() => {
+      if (this.state === 'busy' && this.opCount === myOp) this._forceIdle();
+    }, 800);
     // Ctrl-C sonrası friendly REPL'in oturması için kısa bekleme,
     // ardından motor/PWM temizliği (fire-and-forget, hata yutulur)
     setTimeout(() => {
       this._sendMotorCleanup().catch(() => {});
-    }, 250);
+    }, 400);
   }
 
   /**
@@ -305,6 +330,7 @@ export class SerialBridge {
    * Port hala açıksa connected, değilse disconnected.
    */
   async forceReset(): Promise<void> {
+    this.cancelled = true; // süren her şeyi düşür
     this._forceIdle();
     try {
       if (this.writer) {
@@ -361,7 +387,7 @@ export class SerialBridge {
    * Run: Kodu raw REPL ile çalıştır. Çıktı CANLI olarak Serial Monitor'a akar.
    */
   async runCode(code: string): Promise<void> {
-    if (this.state !== 'connected') throw new Error('Bağlı değil');
+    await this._acquireOp(); // süren işlemi iptal et, kilidi al
     this._setState('busy');
     this.liveRun = true; // tuş enjeksiyonuna izin ver (canlı çalıştırma)
     try {
@@ -383,7 +409,7 @@ export class SerialBridge {
     code: string,
     onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
   ): Promise<void> {
-    if (this.state !== 'connected') throw new Error('Bağlı değil');
+    await this._acquireOp(); // süren işlemi iptal et, kilidi al
     this._setState('busy');
 
     const start = Date.now();
@@ -413,6 +439,7 @@ export class SerialBridge {
       // 2) Chunk'lar halinde yaz — Pico'nun RAM'i taşmasın
       let offset = 0;
       while (offset < bytesTotal) {
+        if (this.cancelled) throw new Error('Yükleme iptal edildi');
         const end = Math.min(offset + CHUNK_BYTES, bytesTotal);
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
@@ -493,7 +520,7 @@ export class SerialBridge {
     code: string,
     onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
   ): Promise<void> {
-    if (this.state !== 'connected') throw new Error('Bağlı değil');
+    await this._acquireOp(); // süren işlemi iptal et, kilidi al
     this._setState('busy');
 
     const start = Date.now();
@@ -516,6 +543,7 @@ export class SerialBridge {
       // 2) Her chunk'ı ayrı yaz
       let offset = 0;
       while (offset < bytesTotal) {
+        if (this.cancelled) throw new Error('Yükleme iptal edildi');
         const end = Math.min(offset + CHUNK_BYTES, bytesTotal);
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
@@ -574,6 +602,36 @@ export class SerialBridge {
       this.state = s;
       this.onStateChange(s);
     }
+  }
+
+  /** İptal edilebilir bekleme — Durdur basılırsa 50ms içinde hata fırlatır. */
+  private async _delay(ms: number): Promise<void> {
+    const end = Date.now() + ms;
+    for (;;) {
+      if (this.cancelled) throw new Error('İşlem iptal edildi');
+      const remaining = end - Date.now();
+      if (remaining <= 0) return;
+      await new Promise((r) => setTimeout(r, Math.min(50, remaining)));
+    }
+  }
+
+  /**
+   * Yeni bir işlem (run/upload) başlamadan önce çağrılır.
+   * Süren işlem varsa iptal eder, bitmesini kısa süre bekler; hâlâ
+   * takılıysa zorla idle yapar. Böylece iki işlem asla üst üste binmez.
+   */
+  private async _acquireOp(): Promise<void> {
+    if (this.state === 'busy') {
+      this.cancelled = true; // eski işlemin tüm bekleme noktaları patlar
+      const t0 = Date.now();
+      while (this.state === 'busy' && Date.now() - t0 < 2500) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (this.state === 'busy') this._forceIdle(); // son çare
+    }
+    if (this.state !== 'connected') throw new Error('Bağlı değil');
+    this.cancelled = false;
+    this.opCount++;
   }
 
   private async _connect(port: SerialPortLike): Promise<PortInfo> {
@@ -697,6 +755,7 @@ export class SerialBridge {
       const serial = this._serialApi();
       const deadline = Date.now() + 12000;
       while (Date.now() < deadline) {
+        if (this.cancelled) return false; // Durdur basıldı — aramayı kes
         await new Promise((r) => setTimeout(r, 500));
         try {
           const ports = await serial.getPorts();
@@ -823,6 +882,7 @@ export class SerialBridge {
   private async _waitForBuffer(needle: string, timeoutMs = 5000): Promise<void> {
     const start = Date.now();
     while (true) {
+      if (this.cancelled) throw new Error('İşlem iptal edildi');
       if (this.silentBuffer.includes(needle)) return;
       if (Date.now() - start > timeoutMs) {
         throw new Error('Zaman aşımı: bekleniyor "' + needle.replace(/[\r\n\x01-\x1f]/g, '·').slice(0, 40) + '"');
@@ -884,28 +944,32 @@ export class SerialBridge {
     try {
       for (let i = 0; i < 3; i++) {
         await this._write('\r\x03\x03');
-        await new Promise((r) => setTimeout(r, 150));
+        await this._delay(150);
       }
-    } catch {
+    } catch (e) {
+      if (this.cancelled) throw e;
       // yazma zaman aşımı — sonraki stratejiler / yazılımsal reset devralır
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await this._delay(200);
     if (await this._tryRawEntry(2000)) return;
+    if (this.cancelled) throw new Error('İşlem iptal edildi');
 
     // STRATEJİ 2: Soft reset (Ctrl-D) — main.py yeniden başlar, USB aktivite
     // tespiti devreye girer (yeni bootloader). Sonra tekrar kes + raw REPL'e gir.
     try {
       this._drainStale();
       await this._write('\r\x04');
-      await new Promise((r) => setTimeout(r, 400));
+      await this._delay(400);
       await this._write('\x03\x03\x03');
-      await new Promise((r) => setTimeout(r, 2500));
+      await this._delay(2500);
       await this._write('\r\x03\x03');
-      await new Promise((r) => setTimeout(r, 300));
-    } catch {
+      await this._delay(300);
+    } catch (e) {
+      if (this.cancelled) throw e;
       // yazma hatası — devam
     }
     if (await this._tryRawEntry(3000)) return;
+    if (this.cancelled) throw new Error('İşlem iptal edildi');
 
     // STRATEJİ 3: Pico sıkışmış (eski main.py, core1 thread, BLE meşgul).
     // Yeni bootloader USB byte gelince reset yapar — Ctrl-C'leri art arda
@@ -920,13 +984,15 @@ export class SerialBridge {
         }
         // Yoğun byte trafiği → yeni bootloader bunu yakalayıp reset eder
         await this._write('\x03\x03\x03\x03\x03');
-        await new Promise((r) => setTimeout(r, 1500));
+        await this._delay(1500);
         await this._write('\r\x03');
-      } catch {
+      } catch (e) {
+        if (this.cancelled) throw e;
         // yazma hatası — reset stratejisine düş
         break;
       }
       if (await this._tryRawEntry(2500)) return;
+      if (this.cancelled) throw new Error('İşlem iptal edildi');
     }
 
     // STRATEJİ 4 (SON ÇARE): Yazılımsal hard reset + otomatik yeniden bağlanma.
@@ -934,16 +1000,17 @@ export class SerialBridge {
     // core1 thread'lerini beklemeden tüm çipi yeniden başlatır. Kart temiz
     // boot edince raw REPL'e girmek her zaman mümkündür.
     const resetOk = await this._hardResetAndReconnect();
+    if (this.cancelled) throw new Error('İşlem iptal edildi');
     if (resetOk) {
       this.silent = true; // yeniden bağlanma sırasında akış silent kalmalı
       this._drainStale();
       try {
         await this._write('\r\x03\x03');
       } catch {}
-      await new Promise((r) => setTimeout(r, 300));
+      await this._delay(300);
       if (await this._tryRawEntry(4000)) return;
       // İlk deneme tutmadıysa kart hâlâ boot ediyor olabilir — bir kez daha
-      await new Promise((r) => setTimeout(r, 1500));
+      await this._delay(1500);
       if (await this._tryRawEntry(4000)) return;
     }
 
@@ -989,6 +1056,7 @@ export class SerialBridge {
     const pauseMs = this.uartBridge ? 20 : 8;
 
     for (let i = 0; i < total; i += chunkSize) {
+      if (this.cancelled) throw new Error('İşlem iptal edildi');
       const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
       await this._write(chunk);
       const sent = Math.min(i + chunkSize, total);
@@ -1031,6 +1099,10 @@ export class SerialBridge {
     const streamDone = () => this.streamState === 'done';
     const start = Date.now();
     while (!streamDone() && this.streamMode) {
+      if (this.cancelled) {
+        this.streamMode = false;
+        throw new Error('İşlem iptal edildi');
+      }
       if (Date.now() - start > 60000) {
         console.error('[RoboExx] 60s TIMEOUT - streamState:', this.streamState);
         this.streamMode = false;

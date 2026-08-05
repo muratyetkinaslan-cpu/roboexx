@@ -3446,10 +3446,17 @@ g.blocklyDraggable > path:first-of-type {
     width: 40px;
     height: 40px;
   }
-  /* Panel'ler tam ekran açılsın */
+  /* Panel'ler tam ekran açılsın — grid kolonu da AYNI genişliğe ayarlanır,
+     yoksa 380px panel 260px kolondan taşıp içeriğin üstüne biniyordu */
   .projects-panel,
   .classroom-panel {
     width: min(380px, 85vw);
+  }
+  .app[data-panel-open="true"] {
+    grid-template-columns: 64px min(380px, 85vw) minmax(0, 1fr);
+  }
+  .app[data-live-share="true"][data-panel-open="true"] {
+    grid-template-columns: 64px min(380px, 85vw) minmax(0, 1fr);
   }
   /* Workspace bölünmüş layout — preview gizli, kullanıcı manuel açar */
   .workspace-split.is-preview-collapsed {
@@ -6590,3 +6597,132 @@ g.blocklyDraggable > path:first-of-type {
   color: var(--rx-text);
 }
 .tl-steps li { margin: 0; }
+
+/* ════════════════════════════════════════════════════════════════════
+   TOPBAR DROPDOWN'LARI — hedef seçici + araçlar menüsü
+   (Eski 3'lü hedef butonu ve 5 ikon topbar'a sığmıyordu; dropdown'a
+   toplandı. Menü tema değişkenleriyle uyumlu, dışarı tıkla/Esc kapatır.)
+   ════════════════════════════════════════════════════════════════════ */
+.tb-dropdown { position: relative; }
+
+.tb-dd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--rx-border);
+  border-radius: 9px;
+  background: var(--rx-surface2);
+  color: var(--rx-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.tb-dd-trigger:hover { border-color: var(--rx-accent); }
+.tb-dd-trigger.is-open {
+  border-color: var(--rx-accent);
+  background: color-mix(in srgb, var(--rx-accent) 10%, var(--rx-surface2));
+}
+.tb-dd-trigger.has-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rx-accent) 55%, transparent);
+}
+.tb-dd-emoji { font-size: 14px; line-height: 1; }
+.tb-dd-caret { opacity: 0.6; flex-shrink: 0; transition: transform 0.15s var(--ease-out); }
+.tb-dd-trigger.is-open .tb-dd-caret { transform: rotate(180deg); }
+.tb-tools-trigger { gap: 6px; }
+.tb-tools-label { font-size: 12px; }
+
+.tb-dd-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 250px;
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  background: var(--rx-surface);
+  border: 1px solid var(--rx-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25);
+  padding: 6px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: tb-dd-in 0.12s var(--ease-out);
+}
+.tb-dd-menu-right { left: auto; right: 0; }
+@keyframes tb-dd-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tb-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rx-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s var(--ease-out);
+}
+.tb-dd-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rx-accent) 12%, transparent);
+}
+.tb-dd-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.tb-dd-item.is-active {
+  background: color-mix(in srgb, var(--rx-accent) 16%, transparent);
+}
+.tb-dd-item-emoji { font-size: 17px; line-height: 1; flex-shrink: 0; }
+.tb-dd-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.tb-dd-item-name { font-size: 12.5px; font-weight: 600; }
+.tb-dd-item-hint {
+  font-size: 10.5px;
+  color: var(--rx-text-dim);
+  margin-top: 1px;
+  line-height: 1.35;
+}
+.tb-dd-check {
+  color: var(--rx-accent);
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Topbar sıkışma emniyeti: kolonlar min-content altına inebilsin,
+   taşan içerik görünür kalsın (dropdown menüler kesilmesin). */
+.toolbar { grid-template-columns: auto auto minmax(0, 1fr); }
+.toolbar-center { min-width: 0; }
+.toolbar-right { flex-wrap: nowrap; }
+.device-pill { min-width: 0; }
+.device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   EĞİTMEN PANELİ — kaydırma garantisi ("görev cevaplarında aşağı
+   inilemiyor" düzeltmesi). Zincirdeki her katman yüksekliği sınırlar,
+   scroll SADECE .tl-kit-list üzerinde ve daima çalışır.
+   ════════════════════════════════════════════════════════════════════ */
+.classroom-panel {
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+.tl-kit-list {
+  overscroll-behavior: contain;   /* Blockly'ye scroll sızmasın */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 32px;           /* son görevin butonları rahat görünsün */
+}
+.tl-file-list { min-height: 0; }
+.tl-steps { overflow-wrap: anywhere; }

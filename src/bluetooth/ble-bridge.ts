@@ -124,6 +124,13 @@ export class BLEBridge {
    */
   private opSeq = 0;
   /**
+   * İPTAL BAYRAĞI — Durdur/Reset/Disconnect basılınca true olur; süren
+   * yüklemenin chunk döngüsü ve durum beklemeleri anında hata fırlatıp
+   * temiz çıkar. Eskiden yükleme arka planda dakikalarca sürüp yeni
+   * komutlarla çakışabiliyordu.
+   */
+  private cancelled = false;
+  /**
    * true ise gattserverdisconnected'da cihazı UNUTMA — otomatik reconnect dene.
    */
   private expectReconnect = false;
@@ -383,6 +390,8 @@ export class BLEBridge {
   }
 
   async disconnect(): Promise<void> {
+    this.cancelled = true; // süren işlemler temiz düşsün
+    this.opSeq++;
     this.expectReconnect = false;
     this.reconnecting = false;
     this._stopReadPolling();
@@ -406,8 +415,20 @@ export class BLEBridge {
     code: string,
     onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
   ): Promise<void> {
-    if (this.state !== 'connected') throw new Error('BLE bağlı değil');
     if (!this.rxChar) throw new Error('RX karakteristik yok');
+
+    // Meşgulse: önceki (muhtemelen takılı) yüklemeyi iptal et ve devral.
+    if (this.state === 'busy') {
+      this.cancelled = true;
+      this._clearStatus(); // askıdaki bekleyici reject olur, eski işlem düşer
+      const t0 = Date.now();
+      while ((this.state as BridgeState) === 'busy' && Date.now() - t0 < 2500) {
+        await sleep(50);
+      }
+      if ((this.state as BridgeState) === 'busy') this._setState('connected');
+    }
+    if (this.state !== 'connected') throw new Error('BLE bağlı değil');
+    this.cancelled = false;
 
     this.opSeq++;        // ← arka plandaki _verifyAlive PING doğrulayıcısını durdur
     this._setState('busy');
@@ -501,7 +522,9 @@ export class BLEBridge {
     // REBOOTING → robot yükleme moduna resetleniyor. BEGIN'i tekrar dene.
     this.onLog('system', '⚙ Robot yükleme moduna geçiyor…');
     for (let attempt = 1; attempt <= 10; attempt++) {
+      if (this.cancelled) throw new Error('Yükleme iptal edildi');
       await sleep(attempt === 1 ? 1200 : 900);
+      if (this.cancelled) throw new Error('Yükleme iptal edildi');
       this._clearStatus();
       try {
         await this._writeRaw(begin);
@@ -569,6 +592,7 @@ export class BLEBridge {
     let offset = 0;
 
     while (offset < bytesTotal) {
+      if (this.cancelled) throw new Error('Yükleme iptal edildi');
       const dlen = Math.min(chunkSize, bytesTotal - offset);
       const pkt = new Uint8Array(7 + dlen);
       pkt[0] = MSG_CHUNK2;
@@ -631,6 +655,7 @@ export class BLEBridge {
     const bytesTotal = codeBytes.length;
     let offset = 0;
     while (offset < bytesTotal) {
+      if (this.cancelled) throw new Error('Yükleme iptal edildi');
       const dlen = Math.min(CHUNK_SIZE_V1, bytesTotal - offset);
       const pkt = new Uint8Array(5 + dlen);
       pkt[0] = MSG_CHUNK;
@@ -703,18 +728,44 @@ export class BLEBridge {
   /** Robotu durdur (v2): kod çalıştırılmadan boşta bekleyen moda reset. */
   async stopCode(): Promise<void> {
     if (this.state !== 'connected' && this.state !== 'busy') throw new Error('BLE bağlı değil');
+    const wasBusy = this.state === 'busy';
+    this.cancelled = true;  // süren yükleme varsa anında düşür
+    this.opSeq++;           // önceki doğrulayıcıyı geçersiz kıl
+    this._clearStatus();    // askıdaki bekleyiciler reject olsun
+    // İptal edilen işlemin finally'sine ulaşıp state'i bırakmasını BEKLE —
+    // bayrağı hemen temizlersek işlem kontrol noktasına gelmeden bayrak
+    // kapanır ve zombi gibi devam ederdi (yarış durumu).
+    if (wasBusy) {
+      const t0 = Date.now();
+      while ((this.state as BridgeState) === 'busy' && Date.now() - t0 < 2000) {
+        await sleep(50);
+      }
+    }
     if (!this.protoV2) {
+      this.cancelled = false;
+      if ((this.state as BridgeState) === 'busy') this._setState('connected');
       throw new Error('Durdur için robot yazılımını güncelle ("Modülleri Yükle")');
     }
-    this.opSeq++; // önceki doğrulayıcıyı geçersiz kıl
     this.expectReconnect = true;
     await this._writeRaw(new Uint8Array([MSG_STOP]));
     if ((this.state as BridgeState) === 'busy') this._setState('connected');
+    this.cancelled = false;
     void this._verifyAlive();
   }
 
   /** Manual reset (Pico'yu yeniden başlat — mevcut kod tekrar çalışır) */
   async forceReset(): Promise<void> {
+    const wasBusy = this.state === 'busy';
+    this.cancelled = true;  // takılı yüklemeyi düşür
+    this.opSeq++;
+    this._clearStatus();
+    // İptal edilen işlemin düşmesini bekle (bayrak yarışını önle)
+    if (wasBusy) {
+      const t0 = Date.now();
+      while (this.state === 'busy' && Date.now() - t0 < 2000) {
+        await sleep(50);
+      }
+    }
     if (this.rxChar) {
       try {
         this.expectReconnect = true;
@@ -722,6 +773,7 @@ export class BLEBridge {
       } catch {}
     }
     if (this.state === 'busy') this._setState('connected');
+    this.cancelled = false;
   }
 
   // ====== private ======
@@ -897,6 +949,7 @@ export class BLEBridge {
     }
     const deadline = Date.now() + timeoutMs;
     for (;;) {
+      if (this.cancelled) throw new Error('İşlem iptal edildi');
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         throw new Error(`BLE zaman aşımı: durum 0x${expected[0].toString(16)} beklendi`);

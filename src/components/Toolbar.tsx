@@ -1,7 +1,36 @@
+import { useEffect, useRef, useState } from 'react';
 import { ModeTabs, type AppMode } from './ModeTabs';
 import type { BridgeState, PortInfo } from '../serial/types';
 import type { ThemeId } from '../themes/types';
 import { branding } from '../config/branding';
+
+type CodeTargetT = 'micropython' | 'arduino' | 'berrybot';
+
+const TARGET_META: Record<CodeTargetT, { emoji: string; label: string; hint: string }> = {
+  micropython: { emoji: '🐍', label: 'MicroPython', hint: 'Pico / ESP32' },
+  berrybot:    { emoji: '🍓', label: 'BerryBot',    hint: 'Bluetooth ile kablosuz' },
+  arduino:     { emoji: '🔌', label: 'Arduino',     hint: 'Uno / Nano · C++' },
+};
+
+/** Dışarı tıklayınca kapanan basit dropdown iskeleti. */
+function useDropdown() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+  return { open, setOpen, ref };
+}
 
 interface Props {
   mode: AppMode;
@@ -71,6 +100,10 @@ export function Toolbar(props: Props) {
   const isConnecting = bridgeState === 'connecting';
   const isLight = props.themeId === 'galaxy-orange-light';
 
+  const targetDd = useDropdown();
+  const toolsDd = useDropdown();
+  const curTarget = TARGET_META[props.codeTarget];
+
   return (
     <header className="toolbar">
       <div className="toolbar-section toolbar-left">
@@ -95,31 +128,41 @@ export function Toolbar(props: Props) {
 
       <div className="toolbar-section toolbar-center">
         <ModeTabs mode={props.mode} onChange={props.onModeChange} />
-        <div className="target-switch" role="group" aria-label="Kod hedefi">
+
+        {/* Kod hedefi — DROPDOWN (eski 3'lü buton grubu topbar'a sığmıyordu) */}
+        <div className="tb-dropdown tb-dropdown-target" ref={targetDd.ref}>
           <button
-            className={`target-switch-btn ${props.codeTarget === 'micropython' ? 'is-active' : ''}`}
-            onClick={() => props.onTargetChange('micropython')}
-            data-tooltip="Pico / ESP32 · MicroPython"
-            data-tooltip-detail="Bloklardan MicroPython üret, Raspberry Pi Pico veya ESP32'ye yükle"
+            className={`tb-dd-trigger ${targetDd.open ? 'is-open' : ''}`}
+            onClick={() => targetDd.setOpen(!targetDd.open)}
+            title="Kod hedefini değiştir"
+            aria-haspopup="menu"
+            aria-expanded={targetDd.open}
           >
-            🐍 MicroPython
+            <span className="tb-dd-emoji">{curTarget.emoji}</span>
+            <span className="tb-dd-label">{curTarget.label}</span>
+            <svg className="tb-dd-caret" width="10" height="10" viewBox="0 0 12 12" fill="none">
+              <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
-          <button
-            className={`target-switch-btn ${props.codeTarget === 'berrybot' ? 'is-active' : ''}`}
-            onClick={() => props.onTargetChange('berrybot')}
-            data-tooltip="BerryBot · MicroPython"
-            data-tooltip-detail="Robotistan BerryBot için kod üret — Bluetooth ile kablosuz yükle, hazır BerryBot blokları"
-          >
-            🍓 BerryBot
-          </button>
-          <button
-            className={`target-switch-btn ${props.codeTarget === 'arduino' ? 'is-active' : ''}`}
-            onClick={() => props.onTargetChange('arduino')}
-            data-tooltip="Arduino · C++"
-            data-tooltip-detail="Aynı bloklardan Arduino (C++) üret, Uno/Nano'ya yükle"
-          >
-            🔌 Arduino
-          </button>
+          {targetDd.open && (
+            <div className="tb-dd-menu" role="menu">
+              {(Object.keys(TARGET_META) as CodeTargetT[]).map((t) => (
+                <button
+                  key={t}
+                  role="menuitem"
+                  className={`tb-dd-item ${props.codeTarget === t ? 'is-active' : ''}`}
+                  onClick={() => { props.onTargetChange(t); targetDd.setOpen(false); }}
+                >
+                  <span className="tb-dd-item-emoji">{TARGET_META[t].emoji}</span>
+                  <span className="tb-dd-item-text">
+                    <span className="tb-dd-item-name">{TARGET_META[t].label}</span>
+                    <span className="tb-dd-item-hint">{TARGET_META[t].hint}</span>
+                  </span>
+                  {props.codeTarget === t && <span className="tb-dd-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -239,104 +282,126 @@ export function Toolbar(props: Props) {
           )}
         </div>
 
-        {/* GRUP 2: Çalıştırma — modülleri yükle + çalıştır/durdur + yükle */}
+        {/* GRUP 2: Çalıştırma — Araçlar dropdown + çalıştır/durdur + yükle */}
         <div className="toolbar-group toolbar-group-actions">
-          {/* Firmware (MicroPython UF2) Yükle — yeni Pico için ilk adım (sadece Pico hedefi) */}
-          {props.codeTarget !== 'arduino' && (
-          <button
-            className="btn btn-ghost btn-icon-only btn-firmware"
-            onClick={props.onFirmwareUpload}
-            data-tooltip="Firmware Yükle"
-            data-tooltip-detail="Pico'ya MicroPython UF2 yükle (yeni Pico için — ESP32'ye firmware micropython.org'dan esptool ile yüklenir)"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" />
-            </svg>
-          </button>
+          {/* 🧰 ARAÇLAR — Firmware, Modüller, Sensör Paneli, Robot Kol, RoboBOT
+              tek dropdown'da (eski 5 ikon topbar'a sığmıyordu) */}
+          <div className="tb-dropdown tb-dropdown-tools" ref={toolsDd.ref}>
+            <button
+              className={`btn btn-ghost tb-dd-trigger tb-tools-trigger ${toolsDd.open ? 'is-open' : ''} ${(props.robotArmActive || props.roboBotActive) ? 'has-active' : ''}`}
+              onClick={() => toolsDd.setOpen(!toolsDd.open)}
+              title="Araçlar — firmware, modüller, sensörler, simülasyonlar"
+              aria-haspopup="menu"
+              aria-expanded={toolsDd.open}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M14.7 6.3a4 4 0 00-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 005.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+              </svg>
+              <span className="tb-tools-label">Araçlar</span>
+              <svg className="tb-dd-caret" width="10" height="10" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {toolsDd.open && (
+              <div className="tb-dd-menu tb-dd-menu-right" role="menu">
+                {props.codeTarget !== 'arduino' && (
+                  <button
+                    role="menuitem"
+                    className="tb-dd-item"
+                    onClick={() => { toolsDd.setOpen(false); props.onFirmwareUpload(); }}
+                  >
+                    <span className="tb-dd-item-emoji">⚡</span>
+                    <span className="tb-dd-item-text">
+                      <span className="tb-dd-item-name">Firmware Yükle</span>
+                      <span className="tb-dd-item-hint">Pico'ya MicroPython UF2 (yeni kart için)</span>
+                    </span>
+                  </button>
+                )}
+                {props.codeTarget !== 'arduino' && (
+                  <button
+                    role="menuitem"
+                    className="tb-dd-item"
+                    disabled={!isConnected || isBusy}
+                    onClick={() => { toolsDd.setOpen(false); props.onUploadLibrary(); }}
+                  >
+                    <span className="tb-dd-item-emoji">📦</span>
+                    <span className="tb-dd-item-text">
+                      <span className="tb-dd-item-name">Modülleri Yükle</span>
+                      <span className="tb-dd-item-hint">
+                        {props.codeTarget === 'berrybot'
+                          ? 'BerryBot kütüphanesi + bootloader — bir kez yeter'
+                          : 'RoboExx kütüphanesini karta yaz — bir kez yeter'}
+                      </span>
+                    </span>
+                  </button>
+                )}
+                <button
+                  role="menuitem"
+                  className="tb-dd-item"
+                  disabled={!isConnected || props.connectionMode !== 'ble'}
+                  onClick={() => { toolsDd.setOpen(false); props.onSensorPanel(); }}
+                >
+                  <span className="tb-dd-item-emoji">🤖</span>
+                  <span className="tb-dd-item-text">
+                    <span className="tb-dd-item-name">Sensör Paneli</span>
+                    <span className="tb-dd-item-hint">
+                      {props.connectionMode === 'ble' ? 'Canlı sensör değerleri' : 'Sadece BLE bağlantısında'}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  role="menuitem"
+                  className={`tb-dd-item ${props.robotArmActive ? 'is-active' : ''}`}
+                  onClick={() => { toolsDd.setOpen(false); props.onRobotArm(); }}
+                >
+                  <span className="tb-dd-item-emoji">🦾</span>
+                  <span className="tb-dd-item-text">
+                    <span className="tb-dd-item-name">Robot Kol</span>
+                    <span className="tb-dd-item-hint">4 eksen simülasyon — gerçek kol senkron</span>
+                  </span>
+                  {props.robotArmActive && <span className="tb-dd-check">✓</span>}
+                </button>
+                <button
+                  role="menuitem"
+                  className={`tb-dd-item ${props.roboBotActive ? 'is-active' : ''}`}
+                  onClick={() => { toolsDd.setOpen(false); props.onRoboBot(); }}
+                >
+                  <span className="tb-dd-item-emoji">🚗</span>
+                  <span className="tb-dd-item-text">
+                    <span className="tb-dd-item-name">RoboBOT Simülasyonu</span>
+                    <span className="tb-dd-item-hint">Çizgi izleme · engelden kaçma</span>
+                  </span>
+                  {props.roboBotActive && <span className="tb-dd-check">✓</span>}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Durdur — MEŞGUL her durumda görünür (USB run, BLE yükleme,
+              takılı kalan işlem). Yeni iptal sistemi süren işlemi anında
+              düşürür; enerji kesmeye / fiziksel resete gerek kalmaz. */}
+          {isBusy && (
+            <button className="btn btn-stop" onClick={props.onStop} title="Süren işlemi durdur / iptal et">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
+                <rect x="2" y="2" width="8" height="8" rx="1" />
+              </svg>
+              Durdur
+            </button>
           )}
-
-          {props.codeTarget !== 'arduino' && (
-          <button
-            className="btn btn-ghost btn-icon-only btn-upload-lib"
-            onClick={props.onUploadLibrary}
-            disabled={!isConnected || isBusy}
-            data-tooltip="Modülleri Yükle"
-            data-tooltip-detail={props.codeTarget === 'berrybot'
-              ? 'BerryBot kütüphanesi + bootloader\'ı robota yazar. Bir kez yapman yeter.'
-              : 'RoboExx kütüphanesini karta (Pico / ESP32) yazar. Bir kez yapman yeter.'}
-          >
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-              <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <circle cx="13" cy="4" r="2" fill="currentColor" />
-            </svg>
-          </button>
-          )}
-
-          {/* Sensör paneli — robot resmi üzerinde canlı sensör değerleri */}
-          <button
-            className="btn btn-ghost btn-icon-only btn-sensor-panel"
-            onClick={props.onSensorPanel}
-            disabled={!isConnected || props.connectionMode !== 'ble'}
-            data-tooltip="Sensör Paneli"
-            data-tooltip-detail={
-              props.connectionMode === 'ble'
-                ? 'Robot resmi üzerinde canlı sensör değerleri'
-                : 'Sadece BLE bağlantısında kullanılabilir'
-            }
-          >
-            <span style={{ fontSize: 18, lineHeight: 1 }}>🤖</span>
-          </button>
-
-          {/* Robot Kol — 3B simülasyon + gerçek kol senkron kontrolü */}
-          <button
-            className={`btn btn-ghost btn-icon-only btn-robotarm ${props.robotArmActive ? 'is-active' : ''}`}
-            onClick={props.onRobotArm}
-            data-tooltip="Robot Kol"
-            data-tooltip-detail="4 eksenli robot kol simülasyonu — IK ile tıkla-git, gerçek kol senkron"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect x="9" y="2" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M12 6v4M7 14l5-4 5 4M5 20h14M7 14v6M17 14v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-
-          {/* RoboBOT — diferansiyel sürüş robot simülasyonu (çizgi izleme / engelden kaçma) */}
-          <button
-            className={`btn btn-ghost btn-icon-only btn-robobot ${props.roboBotActive ? 'is-active' : ''}`}
-            onClick={props.onRoboBot}
-            data-tooltip="RoboBOT Simülasyonu"
-            data-tooltip-detail="Diferansiyel sürüş robotu — çizgi izleme, engelden kaçma; bloklarla yaz, simülasyonda dene"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect x="5" y="8" width="14" height="9" rx="2" stroke="currentColor" strokeWidth="1.8" />
-              <circle cx="9" cy="20" r="2" stroke="currentColor" strokeWidth="1.8" />
-              <circle cx="15" cy="20" r="2" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M9 8V5M15 8V5M8.5 12h.01M15.5 12h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </button>
 
           {/* Çalıştır — sadece USB modunda + Pico hedefinde (BLE'de canlı çıktı pratik değil) */}
-          {props.codeTarget !== 'arduino' && props.connectionMode === 'usb' && (
-            isBusy ? (
-              <button className="btn btn-stop" onClick={props.onStop} title="Çalışan programı durdur (Ctrl+C)">
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
-                  <rect x="2" y="2" width="8" height="8" rx="1" />
-                </svg>
-                Durdur
-              </button>
-            ) : (
-              <button
-                className="btn btn-secondary"
-                onClick={props.onRun}
-                disabled={!isConnected}
-                title="REPL üzerinden RAM'de anında çalıştır"
-              >
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
-                  <path d="M2.5 1.5v9l8-4.5-8-4.5z" />
-                </svg>
-                Çalıştır
-              </button>
-            )
+          {!isBusy && props.codeTarget !== 'arduino' && props.connectionMode === 'usb' && (
+            <button
+              className="btn btn-secondary"
+              onClick={props.onRun}
+              disabled={!isConnected}
+              title="REPL üzerinden RAM'de anında çalıştır"
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M2.5 1.5v9l8-4.5-8-4.5z" />
+              </svg>
+              Çalıştır
+            </button>
           )}
 
           {props.codeTarget !== 'arduino' ? (
