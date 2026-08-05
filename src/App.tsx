@@ -357,8 +357,10 @@ export default function App() {
     serialBridge.onLog = (kind, message) => addLine(kind, message);
 
     // BLE Bridge — aynı state callback'lerine bağla
+    // (BLE onLog 'stdout'/'stderr' de üretebilir → monitor türlerine eşle)
     bleBridge.onStateChange = setBridgeState;
-    bleBridge.onLog = (kind, message) => addLine(kind, message);
+    bleBridge.onLog = (kind, message) =>
+      addLine(kind === 'stdout' ? 'output' : kind === 'stderr' ? 'error' : kind, message);
 
     addLine('system', 'RoboExx · BerryBot sürümü v4.2');
     if ('serial' in navigator) {
@@ -369,14 +371,21 @@ export default function App() {
       addLine('error', 'Bu tarayıcıda USB erişimi yok (iPad?) — Bluetooth kullanın');
     }
     addLine('system', 'RoboExx · Pico / ESP32 bağlantısı bekleniyor');
-    serialBridge.tryAutoConnect().then((info) => {
+    // Kod hedefi Arduino iken CH340/CP210x/FTDI portlarına OTOMATİK bağlanma:
+    // bu çipler Arduino klonlarında da var; MicroPython köprüsü portu kapınca
+    // "Karta Yükle" port açamıyordu. (Pico/Espressif native USB her zaman
+    // otomatik bağlanır — onlar Arduino olamaz.)
+    const skipUartForArduino = () => ({
+      skipUartBridges: localStorage.getItem('roboexx.code-target') === 'arduino',
+    });
+    serialBridge.tryAutoConnect(skipUartForArduino()).then((info) => {
       if (info) addLine('info', 'Önceden tanınan cihaz otomatik bağlandı');
     });
 
     if ('serial' in navigator || 'usb' in navigator) {
       const onConnect = () => {
         if (serialBridge.state === 'disconnected') {
-          serialBridge.tryAutoConnect().then((info) => {
+          serialBridge.tryAutoConnect(skipUartForArduino()).then((info) => {
             if (info) addLine('info', 'Cihaz takıldı, otomatik bağlandı');
           });
         }
@@ -412,6 +421,12 @@ export default function App() {
   const handleTargetChange = (t: CodeTarget) => {
     setCodeTarget(t);
     try { localStorage.setItem('roboexx.code-target', t); } catch { /* yoksay */ }
+    // Arduino hedefine geçildi ve MicroPython köprüsü bir CH340/CP210x/FTDI
+    // portunu tutuyorsa bırak — o port büyük ihtimalle Arduino'nun kendisi.
+    if (t === 'arduino' && serialBridge.isHoldingUartBridgePort()) {
+      serialBridge.disconnect().catch(() => {});
+      addLine('system', 'Arduino modu: USB portu Arduino yükleyicisi için serbest bırakıldı');
+    }
     // Bloklar aynı; sadece üretilen kod dilini değiştir
     setTimeout(() => blocklyRef.current?.regenerate(), 0);
   };

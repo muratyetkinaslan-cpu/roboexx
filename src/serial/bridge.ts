@@ -146,17 +146,24 @@ export class SerialBridge {
   /**
    * Daha önce yetkilendirilmiş portu bulup otomatik bağlanmayı dener.
    */
-  async tryAutoConnect(): Promise<PortInfo | null> {
+  async tryAutoConnect(opts?: { skipUartBridges?: boolean }): Promise<PortInfo | null> {
     if (!this.isWebSerialSupported()) return null;
     try {
       const serial = this._serialApi();
       const ports = await serial.getPorts();
-      // Önce Pico'yu, yoksa desteklenen herhangi bir kartı (ESP32) dene
+      // Önce Pico'yu, yoksa desteklenen herhangi bir kartı (ESP32) dene.
+      // skipUartBridges: CH340/CP210x/FTDI çipleri hem ESP32 hem Arduino
+      // klonlarında var. Kod hedefi Arduino iken bu çiplere OTOMATİK
+      // bağlanmayız — yoksa MicroPython köprüsü Arduino'nun portunu kapıp
+      // açık tutuyor ve "Karta Yükle" port açamadığı için patlıyordu.
       const devicePort =
         ports.find((p) => p.getInfo().usbVendorId === RPI_VID) ??
         ports.find((p) => {
-          const vid = p.getInfo().usbVendorId;
-          return vid !== undefined && SUPPORTED_VIDS.includes(vid);
+          const info = p.getInfo();
+          const vid = info.usbVendorId;
+          if (vid === undefined || !SUPPORTED_VIDS.includes(vid)) return false;
+          if (opts?.skipUartBridges && isUartBridge(info)) return false;
+          return true;
         });
       if (!devicePort) return null;
       return await this._connect(devicePort);
@@ -164,6 +171,14 @@ export class SerialBridge {
       console.warn('Auto-connect failed:', e);
       return null;
     }
+  }
+
+  /**
+   * Elimizdeki port bir UART köprü çipi mi (CH340/CP210x/FTDI)?
+   * Arduino yükleyicisi, çakışan portu serbest bıraktırmak için sorar.
+   */
+  isHoldingUartBridgePort(): boolean {
+    return this.port !== null && this.uartBridge;
   }
 
   /**
@@ -349,22 +364,15 @@ export class SerialBridge {
     if (this.state !== 'connected') throw new Error('Bağlı değil');
     this._setState('busy');
     this.liveRun = true; // tuş enjeksiyonuna izin ver (canlı çalıştırma)
-    console.log('[RoboExx] runCode başladı, kod boyutu:', code.length);
     try {
-      console.log('[RoboExx] _enterRaw çağrılıyor...');
       await this._enterRaw();
-      console.log('[RoboExx] _enterRaw tamamlandı, _execRaw başlıyor');
       await this._execRaw(code);
-      console.log('[RoboExx] _execRaw tamamlandı, _exitRaw başlıyor');
       await this._exitRaw();
-      console.log('[RoboExx] runCode başarılı bitiş');
     } catch (e) {
       console.error('[RoboExx] runCode HATA:', e);
       throw e;
     } finally {
-      console.log('[RoboExx] runCode finally — _forceIdle çağrılıyor, mevcut state:', this.state);
       this._forceIdle();
-      console.log('[RoboExx] _forceIdle sonrası state:', this.state);
     }
   }
 
@@ -381,7 +389,11 @@ export class SerialBridge {
     const start = Date.now();
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
-    const CHUNK_BYTES = 1024;
+    // Native USB-CDC (Pico/Espressif) 2 KB parçayı rahat parse eder (bytes
+    // literal ~2.5-8 KB'a şişer; MemoryError sınırı ~14 KB idi). Gerçek UART
+    // köprülerinde (CH340/CP210x) küçük RX tamponu için 1 KB'da kal.
+    // Daha az raw-REPL turu = belirgin hız artışı.
+    const CHUNK_BYTES = this.uartBridge ? 1024 : 2048;
 
     try {
       await this._enterRaw();
@@ -488,10 +500,10 @@ export class SerialBridge {
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
 
-    // Büyük dosyalar (>4KB) için chunk'lara böl — Pico W'nin sınırlı RAM'i
-    // tek seferde 14 KB bytes literal'i parse edemiyor (MemoryError).
-    // Her chunk için ayrı bir f.write() raw REPL komutu gönder.
-    const CHUNK_BYTES = 1024;
+    // Büyük dosyalar için chunk'lara böl — Pico W'nin sınırlı RAM'i tek
+    // seferde 14 KB bytes literal'i parse edemiyor (MemoryError). Native
+    // USB'de 2 KB güvenli ve iki kat hızlı; UART köprüsünde 1 KB'da kal.
+    const CHUNK_BYTES = this.uartBridge ? 1024 : 2048;
 
     try {
       await this._enterRaw();
@@ -759,13 +771,6 @@ export class SerialBridge {
    * \x04 işaretleri ayıklanır, kullanıcı içerik canlı olarak onText'e akar.
    */
   private _processStream(text: string): void {
-    // Hangi byte'lar geldi? \x04 = 0x04 = "End of Transmission"
-    const has04 = text.includes('\x04');
-    const has04Bracket = text.includes('\x04>');
-    if (has04 || has04Bracket) {
-      console.log('[RoboExx] _processStream chunk:', JSON.stringify(text.slice(0, 80)),
-        'state:', this.streamState, 'has \\x04:', has04, 'has \\x04>:', has04Bracket);
-    }
     let pos = 0;
     while (pos < text.length && this.streamState !== 'done') {
       if (this.streamState === 'stdout') {
@@ -995,11 +1000,9 @@ export class SerialBridge {
 
     // Çalıştır (Ctrl-D)
     await this._write('\x04');
-    console.log('[RoboExx] Ctrl-D yazıldı, OK bekleniyor...');
 
     // OK işaretini silent buffer'da bekle
     await this._waitForBuffer('OK', 3000);
-    console.log('[RoboExx] OK alındı, silentBuffer:', JSON.stringify(this.silentBuffer.slice(0, 100)));
 
     // KRİTİK: "OK" sonrası silent buffer'da kalan veriyi alıp stream parser'a
     // ver. Yeni Pico firmware'leri "OK" + stream + end-marker'ı tek pakette
@@ -1007,7 +1010,6 @@ export class SerialBridge {
     // kaybolur, end-marker hiç gelmez ve 60s timeout olur.
     const okIdx = this.silentBuffer.indexOf('OK');
     const leftover = this.silentBuffer.slice(okIdx + 2);
-    console.log('[RoboExx] leftover boyutu:', leftover.length, 'içerik:', JSON.stringify(leftover.slice(0, 60)));
     this.silent = false;
     this.silentBuffer = '';
 
@@ -1020,27 +1022,22 @@ export class SerialBridge {
     // Kalan veriyi şimdi stream parser'a yedir — kayıp önlenir
     if (leftover) {
       this._processStream(leftover);
-      console.log('[RoboExx] leftover işlendi, streamState:', this.streamState);
     }
 
     // Stream'in bitmesini bekle (\x04> görene kadar)
     // VEYA dış müdahale ile streamMode kapatılana kadar (interrupt/forceReset)
+    // Not: streamState'i _processStream / read loop değiştirir; TS bunu
+    // göremediği için okuma fonksiyona alındı (yanlış daraltma önlenir).
+    const streamDone = () => this.streamState === 'done';
     const start = Date.now();
-    let lastLog = start;
-    while (this.streamState !== 'done' && this.streamMode) {
+    while (!streamDone() && this.streamMode) {
       if (Date.now() - start > 60000) {
-        console.error('[RoboExx] 60s TIMEOUT - streamState:', this.streamState, 'streamMode:', this.streamMode);
+        console.error('[RoboExx] 60s TIMEOUT - streamState:', this.streamState);
         this.streamMode = false;
         throw new Error('Çalıştırma zaman aşımı (60s)');
       }
-      // Her 2 saniyede bir log
-      if (Date.now() - lastLog > 2000) {
-        console.log('[RoboExx] stream bekleniyor, state:', this.streamState, 'stdout uzunluğu:', this.streamStdout.length);
-        lastLog = Date.now();
-      }
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 5));
     }
-    console.log('[RoboExx] Stream bitti, streamState:', this.streamState, 'streamMode:', this.streamMode);
 
     const output = this.streamStdout;
     const error = this.streamStderr;

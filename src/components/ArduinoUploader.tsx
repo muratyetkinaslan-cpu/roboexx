@@ -15,6 +15,7 @@ import {
 } from '../arduino/compile';
 import { Stk500Flasher, type FlashProgress } from '../arduino/stk500';
 import { arduinoLiveLink } from '../arduino/livelink';
+import { serialBridge } from '../serial/bridge';
 
 interface Props {
   open: boolean;
@@ -78,6 +79,12 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
 
     // Daha önce izin verilmiş tek bir Arduino portu varsa dialogsuz devam et
     (async () => {
+      // ÖNEMLİ: MicroPython köprüsü, Arduino'nun CH340/FTDI çipini "ESP32"
+      // sanıp otomatik bağlanmış olabilir — portu O tutuyorsa STK500 açamaz
+      // ve yükleme "port açılamadı" ile patlar. Önce serbest bıraktır.
+      if (serialBridge.isHoldingUartBridgePort()) {
+        try { await serialBridge.disconnect(); } catch { /* yoksay */ }
+      }
       if (flasher.hasPort()) {
         applyGuess();
         setPortReused(true);
@@ -201,6 +208,11 @@ export function ArduinoUploader({ open, onClose, source }: Props) {
     // Canlı bağlantı açıksa kapat — port aynı anda tek sahipli olabilir
     setLiveReady(false);
     await arduinoLiveLink.close().catch(() => {});
+    // Dialog açıkken kart yeniden takıldıysa MicroPython köprüsü portu
+    // tekrar kapmış olabilir — flash'tan hemen önce bir kez daha bıraktır.
+    if (serialBridge.isHoldingUartBridgePort()) {
+      await serialBridge.disconnect().catch(() => {});
+    }
     setStep('flashing');
     setProgress({ phase: 'reset', pct: 0 });
     try {

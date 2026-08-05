@@ -60,6 +60,8 @@ export class Stk500Flasher {
   private rxBuffer: number[] = [];
   private readLoop: Promise<void> | null = null;
   private reading = false;
+  /** Yeni bayt gelince uyandırılacak bekleyici — 4ms polling yerine anlık. */
+  private rxWake: (() => void) | null = null;
 
   isSupported(): boolean {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -177,7 +179,7 @@ export class Stk500Flasher {
               : 'İlk deneme tutmadı, otomatik yeniden deneniyor…'
           );
           // kartın ve USB sürücüsünün toparlanması için bekle
-          await sleep(900);
+          await sleep(500);
         }
       }
     }
@@ -197,7 +199,20 @@ export class Stk500Flasher {
 
     const { data } = parseIntelHex(hexText);
 
-    await this.port.open({ baudRate: board.baudRate, bufferSize: 4096 });
+    // Port açma — "zaten açık" hatasında (önceki yarım oturum, canlı bağlantı
+    // ya da MicroPython köprüsünün kapmış olması) kapatıp bir kez daha dene.
+    try {
+      await this.port.open({ baudRate: board.baudRate, bufferSize: 4096 });
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
+      const already =
+        (e as { name?: string })?.name === 'InvalidStateError' ||
+        /already open|zaten aç/i.test(msg);
+      if (!already) throw e;
+      try { await this.port.close(); } catch { /* kapatılamadıysa open zaten patlar */ }
+      await sleep(150);
+      await this.port.open({ baudRate: board.baudRate, bufferSize: 4096 });
+    }
     try {
       this.writer = this.port.writable!.getWriter();
       this.startReadLoop();
@@ -270,8 +285,11 @@ export class Stk500Flasher {
         // her denemede tamponu temizle
         this.rxBuffer = [];
         await this.write([STK_GET_SYNC, CRC_EOP]);
-        await this.expect(STK_INSYNC, 400);
-        await this.expect(STK_OK, 400);
+        // Optiboot canlıysa <100ms'de cevaplar: ilk denemeler kısa timeout
+        // ile geçsin ki yanlış baud'da hızlıca diğer hıza düşülebilsin.
+        const t = i < 3 ? 220 : 400;
+        await this.expect(STK_INSYNC, t);
+        await this.expect(STK_OK, t);
         return;
       } catch (e) {
         lastErr = e as Error;
@@ -282,7 +300,7 @@ export class Stk500Flasher {
           await sleep(350);
           this.rxBuffer = [];
         }
-        await sleep(80);
+        await sleep(60);
       }
     }
     throw new SyncError(
@@ -340,21 +358,43 @@ export class Stk500Flasher {
         while (this.reading) {
           const { value, done } = await this.reader!.read();
           if (done) break;
-          if (value) for (const b of value) this.rxBuffer.push(b);
+          if (value) {
+            for (const b of value) this.rxBuffer.push(b);
+            // Bekleyen readBytes'ı ANINDA uyandır — polling gecikmesi yok
+            if (this.rxWake) {
+              const w = this.rxWake;
+              this.rxWake = null;
+              w();
+            }
+          }
         }
       } catch {
         /* port kapanınca normal */
+      } finally {
+        if (this.rxWake) {
+          const w = this.rxWake;
+          this.rxWake = null;
+          w(); // bekleyeni bırak; readBytes timeout'a düşer
+        }
       }
     })();
   }
 
   private async readBytes(n: number, timeoutMs: number): Promise<number[]> {
-    const start = Date.now();
+    const deadline = Date.now() + timeoutMs;
     while (this.rxBuffer.length < n) {
-      if (Date.now() - start > timeoutMs) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
         throw new Error(`Zaman aşımı: ${n} bayt beklendi, ${this.rxBuffer.length} geldi`);
       }
-      await sleep(4);
+      // Olay tabanlı bekle: yeni bayt gelir gelmez read loop bizi uyandırır.
+      // (Eski 4ms polling, 32KB'lık sketch'te sayfa başına ~8ms → toplam
+      // ~2sn gereksiz gecikme demekti.)
+      await new Promise<void>((resolve) => {
+        this.rxWake = resolve;
+        setTimeout(resolve, Math.min(remaining, 50)); // emniyet: en geç 50ms'de kontrol
+      });
+      this.rxWake = null;
     }
     return this.rxBuffer.splice(0, n);
   }
@@ -370,8 +410,9 @@ export class Stk500Flasher {
   private async toggleReset(): Promise<void> {
     if (!this.port) return;
     try {
+      // 120ms darbe yeterli (avrdude ~50ms kullanır; klonlar için pay bırak).
       await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
-      await sleep(250);
+      await sleep(120);
       await this.port.setSignals({ dataTerminalReady: true, requestToSend: true });
       await sleep(50);
     } catch (e) {

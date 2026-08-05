@@ -110,7 +110,19 @@ export class BLEBridge {
   private lastPollHex: string | null = null;
   /** Gelen durum baytları (notify) — FIFO kuyruk */
   private statusQueue: number[] = [];
-  private statusWaiter: { resolve: (s: number) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private statusWaiter: {
+    resolve: (s: number) => void;
+    reject: (e: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+  /**
+   * İşlem jenerasyon sayacı. Her yükleme/durdurma bunu artırır; arka planda
+   * süren _verifyAlive (PING doğrulayıcı) kendi jenerasyonu eskiyince ANINDA
+   * çekilir. Eskiden doğrulayıcı, hemen ardından başlatılan İKİNCİ yüklemenin
+   * durum bekleyicisini _clearStatus ile siliyordu → yükleme sonsuza dek
+   * donuyor, kullanıcı robota reset atmak zorunda kalıyordu.
+   */
+  private opSeq = 0;
   /**
    * true ise gattserverdisconnected'da cihazı UNUTMA — otomatik reconnect dene.
    */
@@ -330,8 +342,10 @@ export class BLEBridge {
     this.linkAlive = false;
     if (!this.rxChar) return;
     if (!this.notifyAvailable) return; // abonelik zaten yok -> kor mod
+    const mySeq = this.opSeq;
     // 1) Notify ile 3 deneme
     for (let i = 1; i <= 3; i++) {
+      if (this.opSeq !== mySeq || this.state === 'busy') return; // yükleme devraldı
       this._clearStatus();
       try {
         await this._writeRaw(new Uint8Array([MSG_PING]));
@@ -344,6 +358,7 @@ export class BLEBridge {
     this.onLog('system', 'Bildirim hattı sessiz — okuma yoklaması deneniyor…');
     this._startReadPolling();
     for (let i = 1; i <= 3; i++) {
+      if (this.opSeq !== mySeq || this.state === 'busy') return; // yükleme devraldı
       this._clearStatus();
       try {
         await this._writeRaw(new Uint8Array([MSG_PING]));
@@ -394,6 +409,7 @@ export class BLEBridge {
     if (this.state !== 'connected') throw new Error('BLE bağlı değil');
     if (!this.rxChar) throw new Error('RX karakteristik yok');
 
+    this.opSeq++;        // ← arka plandaki _verifyAlive PING doğrulayıcısını durdur
     this._setState('busy');
     this._clearStatus(); // ← bayat durum baytları yeni beklemeyi karşılamasın
     const start = Date.now();
@@ -515,9 +531,16 @@ export class BLEBridge {
    */
   private async _verifyAlive(): Promise<void> {
     if (!this.notifyAvailable) return;
+    // Jenerasyonu yakala: yeni bir yükleme/durdurma başlarsa (opSeq artar)
+    // bu doğrulayıcı ONA KARIŞMADAN sessizce çekilir. Eskiden buradaki
+    // _clearStatus, ikinci yüklemenin ACK/RECEIVING bekleyicisini yutuyordu.
+    const mySeq = this.opSeq;
     for (let attempt = 1; attempt <= 5; attempt++) {
       await sleep(attempt === 1 ? 1200 : 1000);
-      if (this.state === 'connecting') return; // reconnect zaten ilgileniyor
+      if (this.opSeq !== mySeq) return;         // yeni işlem devraldı — karışma
+      if (this.state === 'busy') return;        // yükleme sürüyor — karışma
+      if (this.state === 'connecting') return;  // reconnect zaten ilgileniyor
+      if (this.state === 'disconnected') return;
       this._clearStatus();
       try {
         await this._writeRaw(new Uint8Array([MSG_PING]));
@@ -526,6 +549,7 @@ export class BLEBridge {
       } catch {
         // yanıt yok — tekrar dene
       }
+      if (this.opSeq !== mySeq) return;
     }
     // Robot yanıt vermiyor ama GATT "bağlı" görünüyor → bayat bağlantı.
     if (this.device?.gatt?.connected && this.expectReconnect) {
@@ -682,6 +706,7 @@ export class BLEBridge {
     if (!this.protoV2) {
       throw new Error('Durdur için robot yazılımını güncelle ("Modülleri Yükle")');
     }
+    this.opSeq++; // önceki doğrulayıcıyı geçersiz kıl
     this.expectReconnect = true;
     await this._writeRaw(new Uint8Array([MSG_STOP]));
     if ((this.state as BridgeState) === 'busy') this._setState('connected');
@@ -836,8 +861,13 @@ export class BLEBridge {
   private _clearStatus(): void {
     this.statusQueue = [];
     if (this.statusWaiter) {
-      clearTimeout(this.statusWaiter.timer);
+      const w = this.statusWaiter;
       this.statusWaiter = null;
+      clearTimeout(w.timer);
+      // KRİTİK: bekleyen promise'i reddet — eskiden sadece null'lanıyordu ve
+      // promise SONSUZA DEK askıda kalıyordu (await asla dönmüyordu). Üst üste
+      // yüklemede donmaların ana nedeni buydu.
+      w.reject(new Error('BLE durum bekleyicisi iptal edildi'));
     }
   }
 
@@ -851,7 +881,7 @@ export class BLEBridge {
         this.statusWaiter = null;
         reject(new Error('BLE zaman aşımı'));
       }, timeoutMs);
-      this.statusWaiter = { resolve, timer };
+      this.statusWaiter = { resolve, reject, timer };
     });
   }
 
