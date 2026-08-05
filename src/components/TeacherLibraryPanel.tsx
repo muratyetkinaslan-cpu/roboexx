@@ -103,7 +103,7 @@ export function TeacherLibraryPanel({
           </button>
         </div>
       ) : (
-        <>
+        <div className="tl-scroll">
           <div className="tl-target-row">
             {connectedStudentName ? (
               <>
@@ -204,7 +204,7 @@ export function TeacherLibraryPanel({
               );
             })}
           </div>
-        </>
+        </div>
       )}
     </aside>
   );

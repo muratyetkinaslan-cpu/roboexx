@@ -6837,3 +6837,58 @@ g.blocklyDraggable > path:first-of-type {
 /* Şifre kapısı ve hedef satırı sabit kalsın, liste kalan alanı alsın */
 .tl-target-row { flex-shrink: 0; }
 .classroom-panel-header { flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════════════════════
+   EĞİTMEN PANELİ SCROLL — NÜKLEER ÇÖZÜM (v3)
+   Ekran görüntüsünde panel içerik pencereden TAŞIYOR, scrollbar hiç yok.
+   Artık kaydırma bölgesi flex/grid hesabına GÜVENMİYOR:
+   .tl-scroll doğrudan ekran yüksekliğine sabitlenir (calc(100dvh - ...)),
+   içerik ne olursa olsun bu tavanı aşamaz → tekerlek/touchpad/parmak
+   kaydırması her tarayıcıda garantili çalışır.
+   ════════════════════════════════════════════════════════════════════ */
+.teacher-library-panel .tl-scroll {
+  /* 100dvh − (toolbar 64px + panel başlığı ~50px + pay) — banner varken de
+     güvenli. dvh: mobil adres çubuğu değişimlerinde 100vh hatasını önler. */
+  height: calc(100dvh - 118px);
+  max-height: calc(100dvh - 118px);
+  overflow-y: scroll;              /* auto değil SCROLL: çubuk hep görünür,
+                                      kaydırılabilir olduğu belli olur */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  scrollbar-gutter: stable;
+}
+@supports not (height: 100dvh) {
+  .teacher-library-panel .tl-scroll {
+    height: calc(100vh - 118px);
+    max-height: calc(100vh - 118px);
+  }
+}
+/* Banner (destek uyarısı) açıkken 52px daha kısa */
+.app[data-has-banner="true"] .teacher-library-panel .tl-scroll {
+  height: calc(100dvh - 170px);
+  max-height: calc(100dvh - 170px);
+}
+/* Sarmalayıcı artık kaydırdığı için iç liste doğal yükseklikte akar */
+.teacher-library-panel .tl-kit-list {
+  flex: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  padding-bottom: 48px;            /* son görevin butonları rahat erişilir */
+}
+.teacher-library-panel .tl-target-row { flex-shrink: 0; }
+
+/* Görünür, tutulabilir kaydırma çubuğu — "kaydırılabilir" olduğu bariz */
+.teacher-library-panel .tl-scroll::-webkit-scrollbar { width: 12px; }
+.teacher-library-panel .tl-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--rx-accent) 45%, var(--rx-border));
+  border-radius: 999px;
+  border: 3px solid var(--rx-surface);
+}
+.teacher-library-panel .tl-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--rx-accent);
+}

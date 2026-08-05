@@ -835,7 +835,7 @@ const F = (id: number, name: string, desc: string, steps: string[], blocks: Work
 
 export const BERRYTANK_SOLUTIONS: Kit = {
   id: 'berrytank-lms',
-  name: 'BerryTank — Görev Cevapları',
+  name: 'RoboPANZER — Görev Cevapları',
   emoji: '🪖',
   desc: 'LMS "Çelik Palet Harekâtı" 36 görevin blok çözümleri (rx_bb_*)',
   files: [
