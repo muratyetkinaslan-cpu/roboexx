@@ -8,7 +8,7 @@ type CodeTargetT = 'micropython' | 'arduino' | 'berrybot';
 
 const TARGET_META: Record<CodeTargetT, { emoji: string; label: string; hint: string }> = {
   micropython: { emoji: '🐍', label: 'MicroPython', hint: 'Pico / ESP32' },
-  berrybot:    { emoji: '🍓', label: 'BerryBot',    hint: 'Bluetooth ile kablosuz' },
+  berrybot:    { emoji: '🪖', label: 'RoboPANZER',  hint: 'Bluetooth ile kablosuz' },
   arduino:     { emoji: '🔌', label: 'Arduino',     hint: 'Uno / Nano · C++' },
 };
 
@@ -105,7 +105,7 @@ export function Toolbar(props: Props) {
   const curTarget = TARGET_META[props.codeTarget];
 
   return (
-    <header className="toolbar">
+    <header className="toolbar" data-target={props.codeTarget}>
       <div className="toolbar-section toolbar-left">
         <Brand isLight={isLight} />
 
@@ -167,24 +167,7 @@ export function Toolbar(props: Props) {
       </div>
 
       <div className="toolbar-section toolbar-right">
-        {/* 🍓 BerryBot pil göstergesi (BLE bağlıyken) */}
-        {props.codeTarget === 'berrybot' && props.batteryPct !== undefined && (
-          <span
-            className="berrybot-battery-badge"
-            data-tooltip="BerryBot pili"
-            data-tooltip-detail={props.batteryPct === null
-              ? 'Pil ölçümü yok — berrybot.py içinde PIN_BATTERY ayarlanmalı (bkz. BERRYBOT.md)'
-              : 'Robottan 10 saniyede bir okunur'}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '2px 8px', borderRadius: 12, fontSize: 12,
-              background: props.batteryPct === null ? 'rgba(128,128,128,.18)'
-                : props.batteryPct < 20 ? 'rgba(220,60,60,.22)' : 'rgba(60,180,90,.18)',
-            }}
-          >
-            🔋 {props.batteryPct === null ? '—' : `%${props.batteryPct}`}
-          </span>
-        )}
+        {/* (Pil rozeti topbar'dan kaldırıldı — istek üzerine) */}
 
         {/* Açık/koyu tema geçiş butonu */}
         <button
@@ -329,7 +312,7 @@ export function Toolbar(props: Props) {
                       <span className="tb-dd-item-name">Modülleri Yükle</span>
                       <span className="tb-dd-item-hint">
                         {props.codeTarget === 'berrybot'
-                          ? 'BerryBot kütüphanesi + bootloader — bir kez yeter'
+                          ? 'RoboPANZER kütüphanesi + bootloader — bir kez yeter'
                           : 'RoboExx kütüphanesini karta yaz — bir kez yeter'}
                       </span>
                     </span>

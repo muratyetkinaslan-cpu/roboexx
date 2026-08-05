@@ -4,14 +4,14 @@ import { ICONS } from './icons';
 import { FieldColourPalette } from './colour-field';
 
 /**
- * 🍓 BerryBot blokları (Robotistan BerryBot, RP2040).
+ * 🪖 RoboPANZER blokları (Robotistan RoboPANZER, RP2040).
  *
  * Üretilen kod `berrybot.py` v2 kütüphanesini kullanır ve
  * `bot = BerryBot()` singleton'ı üzerinden çalışır. Bootloader
  * (berrybot_main.py) aynı singleton'ı paylaştığı için matris timer'ı,
  * NeoPixel PIO makinesi vb. iki kez kurulmaz.
  *
- * Hedef kart "🍓 BerryBot" seçiliyken üretilen koda otomatik olarak
+ * Hedef kart "🪖 RoboPANZER" seçiliyken üretilen koda otomatik olarak
  * `from berrybot import ...` girer; ayrıca bu bloklardan HERHANGİ biri
  * kullanılırsa hedef ne olursa olsun import kendiliğinden eklenir.
  */
@@ -40,9 +40,9 @@ export function setBerryBotMode(on: boolean): void {
 }
 
 // generator.ts'in init sarmalayıcısının ÜZERİNE ikinci bir sarmalayıcı:
-// BerryBot hedefinde berrybot import'u + bot singleton'ı eklenir.
+// RoboPANZER hedefinde berrybot import'u + bot singleton'ı eklenir.
 // (roboexx import'u da kalır — generic pin/buzzer/zaman blokları
-//  BerryBot üzerinde de çalışsın diye; roboexx.py import'u tembeldir,
+//  RoboPANZER üzerinde de çalışsın diye; roboexx.py import'u tembeldir,
 //  donanım kurmaz.)
 const _prevInit = pythonGenerator.init.bind(pythonGenerator);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +55,7 @@ const _prevInit = pythonGenerator.init.bind(pythonGenerator);
   }
 };
 
-/** Her BerryBot blok üreticisi bunu çağırır — hedef ne olursa olsun
+/** Her RoboPANZER blok üreticisi bunu çağırır — hedef ne olursa olsun
  *  import + singleton tanımı koda girer. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function needBot(generator: any): void {
@@ -73,7 +73,7 @@ Blockly.Blocks['rx_bb_move'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.motor))
-      .appendField('BerryBot')
+      .appendField('RoboPANZER')
       .appendField(
         new Blockly.FieldDropdown([
           ['ileri git ⬆', 'FWD'],
@@ -89,7 +89,7 @@ Blockly.Blocks['rx_bb_move'] = {
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(true);
-    this.setTooltip('BerryBot\'u seçilen yönde sürer. Hız: 0-100');
+    this.setTooltip('RoboPANZER\'u seçilen yönde sürer. Hız: 0-100');
   },
 };
 
@@ -97,7 +97,7 @@ Blockly.Blocks['rx_bb_drive'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.motor))
-      .appendField('BerryBot sür · sol %');
+      .appendField('RoboPANZER sür · sol %');
     this.appendValueInput('L').setCheck('Number');
     this.appendDummyInput().appendField('sağ %');
     this.appendValueInput('R').setCheck('Number');
@@ -113,7 +113,7 @@ Blockly.Blocks['rx_bb_stop'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.stop))
-      .appendField('BerryBot dur');
+      .appendField('RoboPANZER dur');
     this.setStyle('dcmotor_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);
@@ -268,7 +268,7 @@ Blockly.Blocks['rx_bb_horn'] = {
     this.setStyle('buzzer_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);
-    this.setTooltip('BerryBot kornasını 0.3 saniye öttürür');
+    this.setTooltip('RoboPANZER kornasını 0.3 saniye öttürür');
   },
 };
 
@@ -278,7 +278,7 @@ Blockly.Blocks['rx_bb_distance'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.ruler))
-      .appendField('BerryBot mesafe (cm)');
+      .appendField('RoboPANZER mesafe (cm)');
     this.setStyle('ultra_blocks');
     this.setOutput(true, 'Number');
     this.setTooltip('Öndeki engele uzaklık (cm). Engel yoksa 400 döner');
@@ -350,7 +350,7 @@ Blockly.Blocks['rx_bb_button'] = {
   init: function (this: Blockly.Block) {
     this.appendDummyInput()
       .appendField(icon(ICONS.button))
-      .appendField('BerryBot butonuna basılı mı?');
+      .appendField('RoboPANZER butonuna basılı mı?');
     this.setStyle('button_blocks');
     this.setOutput(true, 'Boolean');
     this.setTooltip('Üstteki mod butonu basılıysa doğru (True)');
@@ -923,7 +923,7 @@ pythonGenerator.forBlock['rx_bb_battery_v'] = function (_block, generator) {
 // ====================================================================
 
 export const berrybotToolboxCategory = `
-  <category name="🍓 BerryBot Motor" categorystyle="motor_category">
+  <category name="🪖 RoboPANZER Motor" categorystyle="motor_category">
     <label text="Hareket — yüksek seviye"></label>
     <block type="rx_bb_move">
       <value name="SPEED"><shadow type="math_number"><field name="NUM">80</field></shadow></value>
@@ -943,7 +943,7 @@ export const berrybotToolboxCategory = `
     </block>
   </category>
 
-  <category name="🍓 BerryBot LED Matris" categorystyle="oled_category">
+  <category name="🪖 RoboPANZER LED Matris" categorystyle="oled_category">
     <label text="5x5 ekran — yüksek seviye"></label>
     <block type="rx_bb_matrix_icon"></block>
     <block type="rx_bb_matrix_scroll">
@@ -967,7 +967,7 @@ export const berrybotToolboxCategory = `
     </block>
   </category>
 
-  <category name="🍓 BerryBot RGB LED" categorystyle="rgb_category">
+  <category name="🪖 RoboPANZER RGB LED" categorystyle="rgb_category">
     <label text="7'li halka — yüksek seviye"></label>
     <block type="rx_bb_ring_fill"></block>
     <block type="rx_bb_ring_set">
@@ -992,7 +992,7 @@ export const berrybotToolboxCategory = `
     </block>
   </category>
 
-  <category name="🍓 BerryBot Ses" categorystyle="buzzer_category">
+  <category name="🪖 RoboPANZER Ses" categorystyle="buzzer_category">
     <block type="rx_bb_horn"></block>
     <block type="rx_bb_note">
       <value name="MS"><shadow type="math_number"><field name="NUM">200</field></shadow></value>
@@ -1005,7 +1005,7 @@ export const berrybotToolboxCategory = `
     <block type="rx_bb_quiet"></block>
   </category>
 
-  <category name="🍓 BerryBot Mesafe" categorystyle="ultra_category">
+  <category name="🪖 RoboPANZER Mesafe" categorystyle="ultra_category">
     <label text="Yüksek seviye"></label>
     <block type="rx_bb_obstacle">
       <value name="CM"><shadow type="math_number"><field name="NUM">15</field></shadow></value>
@@ -1015,7 +1015,7 @@ export const berrybotToolboxCategory = `
     <block type="rx_bb_distance_mm"></block>
   </category>
 
-  <category name="🍓 BerryBot Çizgi" categorystyle="sensor_category">
+  <category name="🪖 RoboPANZER Çizgi" categorystyle="sensor_category">
     <label text="Yüksek seviye"></label>
     <block type="rx_bb_line"></block>
     <label text="Alçak seviye — analog"></label>
@@ -1025,7 +1025,7 @@ export const berrybotToolboxCategory = `
     </block>
   </category>
 
-  <category name="🍓 BerryBot Işık (LDR)" categorystyle="ldr_category">
+  <category name="🪖 RoboPANZER Işık (LDR)" categorystyle="ldr_category">
     <label text="Yüksek seviye"></label>
     <block type="rx_bb_bright">
       <value name="TH"><shadow type="math_number"><field name="NUM">10000</field></shadow></value>
@@ -1035,14 +1035,14 @@ export const berrybotToolboxCategory = `
     <block type="rx_bb_light"></block>
   </category>
 
-  <category name="🍓 BerryBot Kumanda + Buton" categorystyle="ir_category">
+  <category name="🪖 RoboPANZER Kumanda + Buton" categorystyle="ir_category">
     <block type="rx_bb_ir_pressed"></block>
     <block type="rx_bb_button"></block>
     <label text="Alçak seviye"></label>
     <block type="rx_bb_ir_code"></block>
   </category>
 
-  <category name="🍓 BerryBot Pil" categorystyle="sensor_category">
+  <category name="🪖 RoboPANZER Pil" categorystyle="sensor_category">
     <block type="rx_bb_battery"></block>
     <block type="rx_bb_show_battery"></block>
     <label text="Alçak seviye"></label>

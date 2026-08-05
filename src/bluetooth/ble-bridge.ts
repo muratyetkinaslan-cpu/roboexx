@@ -181,7 +181,7 @@ export class BLEBridge {
       await this._setupChars(service, true);
 
       this.portInfo = {
-        friendlyName: device.name || 'BerryBot',
+        friendlyName: device.name || 'RoboPANZER',
         deviceId: device.id,
       };
       this._setState('connected');
@@ -241,7 +241,7 @@ export class BLEBridge {
 
         this._setState('connected');
         this.reconnecting = false;
-        this.onLog('system', `✓ Otomatik bağlandı: ${this.portInfo?.friendlyName ?? 'BerryBot'}`);
+        this.onLog('system', `✓ Otomatik bağlandı: ${this.portInfo?.friendlyName ?? 'RoboPANZER'}`);
         await this._detectProtocol();
         return;
       } catch {
@@ -433,6 +433,16 @@ export class BLEBridge {
     this.opSeq++;        // ← arka plandaki _verifyAlive PING doğrulayıcısını durdur
     this._setState('busy');
     this._clearStatus(); // ← bayat durum baytları yeni beklemeyi karşılamasın
+    // NİHAİ BEKÇİ: 90 sn içinde bitmezse otomatik iptal — asla kalıcı meşgul yok.
+    const mySeq = this.opSeq;
+    setTimeout(() => {
+      if (this.state === 'busy' && this.opSeq === mySeq) {
+        this.onLog('error', '⏱ Yükleme 90 sn içinde tamamlanmadı — otomatik iptal edildi.');
+        this.cancelled = true;
+        this._clearStatus();
+        this._setState('connected');
+      }
+    }, 90000);
     const start = Date.now();
     const encoder = new TextEncoder();
     const codeBytes = encoder.encode(code);
@@ -681,7 +691,19 @@ export class BLEBridge {
     onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
   ): Promise<void> {
     this.expectReconnect = true;
-    await this.uploadFile('user_code.py', code, onProgress);
+    // OTO-KURTARMA: ilk deneme takılırsa robot resetlenir ve bir kez daha
+    // denenir — "8-10 yüklemede bir takılma" kullanıcıya yansımaz.
+    try {
+      await this.uploadFile('user_code.py', code, onProgress);
+    } catch (e) {
+      if (this.cancelled || this.state === 'disconnected') throw e;
+      this.onLog('info', '⟳ Yükleme takıldı — robot resetlenip otomatik tekrar denenecek…');
+      try { await this.forceReset(); } catch { /* yoksay */ }
+      await sleep(2500); // robotun yükleyiciye dönmesi
+      if ((this.state as BridgeState) !== 'connected') throw e;
+      await this.uploadFile('user_code.py', code, onProgress);
+      this.onLog('info', '✓ Otomatik kurtarma başarılı — yükleme tamamlandı');
+    }
 
     if (this.protoV2) {
       // v2/v3 (BerryBot): checksum doğrulandı, dosya yazıldı, Pico
@@ -722,7 +744,17 @@ export class BLEBridge {
     code: string,
     onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
   ): Promise<void> {
-    await this.uploadFile(filename, code, onProgress);
+    try {
+      await this.uploadFile(filename, code, onProgress);
+    } catch (e) {
+      if (this.cancelled || this.state === 'disconnected') throw e;
+      this.onLog('info', '⟳ Yükleme takıldı — robot resetlenip otomatik tekrar denenecek…');
+      try { await this.forceReset(); } catch { /* yoksay */ }
+      await sleep(2500);
+      if ((this.state as BridgeState) !== 'connected') throw e;
+      await this.uploadFile(filename, code, onProgress);
+      this.onLog('info', '✓ Otomatik kurtarma başarılı');
+    }
   }
 
   /** Robotu durdur (v2): kod çalıştırılmadan boşta bekleyen moda reset. */

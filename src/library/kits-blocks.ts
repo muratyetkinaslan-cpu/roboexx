@@ -579,9 +579,9 @@ export const KITS: Kit[] = [
   },
   {
     id: 'berrybot',
-    name: 'BerryBot Kiti',
-    emoji: '🍓',
-    desc: 'Robotistan BerryBot · gerçek robot blokları (rx_bb_*)',
+    name: 'RoboPANZER Kiti',
+    emoji: '🪖',
+    desc: 'Robotistan RoboPANZER · gerçek robot blokları (rx_bb_*)',
     files: [
       {
         id: 'berry-test', name: 'Motor + Ekran Testi',

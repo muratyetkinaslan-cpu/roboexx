@@ -270,7 +270,7 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
               </label>
               {cfg.vehicle === 'berrybot' && (
                 <p className="ra-hint">
-                  BerryBot: önde tek mesafe sensörü, altta 2 çizgi sensörü, kartta 5×5 LED matrix,
+                  RoboPANZER: önde tek mesafe sensörü, altta 2 çizgi sensörü, kartta 5×5 LED matrix,
                   4 RGB LED, 2 LDR, buzzer ve A/B butonları. Işık ve butonlar sim araç çubuğundan denenir
                   (klavye <b>A</b>/<b>B</b>).
                 </p>

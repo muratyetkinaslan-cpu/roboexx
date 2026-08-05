@@ -404,6 +404,11 @@ export class SerialBridge {
 
   /**
    * Upload: Kodu main.py olarak flash'a yaz + soft reset.
+   *
+   * OTO-KURTARMA: İlk deneme herhangi bir nedenle takılırsa (REPL cevap
+   * vermiyor, akış bozuldu vb.) kart otomatik olarak yazılımsal resetlenir
+   * ve yükleme BİR KEZ daha denenir — kullanıcı hiçbir şey yapmaz.
+   * Böylece "8-10 yüklemede bir takılma" kullanıcıya hiç yansımaz.
    */
   async uploadCode(
     code: string,
@@ -411,7 +416,28 @@ export class SerialBridge {
   ): Promise<void> {
     await this._acquireOp(); // süren işlemi iptal et, kilidi al
     this._setState('busy');
+    try {
+      try {
+        await this._uploadCodeAttempt(code, onProgress);
+      } catch (e) {
+        if (this.cancelled || this.state === 'disconnected') throw e;
+        this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
+        const ok = await this._hardResetAndReconnect();
+        if (!ok || this.cancelled) throw e;
+        this._setState('busy');
+        await this._uploadCodeAttempt(code, onProgress);
+        this.onLog('info', '✓ Otomatik kurtarma başarılı — yükleme tamamlandı');
+      }
+    } finally {
+      this._forceIdle();
+    }
+  }
 
+  /** Tek yükleme denemesi — uploadCode'un oto-kurtarma sarmalayıcısı çağırır. */
+  private async _uploadCodeAttempt(
+    code: string,
+    onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
+  ): Promise<void> {
     const start = Date.now();
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
@@ -421,7 +447,6 @@ export class SerialBridge {
     // Daha az raw-REPL turu = belirgin hız artışı.
     const CHUNK_BYTES = this.uartBridge ? 1024 : 2048;
 
-    try {
       await this._enterRaw();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
@@ -503,9 +528,6 @@ export class SerialBridge {
       await this._write('\x04'); // friendly REPL'de Ctrl-D = soft reset
 
       onProgress?.({ pct: 100, bytesSent: bytesTotal, bytesTotal, speedKBs });
-    } finally {
-      this._forceIdle();
-    }
   }
 
   /**
@@ -522,7 +544,29 @@ export class SerialBridge {
   ): Promise<void> {
     await this._acquireOp(); // süren işlemi iptal et, kilidi al
     this._setState('busy');
+    try {
+      try {
+        await this._uploadLibraryAttempt(filename, code, onProgress);
+      } catch (e) {
+        if (this.cancelled || this.state === 'disconnected') throw e;
+        this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
+        const ok = await this._hardResetAndReconnect();
+        if (!ok || this.cancelled) throw e;
+        this._setState('busy');
+        await this._uploadLibraryAttempt(filename, code, onProgress);
+        this.onLog('info', '✓ Otomatik kurtarma başarılı');
+      }
+    } finally {
+      this._forceIdle();
+    }
+  }
 
+  /** Tek kütüphane-yükleme denemesi — oto-kurtarma sarmalayıcısı çağırır. */
+  private async _uploadLibraryAttempt(
+    filename: string,
+    code: string,
+    onProgress?: (p: { pct: number; bytesSent: number; bytesTotal: number; speedKBs: number }) => void
+  ): Promise<void> {
     const start = Date.now();
     const codeBytes = this.encoder.encode(code);
     const bytesTotal = codeBytes.length;
@@ -532,7 +576,6 @@ export class SerialBridge {
     // USB'de 2 KB güvenli ve iki kat hızlı; UART köprüsünde 1 KB'da kal.
     const CHUNK_BYTES = this.uartBridge ? 1024 : 2048;
 
-    try {
       await this._enterRaw();
       await this._stopWatcher();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
@@ -579,9 +622,6 @@ export class SerialBridge {
 
       await this._exitRaw();
       onProgress?.({ pct: 100, bytesSent: bytesTotal, bytesTotal, speedKBs });
-    } finally {
-      this._forceIdle();
-    }
   }
 
   // ====== Private ======
@@ -632,6 +672,16 @@ export class SerialBridge {
     if (this.state !== 'connected') throw new Error('Bağlı değil');
     this.cancelled = false;
     this.opCount++;
+    // NİHAİ BEKÇİ: bu işlem 90 sn içinde bitmezse (her ne olursa olsun)
+    // otomatik iptal edilip boşa alınır — arayüz ASLA kalıcı meşgul kalamaz.
+    const myOp = this.opCount;
+    setTimeout(() => {
+      if (this.state === 'busy' && this.opCount === myOp) {
+        this.onLog('error', '⏱ İşlem 90 sn içinde tamamlanmadı — otomatik iptal edildi. Tekrar deneyebilirsin.');
+        this.cancelled = true;
+        this._forceIdle();
+      }
+    }, 90000);
   }
 
   private async _connect(port: SerialPortLike): Promise<PortInfo> {
@@ -691,13 +741,23 @@ export class SerialBridge {
       // setSignals bazı sürücülerde yok — sessizce geç
     }
 
-    port.addEventListener('disconnect', () => {
-      // Kontrollü yazılımsal reset sırasında USB'nin kopması BEKLENEN bir
-      // durum — bridge kendi yeniden bağlanacak, kullanıcıya kopma gösterme.
-      if (this.rebooting) return;
-      this.onLog('system', 'USB bağlantısı kesildi');
-      this.disconnect();
-    });
+    // 'disconnect' dinleyicisini AYNI port nesnesine bir kez tak.
+    // (Kes→Bağlan döngülerinde aynı SerialPort nesnesi yeniden kullanılır;
+    // her seferinde yeni listener eklemek 8-10 döngü sonra üst üste binen
+    // disconnect çağrılarına ve tutarsız duruma yol açıyordu.)
+    const marked = port as SerialPortLike & { __rxDiscHooked?: boolean };
+    if (!marked.__rxDiscHooked) {
+      marked.__rxDiscHooked = true;
+      port.addEventListener('disconnect', () => {
+        // Kontrollü yazılımsal reset sırasında USB'nin kopması BEKLENEN bir
+        // durum — bridge kendi yeniden bağlanacak, kullanıcıya kopma gösterme.
+        if (this.rebooting) return;
+        // Bu port artık aktif port değilse (reset sonrası yenisi açıldı) yoksay
+        if (this.port !== port) return;
+        this.onLog('system', 'USB bağlantısı kesildi');
+        this.disconnect();
+      });
+    }
 
     if (port.writable) {
       this.writer = port.writable.getWriter();

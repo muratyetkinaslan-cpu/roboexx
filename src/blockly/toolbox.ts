@@ -14,7 +14,7 @@ import { berrybotToolboxCategory } from './berrybot-blocks';
 export const toolboxXml = `
 <xml id="roboexx-toolbox" style="display: none">
 
-  <category name="Akış" categorystyle="logic_category">
+  <category name="🔁 Akış" categorystyle="logic_category">
     <block type="rx_forever"></block>
     <block type="controls_if"></block>
     <block type="controls_ifelse"></block>
@@ -31,7 +31,7 @@ export const toolboxXml = `
     <block type="rx_stop"></block>
   </category>
 
-  <category name="Mantık" categorystyle="operator_category">
+  <category name="🧠 Mantık" categorystyle="operator_category">
     <block type="logic_compare"></block>
     <block type="logic_operation"></block>
     <block type="logic_negate"></block>
@@ -39,7 +39,7 @@ export const toolboxXml = `
     <block type="logic_ternary"></block>
   </category>
 
-  <category name="Matematik" categorystyle="math_category">
+  <category name="🔢 Matematik" categorystyle="math_category">
     <block type="math_number"></block>
     <block type="math_arithmetic">
       <value name="A"><shadow type="math_number"><field name="NUM">1</field></shadow></value>
@@ -81,7 +81,7 @@ export const toolboxXml = `
     </block>
   </category>
 
-  <category name="Metin" categorystyle="text_category">
+  <category name="🔤 Metin" categorystyle="text_category">
     <block type="text"></block>
     <block type="text_join"></block>
     <block type="text_length">
@@ -93,17 +93,7 @@ export const toolboxXml = `
     </block>
   </category>
 
-  <category name="Pinler" categorystyle="io_category">
-    <block type="rx_pin_mode"></block>
-    <block type="rx_digital_write"></block>
-    <block type="rx_digital_read"></block>
-    <block type="rx_analog_read"></block>
-    <block type="rx_pwm_write">
-      <value name="DUTY"><shadow type="math_number"><field name="NUM">32768</field></shadow></value>
-    </block>
-  </category>
-
-  <category name="Zaman" categorystyle="timing_category">
+  <category name="⏱ Zaman" categorystyle="timing_category">
     <block type="rx_delay_ms">
       <value name="MS"><shadow type="math_number"><field name="NUM">500</field></shadow></value>
     </block>
@@ -113,27 +103,63 @@ export const toolboxXml = `
     <block type="rx_millis"></block>
   </category>
 
-  <category name="Konsol" categorystyle="text_category">
+  <category name="🖥 Konsol" categorystyle="text_category">
     <block type="rx_print">
       <value name="TEXT"><shadow type="text"><field name="TEXT">Merhaba</field></shadow></value>
     </block>
   </category>
 
+  <category name="📌 Pinler" categorystyle="io_category">
+    <block type="rx_pin_mode"></block>
+    <block type="rx_digital_write"></block>
+    <block type="rx_digital_read"></block>
+    <block type="rx_analog_read"></block>
+    <block type="rx_pwm_write">
+      <value name="DUTY"><shadow type="math_number"><field name="NUM">32768</field></shadow></value>
+    </block>
+  </category>
+
   <sep></sep>
 
-  <category name="LED" categorystyle="led_category">
-    <block type="rx_led_builtin"></block>
-    <block type="rx_led_external"></block>
+${berrybotToolboxCategory}
+
+  <sep></sep>
+
+  <category name="🚗 DC Motor" categorystyle="dcmotor_category">
+    <block type="rx_motor_init"></block>
+    <block type="rx_dc_motor">
+      <value name="SPEED"><shadow type="math_number"><field name="NUM">50</field></shadow></value>
+    </block>
+    <block type="rx_dc_motor_stop"></block>
   </category>
 
-  <category name="Röle" categorystyle="relay_category">
-    <block type="rx_relay"></block>
+  <category name="🔀 L9110 Motor" categorystyle="dcmotor_category">
+    <label text="Pin tabanlı sürücü — Arduino + Pico"></label>
+    <block type="rx_l9110_motor">
+      <value name="SPEED"><shadow type="math_number"><field name="NUM">80</field></shadow></value>
+    </block>
+    <block type="rx_l9110_stop"></block>
   </category>
 
-  <category name="Servo" categorystyle="servo_category">
+  <category name="⚙ Servo" categorystyle="servo_category">
     <block type="rx_servo_angle">
       <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
     </block>
+  </category>
+
+  <category name="⚙ Servo v2" categorystyle="servo_category">
+    <block type="rx_motor_init"></block>
+    <block type="rx_servo_v2">
+      <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
+    </block>
+  </category>
+
+  <category name="⚙ Servo v3 (PCA9685)" categorystyle="servo_category">
+    <block type="rx_pca9685_init"></block>
+    <block type="rx_servo_v3">
+      <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
+    </block>
+    <block type="rx_servo_v3_off"></block>
   </category>
 
   <category name="🦾 Robot Kol" categorystyle="servo_category">
@@ -168,38 +194,7 @@ export const toolboxXml = `
     <block type="rx_arm_pins"></block>
   </category>
 
-  <category name="Buzzer" categorystyle="buzzer_category">
-    <block type="rx_buzzer_tone">
-      <value name="FREQ"><shadow type="math_number"><field name="NUM">440</field></shadow></value>
-      <value name="DUR"><shadow type="math_number"><field name="NUM">200</field></shadow></value>
-    </block>
-    <block type="rx_buzzer_note">
-      <value name="DUR"><shadow type="math_number"><field name="NUM">300</field></shadow></value>
-    </block>
-    <block type="rx_buzzer_off"></block>
-  </category>
-
-  <category name="🎵 Müzik" categorystyle="buzzer_category">
-    <block type="rx_play_song"></block>
-  </category>
-
-  <category name="DC Motor" categorystyle="dcmotor_category">
-    <block type="rx_motor_init"></block>
-    <block type="rx_dc_motor">
-      <value name="SPEED"><shadow type="math_number"><field name="NUM">50</field></shadow></value>
-    </block>
-    <block type="rx_dc_motor_stop"></block>
-  </category>
-
-  <category name="L9110 Motor" categorystyle="dcmotor_category">
-    <label text="Pin tabanlı sürücü — Arduino + Pico"></label>
-    <block type="rx_l9110_motor">
-      <value name="SPEED"><shadow type="math_number"><field name="NUM">80</field></shadow></value>
-    </block>
-    <block type="rx_l9110_stop"></block>
-  </category>
-
-  <category name="Enkoder" categorystyle="sensor_category">
+  <category name="🌀 Enkoder" categorystyle="sensor_category">
     <label text="Hız / mesafe / devir ölçümü"></label>
     <block type="rx_encoder_init"></block>
     <block type="rx_encoder_count"></block>
@@ -207,22 +202,18 @@ export const toolboxXml = `
     <block type="rx_encoder_reset"></block>
   </category>
 
-  <category name="Servo v2" categorystyle="servo_category">
-    <block type="rx_motor_init"></block>
-    <block type="rx_servo_v2">
-      <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
-    </block>
+  <category name="🔌 Röle" categorystyle="relay_category">
+    <block type="rx_relay"></block>
   </category>
 
-  <category name="Servo v3 (PCA9685)" categorystyle="servo_category">
-    <block type="rx_pca9685_init"></block>
-    <block type="rx_servo_v3">
-      <value name="ANGLE"><shadow type="math_number"><field name="NUM">90</field></shadow></value>
-    </block>
-    <block type="rx_servo_v3_off"></block>
+  <sep></sep>
+
+  <category name="💡 LED" categorystyle="led_category">
+    <block type="rx_led_builtin"></block>
+    <block type="rx_led_external"></block>
   </category>
 
-  <category name="RGB LED" categorystyle="rgb_category">
+  <category name="🌈 RGB LED" categorystyle="rgb_category">
     <block type="rx_rgb_init"></block>
     <block type="rx_rgb_set_all"></block>
     <block type="rx_rgb_set_one">
@@ -234,7 +225,7 @@ export const toolboxXml = `
     </block>
   </category>
 
-  <category name="NeoPixel" categorystyle="rgb_category">
+  <category name="✨ NeoPixel" categorystyle="rgb_category">
     <block type="rx_neopixel_init"></block>
     <block type="rx_neopixel_set">
       <value name="INDEX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
@@ -242,7 +233,7 @@ export const toolboxXml = `
     <block type="rx_neopixel_show"></block>
   </category>
 
-  <category name="OLED Ekran" categorystyle="oled_category">
+  <category name="🖼 OLED Ekran" categorystyle="oled_category">
     <block type="rx_oled_init"></block>
     <block type="rx_oled_clear"></block>
     <block type="rx_oled_text">
@@ -258,14 +249,29 @@ export const toolboxXml = `
   </category>
 
   <sep></sep>
-${berrybotToolboxCategory}
+
+  <category name="🔔 Buzzer" categorystyle="buzzer_category">
+    <block type="rx_buzzer_tone">
+      <value name="FREQ"><shadow type="math_number"><field name="NUM">440</field></shadow></value>
+      <value name="DUR"><shadow type="math_number"><field name="NUM">200</field></shadow></value>
+    </block>
+    <block type="rx_buzzer_note">
+      <value name="DUR"><shadow type="math_number"><field name="NUM">300</field></shadow></value>
+    </block>
+    <block type="rx_buzzer_off"></block>
+  </category>
+
+  <category name="🎵 Müzik" categorystyle="buzzer_category">
+    <block type="rx_play_song"></block>
+  </category>
+
   <sep></sep>
 
-  <category name="Buton" categorystyle="button_category">
+  <category name="🔘 Buton" categorystyle="button_category">
     <block type="rx_button_pressed"></block>
   </category>
 
-  <category name="🎮 Klavye" categorystyle="button_category">
+  <category name="⌨ Klavye" categorystyle="button_category">
     <label text="Bilgisayardan basılan tuşlar (BLE bağlıyken)"></label>
     <block type="rx_key_pressed"></block>
     <block type="rx_key_just_pressed"></block>
@@ -277,19 +283,26 @@ ${berrybotToolboxCategory}
     <block type="rx_gamepad_just_pressed"></block>
   </category>
 
-  <category name="Potansiyometre" categorystyle="pot_category">
+  <category name="🎚 Potansiyometre" categorystyle="pot_category">
     <block type="rx_potentiometer"></block>
   </category>
 
-  <category name="Işık (LDR)" categorystyle="ldr_category">
-    <block type="rx_ldr_read"></block>
-  </category>
+  <sep></sep>
 
-  <category name="Mesafe Sensörü" categorystyle="ultra_category">
+  <category name="📏 Mesafe" categorystyle="ultra_category">
     <block type="rx_ultrasonic_distance"></block>
   </category>
 
-  <category name="Sıcaklık" categorystyle="sensor_category">
+  <category name="🔦 IR Sensör" categorystyle="ir_category">
+    <block type="rx_ir_init"></block>
+    <block type="rx_ir_read_code"></block>
+  </category>
+
+  <category name="🌗 Işık (LDR)" categorystyle="ldr_category">
+    <block type="rx_ldr_read"></block>
+  </category>
+
+  <category name="🌡 Sıcaklık" categorystyle="sensor_category">
     <block type="rx_internal_temp"></block>
     <block type="rx_dht11_temp"></block>
     <block type="rx_dht11_humidity"></block>
@@ -298,16 +311,11 @@ ${berrybotToolboxCategory}
     <block type="rx_shtc3_humidity"></block>
   </category>
 
-  <category name="IR Sensör" categorystyle="ir_category">
-    <block type="rx_ir_init"></block>
-    <block type="rx_ir_read_code"></block>
-  </category>
-
   <sep></sep>
 
-  <category name="Değişkenler" categorystyle="variable_category" custom="VARIABLE"></category>
+  <category name="📦 Değişkenler" categorystyle="variable_category" custom="VARIABLE"></category>
 
-  <category name="Fonksiyonlar" categorystyle="procedure_category" custom="PROCEDURE"></category>
+  <category name="🧩 Fonksiyonlar" categorystyle="procedure_category" custom="PROCEDURE"></category>
 
 </xml>
 `;

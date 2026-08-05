@@ -6726,3 +6726,114 @@ g.blocklyDraggable > path:first-of-type {
 }
 .tl-file-list { min-height: 0; }
 .tl-steps { overflow-wrap: anywhere; }
+
+/* ════════════════════════════════════════════════════════════════════
+   HEDEFE GÖRE TOPBAR RENGİ
+   MicroPython → Python mavisi · RoboPANZER → asker yeşili · Arduino → teal
+   (Yumuşak gradyan: sol taraf renk, sağa doğru yüzeye karışır — okunurluk
+   ve tema uyumu bozulmaz. Alt çizgi de hedef rengini alır.)
+   ════════════════════════════════════════════════════════════════════ */
+.toolbar[data-target="micropython"] {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, #3776ab 20%, var(--rx-surface)) 0%,
+    color-mix(in srgb, #3776ab 8%, var(--rx-surface)) 45%,
+    var(--rx-surface) 100%);
+  border-bottom-color: color-mix(in srgb, #3776ab 45%, var(--rx-border));
+}
+.toolbar[data-target="micropython"]::after {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #4b8bbe 55%, transparent) 50%, transparent);
+}
+.toolbar[data-target="berrybot"] {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, #5a6f2b 24%, var(--rx-surface)) 0%,
+    color-mix(in srgb, #5a6f2b 10%, var(--rx-surface)) 45%,
+    var(--rx-surface) 100%);
+  border-bottom-color: color-mix(in srgb, #7a8f3f 45%, var(--rx-border));
+}
+.toolbar[data-target="berrybot"]::after {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #8aa347 60%, transparent) 50%, transparent);
+}
+.toolbar[data-target="arduino"] {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, #00979d 22%, var(--rx-surface)) 0%,
+    color-mix(in srgb, #00979d 9%, var(--rx-surface)) 45%,
+    var(--rx-surface) 100%);
+  border-bottom-color: color-mix(in srgb, #00979d 45%, var(--rx-border));
+}
+.toolbar[data-target="arduino"]::after {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #00c4cc 55%, transparent) 50%, transparent);
+}
+/* Hedef dropdown tetikleyicisi de aktif hedefin rengini yansıtsın */
+.toolbar[data-target="micropython"] .tb-dropdown-target .tb-dd-trigger {
+  border-color: color-mix(in srgb, #4b8bbe 55%, var(--rx-border));
+  background: color-mix(in srgb, #3776ab 14%, var(--rx-surface2));
+}
+.toolbar[data-target="berrybot"] .tb-dropdown-target .tb-dd-trigger {
+  border-color: color-mix(in srgb, #8aa347 55%, var(--rx-border));
+  background: color-mix(in srgb, #5a6f2b 16%, var(--rx-surface2));
+}
+.toolbar[data-target="arduino"] .tb-dropdown-target .tb-dd-trigger {
+  border-color: color-mix(in srgb, #00c4cc 55%, var(--rx-border));
+  background: color-mix(in srgb, #00979d 14%, var(--rx-surface2));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MODERN BLOK KATEGORİ LİSTESİ (sol toolbox)
+   Yuvarlatılmış satırlar, hover/seçili durumlar, kalın renk şeridi,
+   gruplar arası belirgin ayraç — kategoriler emojili ve mantıksal sırada.
+   ════════════════════════════════════════════════════════════════════ */
+.blocklyToolboxDiv {
+  background: var(--rx-surface) !important;
+  padding: 8px 0 16px !important;
+  border-right: 1px solid var(--rx-border) !important;
+}
+.blocklyTreeRow {
+  height: auto !important;
+  margin: 2px 8px 2px 6px;
+  padding: 6px 10px 6px 8px !important;
+  border-radius: 9px;
+  border-left-width: 5px !important;   /* Blockly'nin kategori renk şeridi */
+  transition: background 0.13s var(--ease-out), transform 0.1s var(--ease-out);
+  cursor: pointer;
+}
+.blocklyTreeRow:hover {
+  background: color-mix(in srgb, var(--rx-accent) 10%, transparent);
+}
+.blocklyTreeRow:active { transform: scale(0.985); }
+.blocklyTreeSelected {
+  background: color-mix(in srgb, var(--rx-accent) 20%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rx-accent) 35%, transparent);
+}
+.blocklyTreeLabel {
+  font-family: inherit !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  color: var(--rx-text) !important;
+  letter-spacing: 0.01em;
+}
+.blocklyTreeSelected .blocklyTreeLabel { color: var(--rx-text) !important; }
+.blocklyTreeSeparator {
+  border-bottom: 1px solid var(--rx-border) !important;
+  margin: 9px 14px !important;
+  height: 0 !important;
+}
+.blocklyToolboxContents { padding-bottom: 24px !important; }
+
+/* ════════════════════════════════════════════════════════════════════
+   EĞİTMEN PANELİ SCROLL — KESİN ÇÖZÜM
+   flex-basis:0 + height:0 → liste yüksekliği SADECE flex-grow'dan gelir,
+   içerik konteyneri asla şişiremez; tekerlek/dokunmatik kaydırma her
+   koşulda çalışır. (min-height:0 tek başına bazı iç içe grid+flex
+   kombinasyonlarında yetmiyordu — "aşağı inemiyorum" şikayetinin nedeni.)
+   ════════════════════════════════════════════════════════════════════ */
+.classroom-panel .tl-kit-list,
+.teacher-library-panel .tl-kit-list {
+  flex: 1 1 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+}
+/* Şifre kapısı ve hedef satırı sabit kalsın, liste kalan alanı alsın */
+.tl-target-row { flex-shrink: 0; }
+.classroom-panel-header { flex-shrink: 0; }

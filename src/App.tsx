@@ -362,7 +362,7 @@ export default function App() {
     bleBridge.onLog = (kind, message) =>
       addLine(kind === 'stdout' ? 'output' : kind === 'stderr' ? 'error' : kind, message);
 
-    addLine('system', 'RoboExx · BerryBot sürümü v4.2');
+    addLine('system', 'RoboExx · RoboPANZER sürümü v4.3');
     if ('serial' in navigator) {
       addLine('system', 'USB modu: Web Serial (bilgisayar)');
     } else if ('usb' in navigator) {
@@ -1397,7 +1397,7 @@ export default function App() {
    * USB veya BLE üzerinden çalışır (BLE'de kütüphane OTA güncellenebilir).
    */
   const runUploadBerryBotLibrary = async () => {
-    addLine('system', `🍓 BerryBot modülleri indiriliyor…`);
+    addLine('system', `🪖 RoboPANZER modülleri indiriliyor…`);
     let libCode: string;
     let modesCode: string;
     let mainCode: string;
@@ -1446,7 +1446,7 @@ export default function App() {
       return;
     }
 
-    addLine('system', `⬆ main.py (BerryBot bootloader) yükleniyor (${mainCode.length} bayt)`);
+    addLine('system', `⬆ main.py (RoboPANZER bootloader) yükleniyor (${mainCode.length} bayt)`);
     setUploadProgress({ phase: 'uploading', pct: 65, bytesSent: 0, bytesTotal: mainCode.length, speedKBs: 0 });
     try {
       await activeBridge.uploadLibrary('main.py', mainCode, (p) => {
@@ -1466,12 +1466,12 @@ export default function App() {
         setUploadProgress({ phase: 'uploading', pct: 95 + p.pct * 0.05, bytesSent: p.bytesSent, bytesTotal: p.bytesTotal, speedKBs: p.speedKBs });
       });
       setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
-      addLine('system', `✓ BerryBot modülleri hazır · Cihaz: "${deviceName}"`);
+      addLine('system', `✓ RoboPANZER modülleri hazır · Cihaz: "${deviceName}"`);
       if (connectionMode === 'ble') {
         addLine('system', '⟳ Robot yeni bootloader ile yeniden başlatılıyor…');
         try { await bleBridge.forceReset(); } catch { /* önemsiz */ }
       } else {
-        addLine('info', 'BerryBot\'u kapat/aç veya RESET\'e bas — sonra Bluetooth\'tan bağlanıp blok kodu kablosuz yükleyebilirsin');
+        addLine('info', 'RoboPANZER\'i kapat/aç veya RESET\'e bas — sonra Bluetooth\'tan bağlanıp blok kodu kablosuz yükleyebilirsin');
       }
     } catch (e) {
       const err = e as Error;
@@ -1902,12 +1902,12 @@ export default function App() {
                   <button
                     className="preview-show-btn"
                     onClick={() => setPreviewOpen(true)}
-                    title={`${codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'BerryBot MicroPython' : 'MicroPython'} kod önizlemesini göster`}
+                    title={`${codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER MicroPython' : 'MicroPython'} kod önizlemesini göster`}
                   >
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                       <path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <span>{codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'BerryBot 🍓' : 'MicroPython'}</span>
+                    <span>{codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER 🪖' : 'MicroPython'}</span>
                   </button>
                 )}
               </div>
@@ -1921,7 +1921,7 @@ export default function App() {
                 <div className="code-editor-header">
                   <span className="code-editor-title">
                     <span className="dot-indicator" />
-                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : codeTarget === 'berrybot' ? 'BerryBot · user_code.py' : 'MicroPython · main.py'}
+                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : codeTarget === 'berrybot' ? 'RoboPANZER · user_code.py' : 'MicroPython · main.py'}
                     {codeWasEdited && <span className="edited-badge">düzenlendi</span>}
                   </span>
                   <span className="code-editor-hint">
