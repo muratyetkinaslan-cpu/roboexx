@@ -10,7 +10,15 @@
 #   2) user_code.py olarak yazılır
 #   3) machine.reset() — cihaz yeniden başlar, yeni kod yüklenir
 #
-# Sürüm: 1.0.0
+# v1.1 — "Çalıştır ilk basışta tutmuyor" kesin çözümü:
+#   * Boot'ta '__RX_BOOT__' işareti basılır (uygulama boot'u tanır)
+#   * USB aktivite penceresi 2sn → 3sn; yakalanınca '__RX_REPL__' basılır
+#   * SUPERVISOR KOMUTLARI: core0 dinleyicisi '\x06!RST\n' görünce
+#     machine.reset() yapar. Kullanıcı kodu core1'de koşarken Ctrl-C
+#     core1'i DURDURAMAZ — uygulama bu komutla kartı her durumda temiz
+#     resetleyebilir; çocuğun fiziksel RESET'e basması gerekmez.
+#
+# Sürüm: 1.1.0
 # ============================================================
 
 import bluetooth
@@ -680,6 +688,7 @@ def _run_user_code_on_core1():
 # ============================================================
 
 print("RoboExx Pico W — BLE bootloader başlıyor...")
+print("__RX_BOOT__ v1.1")
 
 # roboexx kütüphanesini boot'ta pre-load et — MSG_KEY IRQ handler'ı bunu
 # cache'ten alacak (anlık). roboexx yüklenmemişse klavye desteği devre dışı,
@@ -702,21 +711,24 @@ _skip_user_code = False
 try:
     import select
     import sys
-    print("[Boot] USB aktivite kontrolü (2 sn)...")
+    print("[Boot] USB aktivite kontrolü (3 sn)...")
     _poll = select.poll()
     _poll.register(sys.stdin, select.POLLIN)
     _t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), _t0) < 2000:
+    while time.ticks_diff(time.ticks_ms(), _t0) < 3000:
         if _poll.poll(50):  # 50ms timeout
             # USB'den byte geldi — bilgisayar bağlı ve aktif
             _ = sys.stdin.read(1)
-            # Kalan byte'ları da yut ki REPL'i karıştırmasın
+            # Kalan byte'ları da yut ki REPL'i karıştırmasın.
+            # DİKKAT: bare except KULLANMA — KeyboardInterrupt'ı (Ctrl-C)
+            # yutar ve uygulamanın kesme sinyali kaybolurdu.
             while _poll.poll(10):
                 try: sys.stdin.read(1)
-                except: break
+                except Exception: break
             _skip_user_code = True
             print("[Boot] USB aktivitesi tespit edildi — user_code BAŞLATILMIYOR")
             print("[Boot] Pico REPL'de hazır, uygulama upload yapabilir")
+            print("__RX_REPL__")
             break
 except Exception as _e:
     print("[Boot] USB tespiti atlandı:", _e)
@@ -759,7 +771,19 @@ if not _skip_user_code:
             elif _kb_in_msg:
                 if ch == '\n':
                     # mesaj bitti
-                    if _roboexx_ref is not None:
+                    if _kb_buf.startswith('!'):
+                        # ---- SUPERVISOR KOMUTLARI (RoboExx uygulaması) ----
+                        # Kullanıcı kodu core1'de koşarken Ctrl-C onu
+                        # DURDURAMAZ (KeyboardInterrupt yalnız core0'a gider).
+                        # '!RST': tüm çipi temiz resetle — uygulamanın
+                        # "Çalıştır"ı kartı her durumda geri alabilsin.
+                        if _kb_buf == '!RST':
+                            print("__RX_RST__")
+                            time.sleep_ms(80)   # işaret USB'den çıksın
+                            machine.reset()
+                        elif _kb_buf == '!PING':
+                            print("__RX_ALIVE__")
+                    elif _roboexx_ref is not None:
                         try:
                             _roboexx_ref.set_pressed_keys(_kb_buf)
                         except Exception:
@@ -777,3 +801,4 @@ if not _skip_user_code:
 else:
     # USB modu — script çık, MicroPython REPL'e dönsün
     print("[Boot] Script çıkıyor, REPL açık")
+    print("__RX_REPL__")

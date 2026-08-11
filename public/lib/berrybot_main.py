@@ -555,7 +555,8 @@ def _run_user_code():
 # ============================================================
 #  BAŞLANGIÇ
 # ============================================================
-print("BerryBot — BLE bootloader v4 başlıyor...")
+print("BerryBot — BLE bootloader v4.1 başlıyor...")
+print("__RX_BOOT__ berry v4.1")
 _magic = _scratch_read()
 _scratch_write(0)   # işaret tek kullanımlık
 _name = _read_device_name()
@@ -581,17 +582,55 @@ elif _magic == MAGIC_NORUN:
     print("[Boot] Durduruldu — kod otomatik başlatılmayacak")
     _idle_mode(_mod, forever=True)                       # tek çekirdek
 elif _has_user_code():
-    # ÇALIŞMA MODU: gözcü çekirdek-1'de, kullanıcı kodu çekirdek-0'da.
+    # USB PENCERESİ (v4.1): bilgisayar bağlı ve RoboExx uygulaması
+    # konuşuyorsa (reset sonrası uygulama 100 ms'de bir poke gönderir)
+    # kullanıcı kodunu VE core1 gözcüsünü HİÇ başlatma — REPL boş kalsın.
+    # Neden kritik: core1'de gözcü koşarken friendly REPL'de Ctrl-D (soft
+    # reset) RP2040'ta SONSUZA DEK bloklanır → kart seri hatta ölür ve tek
+    # çare fiziksel RESET olurdu. USB'de core1'i hiç doğurmayarak bu tuzak
+    # kökten kapanır. (Uygulamanın poke'u Ctrl-C ise KeyboardInterrupt
+    # script'i burada keser — sonuç aynı: temiz, boş REPL. Bu yüzden
+    # KeyboardInterrupt bilerek YAKALANMAZ.)
+    # Pil ile açılışta (USB yok) pencere 1.5 sn sessiz geçer, robot normal
+    # başlar — BLE kullanıcıları etkilenmez.
+    _usb_pc = False
     try:
-        _thread.start_new_thread(_watcher, (_mod,))
-        print("[BLE] Gözcü aktif — kod çalışırken bile yükleme yapılabilir")
-    except Exception as e:
-        print("[BLE] Gözcü başlatılamadı:", e)
-    _run_user_code()
-    # Kod bitti/çöktü → boşta bekle (yeniden başlatma YOK). Gözcü hâlâ
-    # dinliyor; yeni yükleme gelirse yükleme moduna resetler.
-    while True:
-        time.sleep_ms(500)
+        import select as _sel
+        import sys as _sys
+        _p = _sel.poll()
+        _p.register(_sys.stdin, _sel.POLLIN)
+        _t0 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), _t0) < 1500:
+            if _p.poll(50):
+                try:
+                    _sys.stdin.read(1)
+                except Exception:
+                    pass
+                while _p.poll(5):
+                    try:
+                        _sys.stdin.read(1)
+                    except Exception:
+                        break
+                _usb_pc = True
+                break
+    except Exception:
+        pass
+    if _usb_pc:
+        print("[Boot] USB aktivitesi — kullanıcı kodu başlatılmadı, REPL açık")
+        print("__RX_REPL__")
+        # Script burada biter → MicroPython REPL'i uygulamaya kalır.
+    else:
+        # ÇALIŞMA MODU: gözcü çekirdek-1'de, kullanıcı kodu çekirdek-0'da.
+        try:
+            _thread.start_new_thread(_watcher, (_mod,))
+            print("[BLE] Gözcü aktif — kod çalışırken bile yükleme yapılabilir")
+        except Exception as e:
+            print("[BLE] Gözcü başlatılamadı:", e)
+        _run_user_code()
+        # Kod bitti/çöktü → boşta bekle (yeniden başlatma YOK). Gözcü hâlâ
+        # dinliyor; yeni yükleme gelirse yükleme moduna resetler.
+        while True:
+            time.sleep_ms(500)
 else:
     # Hiç kod yok → doğrudan boşta modunda süresiz dinle (tek çekirdek)
     _idle_mode(_mod, forever=True)

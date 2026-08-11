@@ -385,21 +385,58 @@ export class SerialBridge {
 
   /**
    * Run: Kodu raw REPL ile çalıştır. Çıktı CANLI olarak Serial Monitor'a akar.
+   *
+   * GARANTİLİ ÇALIŞTIRMA (kesin çözüm):
+   *  1. EL SIKIŞMA — kullanıcı kodu gönderilmeden önce karta bir doğrulama
+   *     komutu (print('__RX_GO__')) çalıştırılır. Kart bunu kanıtlamadan
+   *     kullanıcı koduna ASLA geçilmez → "bastım ama çalışmadı" imkânsız.
+   *  2. OTO-KURTARMA — ilk deneme herhangi bir aşamada takılırsa kart
+   *     yazılımsal resetlenir, boot penceresi yakalanır ve BİR kez daha
+   *     denenir. Çocuğun RESET tuşuna basması gerekmez.
+   *  3. Süre bekçisi YOK — sonsuz döngülü programlar (çizgi izleme vb.)
+   *     "Durdur"a basılana dek özgürce koşar; 60/90 sn'de sahte
+   *     "zaman aşımı" hatası üretilmez.
    */
   async runCode(code: string): Promise<void> {
-    await this._acquireOp(); // süren işlemi iptal et, kilidi al
+    await this._acquireOp({ noWatchdog: true }); // canlı run süresiz koşabilir
     this._setState('busy');
     this.liveRun = true; // tuş enjeksiyonuna izin ver (canlı çalıştırma)
     try {
-      await this._enterRaw();
-      await this._execRaw(code);
-      await this._exitRaw();
+      try {
+        await this._runCodeAttempt(code);
+      } catch (e) {
+        if (this.cancelled || this.state === 'disconnected') throw e;
+        this.onLog(
+          'info',
+          '⟳ Kart ilk denemede yanıt vermedi — otomatik resetlenip tekrar denenecek (RESET tuşuna gerek yok)…'
+        );
+        const ok = await this._hardResetAndReconnect({ captureRepl: true });
+        if (!ok || this.cancelled) throw e;
+        this._setState('busy');
+        this.liveRun = true; // _forceIdle çağrılmadı ama garanti olsun
+        await this._runCodeAttempt(code);
+        this.onLog('info', '✓ Otomatik kurtarma başarılı — kod çalışıyor');
+      }
     } catch (e) {
       console.error('[RoboExx] runCode HATA:', e);
       throw e;
     } finally {
       this._forceIdle();
     }
+  }
+
+  /** Tek çalıştırma denemesi — runCode'un oto-kurtarma sarmalayıcısı çağırır. */
+  private async _runCodeAttempt(code: string): Promise<void> {
+    await this._enterRaw();
+    // EL SIKIŞMA DOĞRULAMASI: raw REPL'in gerçekten komut çalıştırdığını
+    // KANITLA. Bu, "raw REPL banner'ı geldi ama kart aslında sıkışık"
+    // durumlarını (yarım protokol, bayat tampon) yakalar.
+    const probe = await this._execRaw("print('__RX_GO__')\n");
+    if (!probe.output.includes('__RX_GO__')) {
+      throw new Error('Kart el sıkışmayı doğrulayamadı');
+    }
+    await this._execRaw(code, undefined, { live: true });
+    await this._exitRaw();
   }
 
   /**
@@ -422,7 +459,7 @@ export class SerialBridge {
       } catch (e) {
         if (this.cancelled || this.state === 'disconnected') throw e;
         this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
-        const ok = await this._hardResetAndReconnect();
+        const ok = await this._hardResetAndReconnect({ captureRepl: true });
         if (!ok || this.cancelled) throw e;
         this._setState('busy');
         await this._uploadCodeAttempt(code, onProgress);
@@ -524,10 +561,78 @@ export class SerialBridge {
       const speedKBs = elapsed > 0 ? bytesTotal / 1024 / elapsed : 0;
       onProgress?.({ pct: 95, bytesSent: bytesTotal, bytesTotal, speedKBs });
 
-      await this._exitRaw();
-      await this._write('\x04'); // friendly REPL'de Ctrl-D = soft reset
+      // 5) Kartı YENİDEN BAŞLAT — yeni kod otomatik çalışsın.
+      //    ESKİ DAVRANIŞ: friendly REPL'e çık + Ctrl-D (soft reset).
+      //    RP2040'ta core1'de bir thread koşarken (kullanıcı kodu / gözcü)
+      //    soft reset core1'i SONSUZA DEK bekler → kart seri hatta ölür,
+      //    "Yükleme başarılı" yazar ama kart kilitlenir; çocuk fiziksel
+      //    RESET'e basmak zorunda kalırdı. machine.reset() core1 dahil her
+      //    şeyi koşulsuz keser — her kartta, her durumda çalışır.
+      await this._rebootAfterUpload();
 
       onProgress?.({ pct: 100, bytesSent: bytesTotal, bytesTotal, speedKBs });
+  }
+
+  /**
+   * Yükleme sonrası kartı machine.reset() ile yeniden başlat ve SESSİZCE
+   * yeniden bağlan. Sessizlik kritik: bootloader boot penceresinde USB
+   * aktivitesi görürse yeni yüklenen kodu BAŞLATMAZ — biz tam tersini,
+   * kodun otomatik başlamasını istiyoruz.
+   */
+  private async _rebootAfterUpload(): Promise<void> {
+    this.rebooting = true;
+    try {
+      try {
+        // Raw REPL'in içindeyiz — reset'i exec olarak kör gönder.
+        // (Cevap beklenmez; komut koşar koşmaz kart zaten yeniden başlar.)
+        await this._write('import machine\r\nmachine.reset()\r\n\x04');
+      } catch {
+        // port bu esnada düşmüş olabilir — reset büyük ihtimalle başladı
+      }
+
+      // USB'nin düşmesi için bekle, eski portu tamamen kapat
+      await new Promise((r) => setTimeout(r, 700));
+      this.readLoopGen++;
+      try { await this.reader?.cancel(); } catch {}
+      try { this.writer?.releaseLock(); } catch {}
+      this.writer = null;
+      this.reader = null;
+      try { await this.port?.close(); } catch {}
+      this.port = null;
+
+      // Kart yeniden numaralandırılınca portu aç — ama HİÇBİR ŞEY YAZMA
+      const serial = this._serialApi();
+      const deadline = Date.now() + 12000;
+      while (Date.now() < deadline) {
+        if (this.cancelled) return;
+        await new Promise((r) => setTimeout(r, 300));
+        try {
+          const ports = await serial.getPorts();
+          const devicePort =
+            ports.find((p) => p.getInfo().usbVendorId === RPI_VID) ??
+            ports.find((p) => {
+              const vid = p.getInfo().usbVendorId;
+              return vid !== undefined && SUPPORTED_VIDS.includes(vid);
+            });
+          if (!devicePort) continue;
+          await this._openPort(devicePort);
+          // Açılış çıktısı (bootloader + kullanıcı kodunun ilk print'leri)
+          // Seri Monitör'e CANLI aksın — eski Ctrl-D akışındaki gibi.
+          this.silent = false;
+          this.silentBuffer = '';
+          this.onLog('info', '✓ Kart yeniden başladı — yüklenen kod çalışıyor');
+          return;
+        } catch {
+          const halfOpen = this.port as SerialPortLike | null;
+          try { await halfOpen?.close(); } catch {}
+          this.port = null;
+          this.writer = null;
+        }
+      }
+      this.onLog('error', 'Kart reset sonrası bulunamadı — USB kablosunu çıkarıp takıp "Bağlan"a bas');
+    } finally {
+      this.rebooting = false;
+    }
   }
 
   /**
@@ -550,7 +655,7 @@ export class SerialBridge {
       } catch (e) {
         if (this.cancelled || this.state === 'disconnected') throw e;
         this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
-        const ok = await this._hardResetAndReconnect();
+        const ok = await this._hardResetAndReconnect({ captureRepl: true });
         if (!ok || this.cancelled) throw e;
         this._setState('busy');
         await this._uploadLibraryAttempt(filename, code, onProgress);
@@ -660,7 +765,7 @@ export class SerialBridge {
    * Süren işlem varsa iptal eder, bitmesini kısa süre bekler; hâlâ
    * takılıysa zorla idle yapar. Böylece iki işlem asla üst üste binmez.
    */
-  private async _acquireOp(): Promise<void> {
+  private async _acquireOp(opts?: { noWatchdog?: boolean }): Promise<void> {
     if (this.state === 'busy') {
       this.cancelled = true; // eski işlemin tüm bekleme noktaları patlar
       const t0 = Date.now();
@@ -674,6 +779,12 @@ export class SerialBridge {
     this.opCount++;
     // NİHAİ BEKÇİ: bu işlem 90 sn içinde bitmezse (her ne olursa olsun)
     // otomatik iptal edilip boşa alınır — arayüz ASLA kalıcı meşgul kalamaz.
+    // İSTİSNA (noWatchdog): canlı "Çalıştır" — çocuğun sonsuz döngülü
+    // programı (çizgi izleme, sürüş) dakikalarca koşabilir; 90 sn'de sahte
+    // iptal edilirse robot ÇALIŞMAYA DEVAM EDER ama arayüz "hata" gösterir.
+    // Bu kafa karışıklığının kaynağıydı — canlı run'da bekçi kurulmaz,
+    // durdurmak tamamen "Durdur" butonuna (interrupt) aittir.
+    if (opts?.noWatchdog) return;
     const myOp = this.opCount;
     setTimeout(() => {
       if (this.state === 'busy' && this.opCount === myOp) {
@@ -784,18 +895,25 @@ export class SerialBridge {
    *
    * Başarılıysa true döner; kart temiz boot etmiş, REPL'e girilebilir durumda.
    */
-  private async _hardResetAndReconnect(): Promise<boolean> {
+  private async _hardResetAndReconnect(opts?: { captureRepl?: boolean }): Promise<boolean> {
     if (!this.port) return false;
+    const captureRepl = opts?.captureRepl !== false;
     this.onLog('info', '⟳ Kart yazılımsal olarak resetleniyor (RESET tuşuna gerek yok)…');
     this.rebooting = true;
     try {
-      // 1) Kör komut: önce Ctrl-C'lerle friendly REPL'e dönmeyi dene,
-      //    sonra machine.reset(). REPL cevap vermese bile zarar yok.
+      // 1) Kör komutlar (REPL cevap vermese bile zarar yok, sırayla):
+      //    a. Ctrl-C'lerle friendly REPL'e dönmeyi dene
+      //    b. SUPERVISOR RESET '\x06!RST\n' — bootloader v1.1+ core0
+      //       dinleyicisi REPL kilitli olsa bile bunu görüp machine.reset()
+      //       yapar (kullanıcı kodu core1'de koşarken TEK güvenilir yol)
+      //    c. Klasik REPL üzerinden machine.reset()
       try {
         await this._write('\r\x03\x03');
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 200));
+        await this._write('\x06!RST\n');
+        await new Promise((r) => setTimeout(r, 180));
         await this._write('\r\x03');
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, 120));
         await this._write('import machine\r\nmachine.reset()\r\n');
       } catch {
         // yazma hatası — port zaten kopmuş olabilir, devam
@@ -811,12 +929,14 @@ export class SerialBridge {
       try { await this.port?.close(); } catch {}
       this.port = null;
 
-      // 3) Kart yeniden numaralandırılana kadar portu ara (en fazla 12sn)
+      // 3) Kart yeniden numaralandırılana kadar portu ara (en fazla 12sn).
+      //    300ms aralıkla — bootloader'ın USB-aktivite penceresini (3 sn)
+      //    kaçırmamak için port belirir belirmez yakalanmalı.
       const serial = this._serialApi();
       const deadline = Date.now() + 12000;
       while (Date.now() < deadline) {
         if (this.cancelled) return false; // Durdur basıldı — aramayı kes
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 300));
         try {
           const ports = await serial.getPorts();
           const devicePort =
@@ -827,10 +947,23 @@ export class SerialBridge {
             });
           if (!devicePort) continue;
           await this._openPort(devicePort);
-          // Boot'un oturması + MicroPython banner'ının basılması için bekle
-          await new Promise((r) => setTimeout(r, 1200));
-          this._drainStale();
-          this.onLog('info', '✓ Kart resetlendi ve yeniden bağlanıldı');
+          if (captureRepl) {
+            // BOOT PENCERESİNİ YAKALA: port açılır açılmaz poke akışı —
+            // bootloader kullanıcı kodunu başlatmadan REPL'i bize bırakır.
+            const captured = await this._bootCapture();
+            this.onLog(
+              'info',
+              captured
+                ? '✓ Kart resetlendi — REPL yakalandı, temiz durumda'
+                : '✓ Kart resetlendi ve yeniden bağlanıldı'
+            );
+          } else {
+            // Yükleme sonrası: SESSİZ kal ki bootloader USB aktivitesi
+            // görmesin ve yeni yüklenen kodu OTOMATİK BAŞLATSIN.
+            await new Promise((r) => setTimeout(r, 1200));
+            this._drainStale();
+            this.onLog('info', '✓ Kart resetlendi ve yeniden bağlanıldı');
+          }
           return true;
         } catch {
           // port henüz hazır değil / açılamadı — tekrar dene.
@@ -847,6 +980,52 @@ export class SerialBridge {
     } finally {
       this.rebooting = false;
     }
+  }
+
+  /**
+   * Reset sonrası BOOT PENCERESİNİ YAKALA.
+   *
+   * Bootloader (roboexx_main v1.1 / berrybot_main v4.1) açılışta kısa bir
+   * süre USB stdin'i dinler; bu sürede byte görürse kullanıcı kodunu HİÇ
+   * başlatmaz ve REPL'i boş bırakır ('__RX_REPL__' basar). Port açılır
+   * açılmaz 100 ms aralıklarla Ctrl-C göndererek bu pencereyi deterministik
+   * biçimde yakalarız. Eski firmware'lerde de Ctrl-C'ler koşmaya başlayan
+   * kodu keser — her iki durumda da kart temiz REPL'de kalır.
+   *
+   * true: REPL/boot işareti görüldü (kart kesin bizde)
+   * false: işaret görülmedi (yine de Ctrl-C'ler gönderildi, devam edilebilir)
+   */
+  private async _bootCapture(): Promise<boolean> {
+    const wasSilent = this.silent;
+    this.silent = true;
+    this._drainStale();
+    const deadline = Date.now() + 4000;
+    let seen = false;
+    while (Date.now() < deadline) {
+      if (this.cancelled) break;
+      try {
+        await this._write('\x03');
+      } catch {
+        break; // port bu sırada düştü — çağıran taraf yeniden dener
+      }
+      await new Promise((r) => setTimeout(r, 100));
+      const buf = this.silentBuffer;
+      if (
+        buf.includes('__RX_REPL__') ||      // yeni bootloader: pencere yakalandı
+        buf.includes('KeyboardInterrupt') || // Ctrl-C koşan kodu kesti
+        buf.includes('>>>') ||               // friendly REPL istemi
+        buf.includes('raw REPL') ||          // raw REPL banner'ı
+        buf.includes('MicroPython')          // boot banner'ı (Ctrl-B/temiz boot)
+      ) {
+        seen = true;
+        break;
+      }
+    }
+    // Kuyruktaki çıktı otursun, sonra tamponu temizle
+    await new Promise((r) => setTimeout(r, 250));
+    this._drainStale();
+    this.silent = wasSilent;
+    return seen;
   }
 
   private async _startReadLoop(): Promise<void> {
@@ -986,7 +1165,9 @@ export class SerialBridge {
     try {
       await this._write('\r\x01');
       await this._waitForBuffer('raw REPL', timeoutMs);
-      await new Promise((r) => setTimeout(r, 50));
+      // Banner'ın kuyruğu ('>' istemi) tamamen gelsin — kod baytlarıyla
+      // karışıp bayat veri olarak kalmasın.
+      await new Promise((r) => setTimeout(r, 80));
       this._drainStale();
       return true;
     } catch {
@@ -998,68 +1179,57 @@ export class SerialBridge {
     this.silent = true;
     this._drainStale();
 
-    // STRATEJİ 1: Friendly REPL'de varsayalım — SABIRLI kesme.
+    // STRATEJİ 1 (HIZLI YOL): Friendly REPL'de varsayalım — SABIRLI kesme.
     // Tek çift Ctrl-C sıkı döngülerde her zaman yakalanmıyor; mpremote gibi
     // Ctrl-C'yi aralıklarla birkaç kez gönder, sonra Ctrl-A ile raw'a gir.
+    // Kart boştaysa (en yaygın durum) bu yol <1 sn'de tamamlanır.
     try {
       for (let i = 0; i < 3; i++) {
         await this._write('\r\x03\x03');
-        await this._delay(150);
+        await this._delay(120);
       }
     } catch (e) {
       if (this.cancelled) throw e;
       // yazma zaman aşımı — sonraki stratejiler / yazılımsal reset devralır
     }
-    await this._delay(200);
-    if (await this._tryRawEntry(2000)) return;
+    await this._delay(150);
+    if (await this._tryRawEntry(1800)) return;
     if (this.cancelled) throw new Error('İşlem iptal edildi');
 
-    // STRATEJİ 2: Soft reset (Ctrl-D) — main.py yeniden başlar, USB aktivite
-    // tespiti devreye girer (yeni bootloader). Sonra tekrar kes + raw REPL'e gir.
-    try {
+    // ÖNEMLİ — ESKİ STRATEJİ 2 (friendly REPL'de Ctrl-D soft reset) BİLEREK
+    // KALDIRILDI: RP2040 MicroPython'da core1'de bir thread koşarken
+    // (roboexx_main kullanıcı kodunu core1'de, berrybot_main gözcüyü core1'de
+    // çalıştırır) soft reset core1'in bitmesini SONSUZA DEK bekler → kart
+    // seri hatta tamamen ölür ve tek çıkış fiziksel RESET tuşu olurdu.
+    // "Çocuk sürekli karttan restart'a basıyor" şikayetinin ana kaynağı buydu.
+    // machine.reset() (aşağıda) core1 dahil her şeyi koşulsuz keser.
+
+    // STRATEJİ 2 (yalnız ESP32): DTR/RTS donanımsal reset — köprü çipi
+    // (CH340/CP210x) USB'de kalır, ESP32 EN pini darbelenip temiz boot
+    // eder. Boot sonrası anında Ctrl-C, bootloader'ın 3 sn'lik USB
+    // penceresine düşer → kullanıcı kodu başlamaz, REPL bize kalır.
+    // NOT: Supervisor reset ('\x06!RST\n') burada BİLEREK gönderilmez —
+    // Pico'da resetle birlikte USB düşer ve kontrolsüz 'disconnect'
+    // tetiklenirdi. O komut, kopmayı doğru yöneten (rebooting bayraklı)
+    // Strateji 3'ün kör-yazım zincirinin içindedir.
+    if (this.esp32) {
+      await this._hardResetEsp32();
       this._drainStale();
-      await this._write('\r\x04');
-      await this._delay(400);
-      await this._write('\x03\x03\x03');
-      await this._delay(2500);
-      await this._write('\r\x03\x03');
-      await this._delay(300);
-    } catch (e) {
-      if (this.cancelled) throw e;
-      // yazma hatası — devam
-    }
-    if (await this._tryRawEntry(3000)) return;
-    if (this.cancelled) throw new Error('İşlem iptal edildi');
-
-    // STRATEJİ 3: Pico sıkışmış (eski main.py, core1 thread, BLE meşgul).
-    // Yeni bootloader USB byte gelince reset yapar — Ctrl-C'leri art arda
-    // gönder ve uzun bekle, Pico kendini resetlesin. Sonra tekrar dene.
-    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        this._drainStale();
-        // ESP32 ise: DTR/RTS ile donanımsal reset dene (Pico'da no-op)
-        if (this.esp32) {
-          await this._hardResetEsp32();
-          this._drainStale();
-        }
-        // Yoğun byte trafiği → yeni bootloader bunu yakalayıp reset eder
-        await this._write('\x03\x03\x03\x03\x03');
-        await this._delay(1500);
-        await this._write('\r\x03');
-      } catch (e) {
-        if (this.cancelled) throw e;
-        // yazma hatası — reset stratejisine düş
-        break;
-      }
+        await this._write('\r\x03\x03');
+      } catch {}
       if (await this._tryRawEntry(2500)) return;
       if (this.cancelled) throw new Error('İşlem iptal edildi');
     }
 
-    // STRATEJİ 4 (SON ÇARE): Yazılımsal hard reset + otomatik yeniden bağlanma.
-    // Fiziksel RESET tuşuna basmanın yazılımla yapılmış hali — machine.reset()
-    // core1 thread'lerini beklemeden tüm çipi yeniden başlatır. Kart temiz
-    // boot edince raw REPL'e girmek her zaman mümkündür.
-    const resetOk = await this._hardResetAndReconnect();
+    // STRATEJİ 3 (KESİN YOL): Yazılımsal hard reset + otomatik yeniden
+    // bağlanma + BOOT PENCERESİ YAKALAMA. Fiziksel RESET tuşuna basmanın
+    // yazılımla yapılmış hali — machine.reset() core1 thread'lerini
+    // beklemeden tüm çipi yeniden başlatır. Yeniden bağlanır bağlanmaz
+    // 100 ms aralıklı Ctrl-C "poke" akışı, bootloader'ın USB-aktivite
+    // penceresini DETERMİNİSTİK olarak yakalar → kullanıcı kodu hiç
+    // başlamaz, REPL boş kalır, raw giriş garantiye yaklaşır.
+    const resetOk = await this._hardResetAndReconnect({ captureRepl: true });
     if (this.cancelled) throw new Error('İşlem iptal edildi');
     if (resetOk) {
       this.silent = true; // yeniden bağlanma sırasında akış silent kalmalı
@@ -1067,10 +1237,10 @@ export class SerialBridge {
       try {
         await this._write('\r\x03\x03');
       } catch {}
-      await this._delay(300);
+      await this._delay(250);
       if (await this._tryRawEntry(4000)) return;
       // İlk deneme tutmadıysa kart hâlâ boot ediyor olabilir — bir kez daha
-      await this._delay(1500);
+      await this._delay(1200);
       if (await this._tryRawEntry(4000)) return;
     }
 
@@ -1104,8 +1274,10 @@ export class SerialBridge {
    */
   private async _execRaw(
     code: string,
-    onChunkSent?: (sent: number, total: number) => void
+    onChunkSent?: (sent: number, total: number) => void,
+    opts?: { live?: boolean }
   ): Promise<{ output: string; error: string }> {
+    const live = opts?.live === true;
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
     // Büyük yüklemelerde kartın yetişmesi için chunk + pause:
@@ -1129,8 +1301,13 @@ export class SerialBridge {
     // Çalıştır (Ctrl-D)
     await this._write('\x04');
 
-    // OK işaretini silent buffer'da bekle
-    await this._waitForBuffer('OK', 3000);
+    // OK işaretini silent buffer'da bekle. "OK" = kart kodu EKSİKSİZ aldı
+    // ve derleyip çalıştırmaya başladı — çalıştığından emin olduğumuz an.
+    // (3 sn bazen yavaş UART köprülerinde dardı; 6 sn güvenli.)
+    await this._waitForBuffer('OK', 6000);
+    if (live) {
+      this.onLog('info', '✓ Kart kodu aldı — çalıştırıyor');
+    }
 
     // KRİTİK: "OK" sonrası silent buffer'da kalan veriyi alıp stream parser'a
     // ver. Yeni Pico firmware'leri "OK" + stream + end-marker'ı tek pakette
@@ -1163,7 +1340,12 @@ export class SerialBridge {
         this.streamMode = false;
         throw new Error('İşlem iptal edildi');
       }
-      if (Date.now() - start > 60000) {
+      // Zaman aşımı SADECE canlı-olmayan exec'lerde (upload chunk'ları vb.).
+      // Canlı "Çalıştır"da çocuğun programı sonsuz döngü olabilir (çizgi
+      // izleme, sürüş) — bu NORMALDİR; program "Durdur"a basılana dek koşar.
+      // Eski 60 sn sınırı burada sahte "Çalıştırma zaman aşımı" hatası
+      // üretiyor, robot koşarken arayüz hata gösteriyordu.
+      if (!live && Date.now() - start > 60000) {
         console.error('[RoboExx] 60s TIMEOUT - streamState:', this.streamState);
         this.streamMode = false;
         throw new Error('Çalıştırma zaman aşımı (60s)');

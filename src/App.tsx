@@ -1341,7 +1341,13 @@ export default function App() {
       await serialBridge.runCode(activeCode);
       addLine('system', 'Çalıştırma tamamlandı');
     } catch (e) {
-      addLine('error', `Çalıştırma hatası: ${(e as Error).message}`);
+      const msg = (e as Error).message;
+      // "Durdur" bilinçli bir eylem — çocuğa hata gibi gösterme
+      if (msg.includes('iptal edildi')) {
+        addLine('system', '■ Program durduruldu');
+      } else {
+        addLine('error', `Çalıştırma hatası: ${msg}`);
+      }
     }
   };
 
