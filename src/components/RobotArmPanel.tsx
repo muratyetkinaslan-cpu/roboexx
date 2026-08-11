@@ -1,12 +1,19 @@
 import {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from 'react';
+import * as Blockly from 'blockly';
 import {
   type ArmConfig, type ServoKind,
   loadArmConfig, saveArmConfig,
   bootstrapCode, jointCommand, allJointsCommand,
-  physicalToLogical, jointForServo,
+  logicalToPhysical, physicalToLogical, jointForServo,
 } from '../robotarm/config';
+import { generateArmSimCode } from '../robotarm/sim-run';
+import {
+  buildArmLiveSketch, armLiveCommand, armHasNonNormalJoints,
+} from '../robotarm/arduino-live';
+import { arduinoLiveLink } from '../arduino/livelink';
+import { ArduinoUploader } from './ArduinoUploader';
 
 /** App'in serial telemetrisini panele iletmesi için imperative handle. */
 export interface RobotArmHandle {
@@ -58,6 +65,63 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [bootDone, setBootDone] = useState(false);
   const [lastReach, setLastReach] = useState<number | null>(null);
   const liveThrottle = useRef<Record<number, number>>({});
+
+  // ── KART SEÇİMİ + ARDUINO CANLI BAĞLANTI ─────────────────────────
+  const board = cfg.board ?? 'pico';
+  const [armLive, setArmLive] = useState(arduinoLiveLink.state === 'open');
+  useEffect(() => arduinoLiveLink.onStateChange((st) => setArmLive(st === 'open')), []);
+  const [armUpOpen, setArmUpOpen] = useState(false);
+
+  // ── BLOK PROGRAMINI SİMÜLASYONDA ÇALIŞTIRMA ──────────────────────
+  const [simRunning, setSimRunning] = useState(false);
+  const [simRunErr, setSimRunErr] = useState<string | null>(null);
+  const [simLog, setSimLog] = useState<string[]>([]);
+  const simLogRef = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    const el = simLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [simLog]);
+  const runCtl = useRef<{ abort: boolean }>({ abort: false });
+  /** Sim'in son bilinen mantıksal açıları (home: gripper 82 — sim varsayılanı). */
+  const anglesRef = useRef<[number, number, number, number]>([90, 90, 90, 82]);
+  // Bağlantı/boot durumlarının çalışan programa taze ulaşması için ref'ler
+  const connRef = useRef(connected); connRef.current = connected;
+  const bootRef = useRef(bootDone); bootRef.current = bootDone;
+  const onSendCodeRef = useRef(onSendCode); onSendCodeRef.current = onSendCode;
+
+  // Tuş blokları için klavye takibi (panel açıkken)
+  const keysRef = useRef<Set<string>>(new Set());
+  const keysOnceRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const norm = (e: KeyboardEvent): string | null => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return null;
+      const k = e.key;
+      if (k === 'ArrowUp') return '\x11';
+      if (k === 'ArrowDown') return '\x12';
+      if (k === 'ArrowLeft') return '\x13';
+      if (k === 'ArrowRight') return '\x14';
+      if (k === 'Enter') return '\n';
+      if (k === ' ') return ' ';
+      if (k.length === 1) return k.toLowerCase();
+      return null;
+    };
+    const onDown = (e: KeyboardEvent) => {
+      const k = norm(e); if (k === null) return;
+      if (!keysRef.current.has(k)) keysOnceRef.current.add(k);
+      keysRef.current.add(k);
+    };
+    const onUp = (e: KeyboardEvent) => { const k = norm(e); if (k !== null) keysRef.current.delete(k); };
+    const onBlur = () => keysRef.current.clear();
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
   // Echo (geri besleme) bastırma: sim kendi komutunu gönderdiği eklemin
   // telemetri yankısını kısa süre yok say → slider geri zıplamaz.
   const drivenAt = useRef<Record<number, number>>({});
@@ -80,6 +144,188 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     onSendCode(bootstrapCode(cfgRef.current));
     setBootDone(true);
   }, [connected, onSendCode]);
+
+  /** Tek eklemi seçili karta gönder (mantıksal açı; throttle içeride). */
+  const hwSendJoint = useCallback((j: number, logical: number) => {
+    const c = cfgRef.current;
+    const now = performance.now();
+    if (now - (liveThrottle.current[j] || 0) < 45) return;
+    liveThrottle.current[j] = now;
+    if ((c.board ?? 'pico') === 'arduino') {
+      const phys = logicalToPhysical(c.joints[j], logical);
+      arduinoLiveLink.sendRaw(armLiveCommand(j, phys)).catch(() => {});
+    } else {
+      if (!connRef.current) return;
+      if (!bootRef.current) { onSendCodeRef.current(bootstrapCode(c)); setBootDone(true); }
+      markDriven([j]);
+      onSendCodeRef.current(jointCommand(c.joints[j], logical));
+    }
+  }, []);
+
+  /** Dört eklemi birden seçili karta gönder (IK / merkez gibi tek atımlar). */
+  const hwSendAll = useCallback((angles: number[]) => {
+    const c = cfgRef.current;
+    if ((c.board ?? 'pico') === 'arduino') {
+      for (let j = 0; j < 4; j++) {
+        const phys = logicalToPhysical(c.joints[j], angles[j]);
+        arduinoLiveLink.sendRaw(armLiveCommand(j, phys)).catch(() => {});
+      }
+    } else {
+      if (!connRef.current) return;
+      if (!bootRef.current) { onSendCodeRef.current(bootstrapCode(c)); setBootDone(true); }
+      markDriven([0, 1, 2, 3]);
+      onSendCodeRef.current(allJointsCommand(c, angles));
+    }
+  }, []);
+  const hwJointRef = useRef(hwSendJoint); hwJointRef.current = hwSendJoint;
+
+  // ── kol API'si: sim-run.ts'in ürettiği kod bu nesneyi çağırır ────
+  const STOP = useRef({ __stop: true }).current;
+  const armApi = useRef<Record<string, unknown> | null>(null);
+  if (!armApi.current) {
+    const easing = (t: number, c: string): number =>
+      c === 'ease' ? t * t * (3 - 2 * t)
+        : c === 'easein' ? t * t
+        : c === 'easeout' ? t * (2 - t)
+        : t;
+    const chk = () => { if (runCtl.current.abort) throw STOP; };
+    const frame = async () => { chk(); await new Promise((r) => setTimeout(r, 16)); chk(); };
+    const setJointLive = (j: number, a: number) => {
+      const v = Math.max(0, Math.min(180, a));
+      anglesRef.current[j] = v;
+      postToSim({ type: 'rx:setJoint', joint: j, angle: Math.round(v) });
+      hwJointRef.current(j, Math.round(v));
+    };
+    const armGit = async (
+      t: number, o: number, d: number, g: number, ms: number, curve: string
+    ) => {
+      const tgt = [t, o, d, g].map((v) =>
+        v == null || Number(v) < -0.5 ? null : Math.max(0, Math.min(180, Number(v) || 0)));
+      const bas = [...anglesRef.current];
+      const dur = Math.max(20, Number(ms) || 0);
+      const t0 = performance.now();
+      for (;;) {
+        chk();
+        const f = Math.min(1, (performance.now() - t0) / dur);
+        const e = easing(f, curve);
+        for (let j = 0; j < 4; j++) {
+          if (tgt[j] == null) continue;
+          setJointLive(j, bas[j] + ((tgt[j] as number) - bas[j]) * e);
+        }
+        if (f >= 1) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
+    const armEksen = (j: number, a: number, ms: number, c: string) =>
+      armGit(j === 0 ? a : -1, j === 1 ? a : -1, j === 2 ? a : -1, j === 3 ? a : -1, ms, c);
+    const armTut = (open: boolean, ms: number) => armEksen(3, open ? 40 : 100, ms, 'easeout');
+    const log = (m: string) => setSimLog((l) => [...l.slice(-150), m]);
+    const noopAsync = async () => { await frame(); };
+    armApi.current = {
+      frame,
+      wait: async (ms: number) => {
+        const end = performance.now() + Math.max(0, Number(ms) || 0);
+        while (performance.now() < end) { chk(); await new Promise((r) => setTimeout(r, 15)); }
+      },
+      print: (x: unknown) => log(String(x)),
+      millis: () => Math.round(performance.now()),
+      map: (v: number, fl: number, fh: number, tl: number, th: number) => {
+        const a = +v, b = +fl, c = +fh, d = +tl, e = +th;
+        return c === b ? d : Math.round(((a - b) * (e - d)) / (c - b) + d);
+      },
+      keyDown: async (k: string) => { await frame(); return keysRef.current.has(k); },
+      keyOnce: async (k: string) => {
+        await frame();
+        if (keysOnceRef.current.has(k)) { keysOnceRef.current.delete(k); return true; }
+        return false;
+      },
+      stopProgram: () => { runCtl.current.abort = true; throw STOP; },
+      // 🦾 kol hareketleri (firmware kütüphanesiyle aynı sekanslar)
+      armGit, armEksen,
+      armMerkez: (ms: number) => armGit(90, 90, 90, 40, ms, 'ease'),
+      armTut,
+      armSelam: async (kez: number) => {
+        await armEksen(1, 140, 600, 'ease');
+        const n = Math.max(1, Math.round(Number(kez) || 1));
+        for (let i = 0; i < n; i++) {
+          await armEksen(2, 130, 300, 'easeout');
+          await armEksen(2, 60, 300, 'easeout');
+        }
+        await armEksen(2, 90, 250, 'ease');
+        await armEksen(1, 90, 500, 'ease');
+      },
+      armKupAl: async (taban: number, alcak: number) => {
+        await armTut(true, 300);
+        await armGit(taban, 120, 80, -1, 700, 'ease');
+        await armGit(-1, alcak, 70, -1, 600, 'easeout');
+        await armTut(false, 400);
+        await armGit(-1, 120, 90, -1, 600, 'ease');
+      },
+      armKupBirak: async (taban: number, alcak: number) => {
+        await armGit(taban, 120, 85, -1, 800, 'ease');
+        await armGit(-1, alcak, 75, -1, 600, 'easeout');
+        await armTut(true, 350);
+        await armGit(-1, 120, 90, -1, 550, 'ease');
+      },
+      // Paylaşılan üretecin diğer API'leri kol panelinde zararsız stub:
+      motor: noopAsync, motorStop: noopAsync, motorStopAll: noopAsync,
+      l9110: noopAsync, l9110Stop: noopAsync,
+      tone: noopAsync, toneOff: noopAsync,
+      rgbAll: noopAsync, rgbOne: noopAsync, rgbClear: noopAsync,
+      matrixPixel: noopAsync, matrixShow: noopAsync, matrixClear: noopAsync,
+      pinMode: noopAsync, digitalWrite: noopAsync, pwmWrite: noopAsync,
+      ledExt: noopAsync, ledBuiltin: noopAsync, servo: noopAsync,
+      encInit: noopAsync, encReset: noopAsync,
+      encCount: async () => { await frame(); return 0; },
+      encSpeed: async () => { await frame(); return 0; },
+      distance: async () => { await frame(); return 999; },
+      digital: async () => { await frame(); return 0; },
+      analog: async () => { await frame(); return 0; },
+      pot: async () => { await frame(); return 50; },
+      ldr: async () => { await frame(); return 50; },
+      button: async () => { await frame(); return false; },
+    };
+  }
+
+  const runBlocks = () => {
+    if (simRunning) return;
+    setSimRunErr(null);
+    let code = '';
+    try {
+      const ws = Blockly.getMainWorkspace();
+      if (!ws) { setSimRunErr('Blok çalışma alanı bulunamadı.'); return; }
+      code = generateArmSimCode(ws as Blockly.Workspace);
+    } catch (e) {
+      setSimRunErr('Kod üretilemedi: ' + (e as Error).message);
+      return;
+    }
+    if (!code.trim()) {
+      setSimRunErr('Önce bloklarla bir kol programı yaz (🦾 blokları).');
+      return;
+    }
+    runCtl.current = { abort: false };
+    keysOnceRef.current.clear();
+    setSimRunning(true);
+    setSimLog(['▶ Simülasyonda çalışıyor…']);
+    let fn: (bot: unknown) => Promise<void>;
+    try {
+      fn = new Function('bot', '"use strict"; return (async () => {\n' + code + '\n})();') as typeof fn;
+    } catch (e) {
+      setSimRunErr('Sözdizimi hatası: ' + (e as Error).message);
+      setSimRunning(false);
+      return;
+    }
+    fn(armApi.current)
+      .then(() => setSimLog((l) => [...l, '✔ Program bitti.']))
+      .catch((e: unknown) => {
+        if (e && (e as { __stop?: boolean }).__stop) setSimLog((l) => [...l, '⏹ Durduruldu.']);
+        else setSimLog((l) => [...l, 'Hata: ' + ((e as Error)?.message || String(e))]);
+      })
+      .finally(() => setSimRunning(false));
+  };
+  const stopBlocks = () => { runCtl.current.abort = true; };
+  // Panel kapanırken çalışan simülasyonu durdur
+  useEffect(() => () => { runCtl.current.abort = true; }, []);
 
   // --- sim'den gelen mesajlar ---
   useEffect(() => {
@@ -116,9 +362,8 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
         case 'rx:ik': {
           // Sim kol hedefe gitti → aynı açıları gerçek kola gönder
           if (Array.isArray(d.angles)) {
-            if (!bootDone) ensureBoot();
-            markDriven([0, 1, 2, 3]);
-            onSendCode(allJointsCommand(cfgRef.current, d.angles));
+            d.angles.slice(0, 4).forEach((a: number, i: number) => { anglesRef.current[i] = a; });
+            hwSendAll(d.angles);   // Pico REPL veya Arduino canlı sketch
           }
           if (typeof d.reach === 'number') setLastReach(d.reach);
           break;
@@ -126,13 +371,8 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
         case 'rx:joint': {
           // Slider canlı sürüş → ilgili servoyu gerçek kola yaz (throttle)
           if (typeof d.joint === 'number' && typeof d.angle === 'number') {
-            const now = performance.now();
-            markDriven([d.joint]);
-            const last = liveThrottle.current[d.joint] || 0;
-            if (now - last < 45) break;
-            liveThrottle.current[d.joint] = now;
-            if (!bootDone) ensureBoot();
-            onSendCode(jointCommand(cfgRef.current.joints[d.joint], d.angle));
+            anglesRef.current[d.joint] = d.angle;   // sim-run başlangıcı doğru olsun
+            hwSendJoint(d.joint, d.angle);
           }
           break;
         }
@@ -140,7 +380,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [onSendCode, ensureBoot, bootDone]);
+  }, [hwSendAll, hwSendJoint]);
 
   // App → bu panel: gerçek servo telemetrisi → sim yansıtma
   useImperativeHandle(ref, () => ({
@@ -151,6 +391,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       // Blok çalıştırınca gelen telemetri ise (sim göndermedi) normal yansır.
       if (performance.now() - (drivenAt.current[joint] || 0) < 800) return;
       const logical = physicalToLogical(cfgRef.current.joints[joint], angle);
+      anglesRef.current[joint] = logical;
       postToSim({ type: 'rx:setJoint', joint, angle: logical });
     },
   }), [postToSim]);
@@ -158,11 +399,8 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   // --- kontroller ---
   const homeAll = () => {
     postToSim({ type: 'rx:home' });
-    if (connected) {
-      if (!bootDone) ensureBoot();
-      markDriven([0, 1, 2, 3]);
-      onSendCode(allJointsCommand(cfgRef.current, [90, 90, 90, 90]));
-    }
+    anglesRef.current = [90, 90, 90, 82];
+    hwSendAll([90, 90, 90, 90]);
   };
   const toggleGoto = () => {
     const next = !gotoOn;
@@ -271,6 +509,13 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
         </div>
       </div>
 
+      {/* Kol canlı kontrol sketch'i için gömülü yükleyici */}
+      <ArduinoUploader
+        open={armUpOpen}
+        onClose={() => setArmUpOpen(false)}
+        source={buildArmLiveSketch(cfg)}
+      />
+
       <div className="robotarm-body">
         <div className="robotarm-stage">
           <iframe
@@ -283,6 +528,70 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
         <aside className="robotarm-config">
           <div className="robotarm-config-scroll">
+            {/* KART & SİMÜLASYONDA ÇALIŞTIR */}
+            <div className="ra-section">
+              <h4 className="ra-h">Kart &amp; Çalıştır</h4>
+              <label className="ra-field">
+                <span>Kontrol kartı</span>
+                <select
+                  value={board}
+                  onChange={(e) => setCfg((c) => ({ ...c, board: e.target.value as 'pico' | 'arduino' }))}
+                >
+                  <option value="pico">Pico W (USB · MicroPython)</option>
+                  <option value="arduino">Arduino Uno / Nano (canlı sketch)</option>
+                </select>
+              </label>
+
+              <div className="ra-row">
+                {simRunning ? (
+                  <button className="btn btn-danger" onClick={stopBlocks} style={{ flex: 1 }}>
+                    ■ Durdur
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={runBlocks} style={{ flex: 1 }}>
+                    ▶ Simülasyonda çalıştır
+                  </button>
+                )}
+              </div>
+              {simRunErr && <p className="ra-warn">{simRunErr}</p>}
+              {simLog.length > 0 && (
+                <pre ref={simLogRef} className="ra-simlog">{simLog.join('\n')}</pre>
+              )}
+              <p className="ra-hint">
+                Bloklardaki 🦾 kol hareketleri <b>kart olmadan</b> simülasyonda oynar.
+                {board === 'pico'
+                  ? ' Pico bağlıysa gerçek kol da aynı anda hareket eder.'
+                  : ' Arduino canlı bağlantısı açıksa gerçek kol da aynı anda hareket eder.'}
+                {' '}Eğitim için: 🎓 Eğitmen Kütüphanesi → RoboArm Kiti → <b>20 görev</b>.
+              </p>
+
+              {board === 'arduino' && (
+                <>
+                  <div className="ra-live-row">
+                    <span className={`robotarm-dot ${armLive ? 'ok' : ''}`} />
+                    <span>Arduino canlı bağlantı: <b>{armLive ? 'açık' : 'kapalı'}</b></span>
+                  </div>
+                  <button className="btn btn-secondary" onClick={() => setArmUpOpen(true)}>
+                    ⬆ Kol kontrol sketch'ini yükle (gerekli)
+                  </button>
+                  {armHasNonNormalJoints(cfg) && (
+                    <p className="ra-warn">
+                      Sürücü/PCA9685 tipli eklemler Arduino canlı kontrolde desteklenmez —
+                      bu eklemler varsayılan pine (3/5/6/9) düşer. Tip: "Normal servo" seç.
+                    </p>
+                  )}
+                  <p className="ra-hint">
+                    <b>Kurulum (bir kez):</b> ① Aşağıdaki "Eklemler"den servo pinlerini gir
+                    (Uno/Nano önerisi: 3·5·6·9). ② <b>Sketch'i yükle</b>'ye bas — derlenip karta
+                    yazılır, bağlantı otomatik açılır. ③ Artık kaydırıcı, Tıkla-Git ve
+                    "Simülasyonda çalıştır" gerçek kolu da sürer. Pin değiştirirsen sketch'i
+                    yeniden yükle. (Blok programını kalıcı yazmak için üstteki
+                    <b> Arduino'ya Yükle</b> ayrıdır.)
+                  </p>
+                </>
+              )}
+            </div>
+
             <div className="ra-section">
               <div className="ra-actions">
                 <button className={`btn btn-secondary ra-goto ${gotoOn ? 'is-on' : ''}`} onClick={toggleGoto}>
@@ -298,8 +607,13 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
                   : 'Simülasyonu 90°, fiziksel kolu da 90° yap; sonra birlikte çalışırlar.'}
                 {lastReach !== null && <> · son hedef sapma: <b>{lastReach} cm</b></>}
               </p>
-              {!connected && <p className="ra-warn">Pico bağlı değil — komutlar yalnızca simülasyonda çalışır.</p>}
-              {connected && !bootDone && (
+              {board === 'pico' && !connected && (
+                <p className="ra-warn">Pico bağlı değil — komutlar yalnızca simülasyonda çalışır.</p>
+              )}
+              {board === 'arduino' && !armLive && (
+                <p className="ra-warn">Arduino canlı bağlantı kapalı — üstteki bölümden sketch'i yükle.</p>
+              )}
+              {board === 'pico' && connected && !bootDone && (
                 <button className="btn btn-ghost ra-boot" onClick={ensureBoot}>Modülleri hazırla (import)</button>
               )}
             </div>

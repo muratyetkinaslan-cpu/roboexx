@@ -126,6 +126,21 @@ class ArduinoLiveLink {
     }
   }
 
+  /**
+   * Ham metin paketi gönder (robot kol canlı komutları: "\x05J1:120\n").
+   * Bağlantı kapalıysa sessizce yok sayar; yazma hatasında sendKeys gibi
+   * otomatik yeniden bağlanmayı tetikler.
+   */
+  async sendRaw(text: string): Promise<void> {
+    if (!this.writer) return;
+    try {
+      await this.writer.write(new TextEncoder().encode(text));
+    } catch {
+      await this.teardown();
+      this.scheduleReconnect();
+    }
+  }
+
   /** Reset/kopma sonrası aynı USB cihazına sessizce yeniden bağlanmayı dener. */
   private scheduleReconnect(): void {
     if (!this.lastInfo) return;

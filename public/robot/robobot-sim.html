@@ -1026,9 +1026,19 @@ const api = {
     await _yield(); return Math.round(bot.usDist[nm]);
   },
   async digital(pin){ await _yield(); if(Number(pin)===Number(config.line.left)) return bot.lineVal.left;
-    if(Number(pin)===Number(config.line.right)) return bot.lineVal.right; return 0; },
+    if(Number(pin)===Number(config.line.right)) return bot.lineVal.right;
+    const r=pinRec(pin);
+    if(r.mode==='out'||r.mode==='pwm') return r.v;      // kendi çıkışını okumak serbest
+    if(r.mode==='-'){ r.mode='in'; r.src='prog-in'; }   // panelde çekilebilir görünsün
+    if(r.mode==='in') r.v = pinSim.latch[String(pin)] ?? 0;
+    return r.mode==='in' ? r.v : (r.mode==='btn' ? (pinSim.btn[String(pin)]?1:0) : r.v); },
   async analog(pin){ await _yield(); if(Number(pin)===Number(config.line.left)) return bot.lineAnalog.left;
-    if(Number(pin)===Number(config.line.right)) return bot.lineAnalog.right; return 0; },
+    if(Number(pin)===Number(config.line.right)) return bot.lineAnalog.right;
+    const r=pinRec(pin);
+    if(r.mode==='-'||r.mode==='ain'){ r.mode='ain'; if(!r.src) r.src='prog-in'; }
+    const pct = pinSim.alatch[String(pin)] ?? 50;
+    if(r.mode==='ain') r.v = pct;
+    return Math.round(pct*655.35); },   // ham u16 (0-65535) — blok semantiğiyle aynı
   async pot(pin){ await _yield(); return config.potValue; },
   async tone(pin, freq, dur){ playBeep(Number(freq)||440, Number(dur)||200); bot.buzzUntil=performance.now()+(Number(dur)||200); await _yield(); },
   async toneOff(pin){ stopBeep(); bot.buzzUntil=0; await _yield(); },
@@ -1043,7 +1053,39 @@ const api = {
     const p=Number(pin);
     const v = (p===27)? bot.ldrLeft : (p===28)? bot.ldrRight : (bot.ldrValueLive!=null?bot.ldrValueLive:bot.ldrValue);
     return Math.max(0,Math.min(100, Math.round(v))); },
-  async button(pin){ await _yield(); return (Number(pin)===11)? bot.btnB : bot.btnA; },
+  async button(pin){ await _yield();
+    const p=Number(pin), no=String(p);
+    const r=pinRec(no); if(r.mode==='-'){ r.mode='btn'; r.src='prog-in'; }
+    const kb = (p===11) ? bot.btnB : bot.btnA;           // klavye A/B eskisi gibi çalışır
+    const virt = !!pinSim.btn[no];                        // panelden basılan sanal buton
+    if(r.mode==='btn') r.v = (kb||virt)?1:0;
+    return kb || virt; },
+  // ---- PİN YAZMA (sanal kart) ----
+  async pinMode(pin, mode){ const r=pinRec(pin);
+    if(String(mode).indexOf('IN')===0){ r.mode='in'; if(!r.src) r.src='prog-in'; r.v=pinSim.latch[String(pin)]??0; }
+    else { r.mode='out'; r.src='prog'; }
+    await _yield(); },
+  async digitalWrite(pin, v){ pinOut(pin, v, ''); await _yield(); },
+  async ledExt(pin, state, label){ const r=pinRec(pin);
+    const cur=(r.mode==='out'&&r.v)?1:0;
+    const v = state==='ON'?1 : state==='OFF'?0 : (cur?0:1);
+    pinOut(pin, v, label||'LED'); await _yield(); },
+  async ledBuiltin(state){
+    pinSim.builtin = state==='ON'?true : state==='OFF'?false : !pinSim.builtin;
+    await _yield(); },
+  async pwmWrite(pin, duty){ const r=pinRec(pin);
+    r.mode='pwm'; r.src='prog'; if(!r.label) r.label='PWM';
+    r.duty=Math.max(0,Math.min(100,Math.round((Number(duty)||0)/65535*100)));
+    r.v=r.duty>0?1:0; r.angle=null; await _yield(); },
+  async servo(pin, angle){ const r=pinRec(pin);
+    r.mode='servo'; r.src='prog'; r.label='Servo'; r.duty=null;
+    r.angle=Math.max(0,Math.min(180,Math.round(Number(angle)||0))); await _yield(); },
+  // ---- ENKODER (tekerlerden otomatik tık) ----
+  async encInit(i){ const e=encSim[Number(i)===2?2:1];
+    e.on=true; e.c=0; e.lastC=0; e.lastT=performance.now(); await _yield(); },
+  async encCount(i){ await _yield(); return Math.round(encSim[Number(i)===2?2:1].c); },
+  async encReset(i){ const e=encSim[Number(i)===2?2:1]; e.c=0; e.lastC=0; await _yield(); },
+  async encSpeed(i){ await _yield(); return encSpeedOf(Number(i)===2?2:1); },
   map(v, fl, fh, tl, th){ const a=Number(v), b=Number(fl), c=Number(fh), d=Number(tl), e=Number(th);
     if(c===b) return d; return Math.round((a-b)*(e-d)/(c-b)+d); },
   millis(){ return Math.round(performance.now()); },
@@ -1051,11 +1093,73 @@ const api = {
 };
 const logSeen={}; function logOnce(k,m){ if(logSeen[k]) return; logSeen[k]=1; botLog(m); }
 
+/* ===================== PİN SİMÜLASYONU (sanal kart) ===================== */
+// Program pinlere YAZAR (dijital/PWM/LED/röle/servo) → panelde canlı görünür.
+// Kullanıcı pinleri ÇEKER (HIGH/LOW, analog %, buton) → "dijital/analog oku"
+// blokları bu değerleri okur. Böylece kart olmadan pin seviyesinde test yapılır.
+const pinSim = {
+  st: {},          // pinNo -> {mode,label,v,duty,angle,src}
+  latch: {},       // pinNo -> 0|1     (kullanıcının çektiği dijital giriş)
+  alatch: {},      // pinNo -> 0..100  (kullanıcının analog yüzdesi)
+  btn: {},         // pinNo -> bool    (basılı tutulan sanal buton)
+  builtin: false,  // kart üzeri LED
+};
+function pinRec(no){
+  no = String(no);
+  if (!pinSim.st[no]) pinSim.st[no] = { mode:'-', label:'', v:0, duty:null, angle:null, src:'' };
+  return pinSim.st[no];
+}
+function pinOut(no, v, label){
+  const r = pinRec(no);
+  r.mode='out'; r.v = v?1:0; r.duty=null; r.angle=null; r.src='prog';
+  if (label) r.label = label;
+}
+function pinResetProg(){
+  // Yeni çalıştırma: programın sahip olduğu pinleri sıfırla,
+  // kullanıcının çektiği girişler KALSIN (bilerek ayarladı).
+  for (const k of Object.keys(pinSim.st)){
+    if (pinSim.st[k].src === 'prog') delete pinSim.st[k];
+  }
+  pinSim.builtin = false;
+}
+function pinsSnapshot(){
+  const list = Object.keys(pinSim.st).map(no => Object.assign({ no }, pinSim.st[no]));
+  list.sort((a,b)=>{
+    const na=parseInt(a.no,10), nb=parseInt(b.no,10);
+    if(isNaN(na)&&isNaN(nb)) return a.no<b.no?-1:1;
+    if(isNaN(na)) return 1; if(isNaN(nb)) return -1; return na-nb;
+  });
+  return { list, builtin: pinSim.builtin, enc: encSnapshot() };
+}
+
+/* Enkoderler — motor tekerlerinden otomatik tık üretir (sim: 3 tık/cm).
+   Enkoder 1 = sol teker, Enkoder 2 = sağ teker. */
+const encSim = { 1:{on:false,c:0,lastC:0,lastT:0}, 2:{on:false,c:0,lastC:0,lastT:0} };
+const ENC_TPC = 3;
+function encStep(dt){
+  if (encSim[1].on) encSim[1].c += Math.abs(bot._vL)*dt*ENC_TPC;
+  if (encSim[2].on) encSim[2].c += Math.abs(bot._vR)*dt*ENC_TPC;
+}
+function encSnapshot(){
+  const o = {};
+  for (const i of [1,2]) if (encSim[i].on) o[i] = Math.round(encSim[i].c);
+  return o;
+}
+function encSpeedOf(i){
+  const e = encSim[i] || encSim[1];
+  const now = performance.now();
+  const dt = now - e.lastT, dc = Math.round(e.c) - e.lastC;
+  e.lastT = now; e.lastC = Math.round(e.c);
+  if (dt <= 0) return 0;
+  return Math.round(dc*1000/dt);
+}
+
 async function runProgram(code){
   if(bot.running){ bot._abort=true; await new Promise(r=>setTimeout(r,40)); }
   for(const k in logSeen) delete logSeen[k];
   bot._abort=false; bot._lastYield=performance.now(); bot.running=true;
   rxL9.pairs.length=0; bot.keysOnce.clear();   // yeni program: L9110 eşlemesi ve tek-sefer tuşlar sıfır
+  pinResetProg();                               // program pin çıkışları sıfır (kullanıcı girişleri kalır)
   setRunUI(true); post({type:'rx:running', on:true});
   botLog('▶ Çalışıyor…');
   let fn;
@@ -1318,6 +1422,21 @@ window.addEventListener('message',ev=>{
     case 'rx:addObstacle': addObstacle(d.x,d.z); break;
     case 'rx:clearObstacles': clearObstacles(); break;
     case 'rx:setPot': config.potValue=Number(d.value)||0; break;
+    case 'rx:setPin': { const no=String(d.pin); const r=pinRec(no);
+      if(r.mode==='out'||r.mode==='pwm'||r.mode==='servo'){
+        logOnce('pin-out-'+no,'⚠ Pin '+no+' programın ÇIKIŞI — elle çekilemez'); break; }
+      pinSim.latch[no]=d.v?1:0;
+      if(r.mode==='-'||r.mode==='in'){ r.mode='in'; r.v=pinSim.latch[no]; if(!r.src||r.src==='prog-in') r.src=r.src||'user'; }
+      break; }
+    case 'rx:setAnalogPin': { const no=String(d.pin);
+      pinSim.alatch[no]=Math.max(0,Math.min(100,Number(d.pct)||0));
+      const r=pinRec(no); if(r.mode==='-'){ r.mode='ain'; r.src='user'; }
+      if(r.mode==='ain') r.v=pinSim.alatch[no]; break; }
+    case 'rx:btnPin': { const no=String(d.pin); pinSim.btn[no]=!!d.down;
+      const r=pinRec(no); if(r.mode==='-'){ r.mode='btn'; r.src='user'; }
+      if(r.mode==='btn') r.v=(pinSim.btn[no]||((Number(no)===11)?bot.btnB:bot.btnA))?1:0; break; }
+    case 'rx:pinsClear': { pinSim.st={}; pinSim.latch={}; pinSim.alatch={}; pinSim.btn={};
+      pinSim.builtin=false; encSim[1].on=encSim[2].on=false; encSim[1].c=encSim[2].c=0; break; }
     case 'rx:setTrackWidth': trackW=Math.max(1, Math.min(12, Number(d.w)||trackW)); rebuildTrack(); break;
     case 'rx:setColors':
       if(vehicle==='robobot'){
@@ -1346,13 +1465,15 @@ const clock=new THREE.Clock();
 function loop(){
   let dt=clock.getDelta(); if(dt>0.05) dt=0.05;
   stepPhysics(dt);
+  encStep(dt);
   updateSensors();
   if(boundless){ // sokakta kamera botu takip etsin (sınırsız sürüş)
     target.x += (bot.x-target.x)*0.08; target.z += (bot.z-target.z)*0.08; updateCam();
   }
   hudT+=dt; if(hudT>0.05){ hudT=0; updateHUD(); updateObsLabels();
     post({type:'rx:sensors', d:{...bot.usDist}, line:{...bot.lineVal}, lineAnalog:{...bot.lineAnalog},
-      motors:{l:Math.round(bot._vL/MAX_CMS*100), r:Math.round(bot._vR/MAX_CMS*100)}, running:bot.running}); }
+      motors:{l:Math.round(bot._vL/MAX_CMS*100), r:Math.round(bot._vR/MAX_CMS*100)}, running:bot.running,
+      pins:pinsSnapshot()}); }
   renderer.render(scene,camera);
   requestAnimationFrame(loop);
 }

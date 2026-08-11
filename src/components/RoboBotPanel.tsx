@@ -14,12 +14,25 @@ interface Props {
   onClose: () => void;
 }
 
+/** Sanal kart pin satırı (sim telemetrisinden) */
+interface PinRow {
+  no: string;
+  mode: string;          // out | pwm | servo | in | ain | btn
+  label: string;
+  v: number;
+  duty: number | null;
+  angle: number | null;
+  src: string;
+}
+interface PinsSnap { list: PinRow[]; builtin: boolean; enc: Record<string, number> }
+
 /** Sim'den gelen canlı sensör telemetrisi */
 interface Sensors {
   d: { front: number; left: number; right: number };
   line: { left: number; right: number };
   motors: { l: number; r: number };
   running: boolean;
+  pins?: PinsSnap;
 }
 
 const SIM_URL = '/robot/robobot-sim.html?embed=1';
@@ -87,7 +100,7 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
           setLog((l) => [...l.slice(-200), String(d.msg)]);
           break;
         case 'rx:sensors':
-          setSensors({ d: d.d, line: d.line, motors: d.motors, running: d.running });
+          setSensors({ d: d.d, line: d.line, motors: d.motors, running: d.running, pins: d.pins });
           break;
       }
     }
@@ -116,22 +129,58 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
       if (k.length === 1) return k.toLowerCase();
       return null;
     };
-    const send = () => postToSim({ type: 'rx:keys', down: Array.from(pressed) });
-    const onDown = (e: KeyboardEvent) => {
-      const k = norm(e);
-      if (k === null) return;
-      if (!pressed.has(k)) { pressed.add(k); send(); }
+    // GAMEPAD: event'i yok — 50 ms'de bir yoklanır; klavye basılılarıyla
+    // birleşip aynı rx:keys paketinde gider. Karakter eşlemesi App.tsx'teki
+    // donanım protokolüyle birebir aynı (\x20-\x37) → gamepad blokları
+    // simülasyonda da CANLI çalışır.
+    const DEAD = 0.35;
+    const readGamepadKeys = (): string[] => {
+      const out: string[] = [];
+      const gps = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+      for (const gp of gps) {
+        if (!gp) continue;
+        if (gp.buttons[0]?.pressed) out.push('\x20');   // A
+        if (gp.buttons[1]?.pressed) out.push('\x21');   // B
+        if (gp.buttons[2]?.pressed) out.push('\x22');   // X
+        if (gp.buttons[3]?.pressed) out.push('\x23');   // Y
+        if (gp.buttons[4]?.pressed) out.push('\x24');   // LB
+        if (gp.buttons[5]?.pressed) out.push('\x25');   // RB
+        if (gp.buttons[6]?.pressed) out.push('\x26');   // LT
+        if (gp.buttons[7]?.pressed) out.push('\x27');   // RT
+        if (gp.buttons[12]?.pressed) out.push('\x28');  // D-pad ↑
+        if (gp.buttons[13]?.pressed) out.push('\x29');  // D-pad ↓
+        if (gp.buttons[14]?.pressed) out.push('\x2A');  // D-pad ←
+        if (gp.buttons[15]?.pressed) out.push('\x2B');  // D-pad →
+        if (gp.buttons[9]?.pressed) out.push('\x2C');   // Start
+        if (gp.buttons[8]?.pressed) out.push('\x2D');   // Select
+        if (gp.buttons[10]?.pressed) out.push('\x2E');  // L3
+        if (gp.buttons[11]?.pressed) out.push('\x2F');  // R3
+        const lx = gp.axes[0] ?? 0, ly = gp.axes[1] ?? 0;
+        if (ly < -DEAD) out.push('\x30');
+        if (ly > DEAD) out.push('\x31');
+        if (lx < -DEAD) out.push('\x32');
+        if (lx > DEAD) out.push('\x33');
+        const rgx = gp.axes[2] ?? 0, rgy = gp.axes[3] ?? 0;
+        if (rgy < -DEAD) out.push('\x34');
+        if (rgy > DEAD) out.push('\x35');
+        if (rgx < -DEAD) out.push('\x36');
+        if (rgx > DEAD) out.push('\x37');
+        break; // ilk gamepad yeterli
+      }
+      return out;
     };
-    const onUp = (e: KeyboardEvent) => {
-      const k = norm(e);
-      if (k === null) return;
-      if (pressed.delete(k)) send();
-    };
-    const onBlur = () => { if (pressed.size) { pressed.clear(); send(); } };
+    const onDown = (e: KeyboardEvent) => { const k = norm(e); if (k !== null) pressed.add(k); };
+    const onUp = (e: KeyboardEvent) => { const k = norm(e); if (k !== null) pressed.delete(k); };
+    const onBlur = () => pressed.clear();
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
     window.addEventListener('blur', onBlur);
+    const keyIv = setInterval(() => {
+      const down = Array.from(new Set([...pressed, ...readGamepadKeys()]));
+      postToSim({ type: 'rx:keys', down });
+    }, 50);
     return () => {
+      clearInterval(keyIv);
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
@@ -160,6 +209,83 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
   };
   const stop = () => postToSim({ type: 'rx:stop' });
   const reset = () => { postToSim({ type: 'rx:reset' }); setLog([]); };
+
+  // --- PİNLER (sanal kart) ---
+  const pins = sensors?.pins;
+  const [manualPin, setManualPin] = useState(7);
+  const pullPin = (v: 0 | 1) => postToSim({ type: 'rx:setPin', pin: manualPin, v });
+  const clearPins = () => postToSim({ type: 'rx:pinsClear' });
+
+  const renderPin = (r: PinRow) => {
+    if (r.mode === 'out') {
+      return (
+        <div key={r.no} className={`rb-pin-chip is-out ${r.v ? 'lit' : ''}`}>
+          <span className="rb-pin-no">Pin {r.no}</span>
+          <span className="rb-pin-dot" />
+          <span className="rb-pin-v">{r.label ? `${r.label} · ` : ''}{r.v ? 'HIGH' : 'LOW'}</span>
+        </div>
+      );
+    }
+    if (r.mode === 'pwm') {
+      return (
+        <div key={r.no} className="rb-pin-chip is-out lit">
+          <span className="rb-pin-no">Pin {r.no}</span>
+          <span className="rb-pin-bar"><i style={{ width: `${r.duty ?? 0}%` }} /></span>
+          <span className="rb-pin-v">PWM %{r.duty ?? 0}</span>
+        </div>
+      );
+    }
+    if (r.mode === 'servo') {
+      return (
+        <div key={r.no} className="rb-pin-chip is-out lit">
+          <span className="rb-pin-no">Pin {r.no}</span>
+          <span className="rb-pin-servo" style={{ transform: `rotate(${(r.angle ?? 90) - 90}deg)` }}>➤</span>
+          <span className="rb-pin-v">Servo {r.angle ?? 0}°</span>
+        </div>
+      );
+    }
+    if (r.mode === 'ain') {
+      return (
+        <div key={r.no} className="rb-pin-chip is-in">
+          <span className="rb-pin-no">Pin {r.no}</span>
+          <input
+            type="range" min={0} max={100} value={r.v}
+            onChange={(e) => postToSim({ type: 'rx:setAnalogPin', pin: r.no, pct: +e.target.value })}
+            title="Analog değeri çek (0-100%)"
+          />
+          <span className="rb-pin-v">%{r.v}</span>
+        </div>
+      );
+    }
+    if (r.mode === 'btn') {
+      return (
+        <div key={r.no} className="rb-pin-chip is-in">
+          <span className="rb-pin-no">Pin {r.no}</span>
+          <button
+            className={`rb-pin-push ${r.v ? 'lit' : ''}`}
+            onPointerDown={() => postToSim({ type: 'rx:btnPin', pin: r.no, down: true })}
+            onPointerUp={() => postToSim({ type: 'rx:btnPin', pin: r.no, down: false })}
+            onPointerLeave={() => postToSim({ type: 'rx:btnPin', pin: r.no, down: false })}
+          >
+            Buton — bas
+          </button>
+        </div>
+      );
+    }
+    // 'in' (dijital giriş): tıkla → HIGH/LOW çek
+    return (
+      <button
+        key={r.no}
+        className={`rb-pin-chip is-in rb-pin-toggle ${r.v ? 'lit' : ''}`}
+        onClick={() => postToSim({ type: 'rx:setPin', pin: r.no, v: r.v ? 0 : 1 })}
+        title="Tıkla — pini HIGH/LOW çek"
+      >
+        <span className="rb-pin-no">Pin {r.no}</span>
+        <span className="rb-pin-dot" />
+        <span className="rb-pin-v">{r.v ? 'HIGH' : 'LOW'} · çek</span>
+      </button>
+    );
+  };
 
   // --- pist ---
   const changeTrack = (preset: string) => {
@@ -291,6 +417,53 @@ export function RoboBotPanel({ fullscreen, onToggleFullscreen, onClose }: Props)
               <p className="ra-hint">
                 Bloklarla kodu yaz, <b>Çalıştır</b>'a bas — robot simülasyonda hareket eder.
                 Robotu ve engelleri fareyle <b>sürükleyebilirsin</b>. Boş alanı sürükle = kamerayı döndür.
+              </p>
+            </div>
+
+            {/* PİNLER — SANAL KART */}
+            <div className="ra-section">
+              <h4 className="ra-h">Pinler (sanal kart)</h4>
+              <div className="rb-pinrow">
+                <label className="ra-field ra-field-narrow">
+                  <span>Pin</span>
+                  <input
+                    type="number" min={0} max={28} value={manualPin}
+                    onChange={(e) => setManualPin(Math.max(0, Math.min(28, +e.target.value || 0)))}
+                  />
+                </label>
+                <button className="btn btn-secondary" onClick={() => pullPin(1)}>HIGH çek</button>
+                <button className="btn btn-ghost" onClick={() => pullPin(0)}>LOW çek</button>
+              </div>
+              {pins && (pins.list.length > 0 || pins.builtin) ? (
+                <div className="rb-pins">
+                  {pins.builtin && (
+                    <div className="rb-pin-chip is-out lit">
+                      <span className="rb-pin-no">LED</span>
+                      <span className="rb-pin-dot" />
+                      <span className="rb-pin-v">Kart LED'i açık</span>
+                    </div>
+                  )}
+                  {pins.list.map((r) => renderPin(r))}
+                  {Object.entries(pins.enc).map(([i, c]) => (
+                    <div key={`enc${i}`} className="rb-pin-chip is-enc">
+                      <span className="rb-pin-no">ENK {i}</span>
+                      <span className="rb-pin-v">{c} tık</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="ra-hint">
+                  Henüz pin yok — programın dokunduğu her pin burada <b>canlı</b> belirir.
+                </p>
+              )}
+              <div className="ra-actions">
+                <button className="btn btn-ghost" onClick={clearPins}>Pinleri temizle</button>
+              </div>
+              <p className="ra-hint">
+                Programın <b>yazdığı</b> pinler yanar (HIGH · PWM · servo açısı).
+                <b> Dijital/analog oku</b> ve <b>buton</b> blokları için değeri buradan <b>çek</b>:
+                yukarıya pin numarasını yazıp <b>HIGH/LOW çek</b>'e bas, ya da beliren
+                anahtara/kaydırıcıya/butona dokun. Program o an bu değeri okur.
               </p>
             </div>
 

@@ -532,12 +532,14 @@ const TANK_OBSTACLE = program([
 
 // ════════════════════════════════════════════════════════════════════
 
+import { ROBOARM_TASKS } from './roboarm-tasks';
+
 export const KITS: Kit[] = [
   {
     id: 'roboarm',
     name: 'RoboArm Kiti',
     emoji: '🦾',
-    desc: '4 eksenli robot kol · servo GP0–GP3',
+    desc: '4 eksenli robot kol · servo GP0–GP3 · 20 görevlik eğitim seti',
     files: [
       {
         id: 'arm-cube-auto', name: '🧊 Küp Görevi (Otomatik Bloklar)',
@@ -575,6 +577,8 @@ export const KITS: Kit[] = [
         steps: ['Gripper açık başla', 'Nesneye uzan, kavra', 'Tabanı 160°\'ye çevir', 'Bırak ve merkeze dön'],
         blocks: ARM_PICK,
       },
+      // ── 20 GÖREVLİK EĞİTİM SETİ (satın alan kullanıcı müfredatı) ──
+      ...ROBOARM_TASKS,
     ],
   },
   {

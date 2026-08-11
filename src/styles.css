@@ -6892,3 +6892,72 @@ g.blocklyDraggable > path:first-of-type {
 .teacher-library-panel .tl-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--rx-accent);
 }
+
+
+/* ===================== RoboBOT — Pinler (sanal kart) ===================== */
+.rb-pinrow { display: flex; gap: 6px; align-items: flex-end; }
+.rb-pinrow .btn { padding: 6px 10px; font-size: 12px; }
+.rb-pins { display: flex; flex-direction: column; gap: 5px; }
+.rb-pin-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 8px;
+  background: color-mix(in srgb, var(--rx-surface-2, #1c2333) 82%, transparent);
+  border: 1px solid var(--rx-border, #2a3550);
+  font-size: 12px; color: var(--rx-text, #dfe6f5);
+}
+button.rb-pin-chip { width: 100%; text-align: left; cursor: pointer; font: inherit; }
+button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
+.rb-pin-no {
+  min-width: 46px; font-weight: 700; font-size: 11px; letter-spacing: .2px;
+  color: var(--rx-text-dim, #9aa7c4);
+}
+.rb-pin-v { margin-left: auto; font-variant-numeric: tabular-nums; }
+.rb-pin-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--rx-border, #3a4760); flex: none;
+  transition: background .12s ease, box-shadow .12s ease;
+}
+.rb-pin-chip.lit .rb-pin-dot {
+  background: #ffd23f;
+  box-shadow: 0 0 8px 2px rgba(255, 210, 63, .55);
+}
+.rb-pin-chip.is-in.lit { border-color: color-mix(in srgb, #5fd38a 60%, var(--rx-border, #2a3550)); }
+.rb-pin-chip.is-in.lit .rb-pin-dot { background: #5fd38a; box-shadow: 0 0 8px 2px rgba(95, 211, 138, .5); }
+.rb-pin-chip.is-enc .rb-pin-no { color: var(--rx-accent, #ff8b3d); }
+.rb-pin-bar {
+  flex: 1; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--rx-border, #2a3550);
+}
+.rb-pin-bar i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #ffb23f, #ffd23f);
+  transition: width .1s linear;
+}
+.rb-pin-servo {
+  display: inline-block; transition: transform .12s ease;
+  color: var(--rx-accent, #ff8b3d); font-size: 14px; line-height: 1;
+}
+.rb-pin-chip input[type="range"] { flex: 1; min-width: 60px; }
+.rb-pin-push {
+  margin-left: auto; padding: 4px 12px; border-radius: 7px;
+  border: 1px solid var(--rx-border, #2a3550);
+  background: var(--rx-surface-2, #232b3f); color: inherit;
+  font-size: 12px; cursor: pointer; user-select: none; touch-action: none;
+}
+.rb-pin-push:active, .rb-pin-push.lit {
+  background: #5fd38a; color: #0c2416; border-color: #5fd38a;
+}
+
+
+/* ===================== Robot Kol — Kart & Çalıştır ===================== */
+.ra-simlog {
+  margin: 0; padding: 7px 9px; max-height: 96px; overflow: auto;
+  border-radius: 8px; font-size: 11px; line-height: 1.5;
+  background: color-mix(in srgb, var(--rx-surface-2, #161c2b) 88%, transparent);
+  border: 1px solid var(--rx-border, #2a3550);
+  color: var(--rx-text, #dfe6f5); white-space: pre-wrap; word-break: break-word;
+}
+.ra-live-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--rx-text, #dfe6f5);
+}

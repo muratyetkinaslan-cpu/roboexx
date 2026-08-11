@@ -11,6 +11,8 @@
  *   await bot.wait(ms)
  *   await bot.distance(trig, echo) / bot.digital(pin) / bot.analog(pin) / bot.pot(pin)
  *   await bot.tone(pin, frekans, süre) / bot.toneOff(pin)
+ *   await bot.pinMode/digitalWrite/pwmWrite/servo/ledExt/ledBuiltin(...)  // sanal kart pinleri
+ *   await bot.encInit/encCount/encSpeed/encReset(no)                      // tekerlerden oto-tık
  *   bot.print(x) / bot.stopProgram()
  *   await bot.frame()   // "sürekli tekrarla" döngüsünü 60Hz'de nefes aldırır
  *
@@ -160,11 +162,15 @@ export function installSimGenerators(): void {
     const key = String(block.getFieldValue('KEY') ?? ' ');
     return awaited(`await bot.keyOnce(${jsKeyLiteral(key)})`);
   };
-  // Gamepad sim'de yakalanmıyor → false (klavye zaten oynanabilir)
-  const falseVal = (): [string, number] => ['false', Order.ATOMIC];
-  for (const t of ['rx_gamepad_pressed', 'rx_gamepad_just_pressed']) {
-    G.forBlock[t] = falseVal;
-  }
+  // Gamepad — panel gamepad'i yoklayıp rx:keys ile iletir → sim'de CANLI
+  G.forBlock['rx_gamepad_pressed'] = function (block: Blockly.Block) {
+    const btn = String(block.getFieldValue('BTN') ?? '\x20');
+    return awaited(`await bot.keyDown(${jsKeyLiteral(btn)})`);
+  };
+  G.forBlock['rx_gamepad_just_pressed'] = function (block: Blockly.Block) {
+    const btn = String(block.getFieldValue('BTN') ?? '\x20');
+    return awaited(`await bot.keyOnce(${jsKeyLiteral(btn)})`);
+  };
   // BerryBot butonu (A=varsayılan, pin 11=B) → sim'de canlı
   G.forBlock['rx_button_pressed'] = function (block: Blockly.Block) {
     const pin = block.getFieldValue('PIN') ?? '10';
@@ -198,17 +204,67 @@ export function installSimGenerators(): void {
   G.forBlock['rx_dht11_humidity'] = (): [string, number] => ['50', Order.ATOMIC];
   G.forBlock['rx_shtc3_temp'] = (): [string, number] => ['25', Order.ATOMIC];
   G.forBlock['rx_shtc3_humidity'] = (): [string, number] => ['50', Order.ATOMIC];
-  G.forBlock['rx_encoder_speed'] = (): [string, number] => ['0', Order.ATOMIC];
-  G.forBlock['rx_encoder_count'] = (): [string, number] => ['0', Order.ATOMIC];
+  // Enkoderler — sim'de teker hareketinden otomatik tık (1=sol, 2=sağ)
+  G.forBlock['rx_encoder_init'] = function (block: Blockly.Block) {
+    const enc = block.getFieldValue('ENC') ?? '1';
+    return `await bot.encInit(${enc});\n`;
+  };
+  G.forBlock['rx_encoder_reset'] = function (block: Blockly.Block) {
+    const enc = block.getFieldValue('ENC') ?? '1';
+    return `await bot.encReset(${enc});\n`;
+  };
+  G.forBlock['rx_encoder_count'] = function (block: Blockly.Block) {
+    const enc = block.getFieldValue('ENC') ?? '1';
+    return awaited(`await bot.encCount(${enc})`);
+  };
+  G.forBlock['rx_encoder_speed'] = function (block: Blockly.Block) {
+    const enc = block.getFieldValue('ENC') ?? '1';
+    return awaited(`await bot.encSpeed(${enc})`);
+  };
+
+  // ---- PİN SİMÜLASYONU — dijital/PWM/servo/LED/röle artık no-op DEĞİL ----
+  // Program pinlere yazar → paneldeki "Pinler (sanal kart)" bölümünde canlı
+  // görünür; "dijital/analog oku" da kullanıcının panelden çektiği değeri okur.
+  G.forBlock['rx_pin_mode'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const mode = block.getFieldValue('MODE') ?? 'OUT';
+    return `await bot.pinMode(${pin}, "${mode}");\n`;
+  };
+  G.forBlock['rx_digital_write'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const v = block.getFieldValue('STATE') === 'HIGH' ? 1 : 0;
+    return `await bot.digitalWrite(${pin}, ${v});\n`;
+  };
+  G.forBlock['rx_pwm_write'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const duty = G.valueToCode(block, 'DUTY', Order.NONE) || '0';
+    return `await bot.pwmWrite(${pin}, ${duty});\n`;
+  };
+  G.forBlock['rx_led_builtin'] = function (block: Blockly.Block) {
+    const state = block.getFieldValue('STATE') ?? 'ON';
+    return `await bot.ledBuiltin("${state}");\n`;
+  };
+  G.forBlock['rx_led_external'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const state = block.getFieldValue('STATE') ?? 'ON';
+    return `await bot.ledExt(${pin}, "${state}", "LED");\n`;
+  };
+  G.forBlock['rx_relay'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const state = block.getFieldValue('STATE') ?? 'ON';
+    return `await bot.ledExt(${pin}, "${state}", "Röle");\n`;
+  };
+  G.forBlock['rx_servo_angle'] = function (block: Blockly.Block) {
+    const pin = block.getFieldValue('PIN');
+    const angle = G.valueToCode(block, 'ANGLE', Order.NONE) || '90';
+    return `await bot.servo(${pin}, ${angle});\n`;
+  };
 
   // ---- DONANIM ÇIKIŞLARI (sim'de görsel karşılığı yok → sessizce atla) ----
   const noop = (): string => '';
   for (const t of [
-    'rx_digital_write', 'rx_pin_mode', 'rx_pwm_write', 'rx_relay',
-    'rx_led_builtin', 'rx_led_external',
-    'rx_servo_angle', 'rx_servo_v2', 'rx_servo_v3', 'rx_servo_v3_off',
+    'rx_servo_v2', 'rx_servo_v3', 'rx_servo_v3_off',
     'rx_motor_init', 'rx_pca9685_init', 'rx_ir_init', 'rx_shtc3_init',
-    'rx_encoder_init', 'rx_encoder_reset',
     'rx_neopixel_init', 'rx_neopixel_show',
     'rx_rgb_init', 'rx_rgb_rainbow',
     'rx_oled_init', 'rx_oled_clear', 'rx_oled_show', 'rx_oled_text', 'rx_oled_eyes',

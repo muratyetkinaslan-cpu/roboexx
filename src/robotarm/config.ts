@@ -31,6 +31,8 @@ export interface JointConfig {
 }
 
 export interface ArmConfig {
+  /** Canlı kontrol hedefi: Pico (REPL) veya Arduino (canlı sketch). */
+  board?: 'pico' | 'arduino';
   joints: [JointConfig, JointConfig, JointConfig, JointConfig];
   /** PCA9685 I2C ayarları (pca tipi kullanılıyorsa) */
   pca: { sda: number; scl: number; addr: number };
@@ -54,6 +56,7 @@ const DEFAULT_GRIPPER: ArmConfig['gripper'] = {
 };
 
 export const DEFAULT_ARM_CONFIG: ArmConfig = {
+  board: 'pico',
   joints: [
     { label: 'Taban (J1)',    kind: 'normal', id: 0, offset: 0, invert: false },
     { label: 'Omuz (J2)',     kind: 'normal', id: 1, offset: 0, invert: false },
@@ -80,6 +83,7 @@ export function loadArmConfig(): ArmConfig {
         }
         if (!Array.isArray(p.gripper.pivot)) p.gripper.pivot = [0, 0, 0];
         if (!p.pick) p.pick = structuredClone(DEFAULT_ARM_CONFIG.pick);
+        if (p.board !== 'arduino') p.board = 'pico';
         return p as ArmConfig;
       }
     }
