@@ -662,12 +662,31 @@ def _run_user_code():
     _run_user_code_body(code)
 
 
+# Çekirdek-1'de kullanıcı kodu koşuyor mu? Uygulama (bridge.ts) yeni bir
+# Çalıştır/Yükle öncesi raw REPL'den globals().get('_RX_C1', 0) ile sorar.
+# Ctrl-C core0'daki main.py'yi kesince REPL AYNI __main__ globals'ını görür;
+# bayrak 1 ise uygulama kartı yönetimli resetler — iki programın aynı anda
+# koşması (pin/PWM çakışması, flash yazım riski) kökten engellenir.
+_RX_C1 = 0
+
+
+def _run_user_code_core1_entry(code_str):
+    """core1 giriş noktası — _RX_C1 bayrağını yönetir."""
+    global _RX_C1
+    _RX_C1 = 1
+    try:
+        _run_user_code_body(code_str)
+    finally:
+        _RX_C1 = 0
+
+
 def _run_user_code_on_core1():
     """
     user_code.py'yi Pico W'nin İKİNCİ çekirdeğinde (core1) çalıştırır.
     KRİTİK: dosyayı core0'da oku, içeriği core1 thread'ine string olarak ver.
     İki ayrı os.stat / open çağrısı arasında littlefs cache race yaşanmasın diye.
     """
+    global _RX_C1
     try:
         import _thread
     except ImportError:
@@ -682,9 +701,13 @@ def _run_user_code_on_core1():
         print("[Boot] user_code.py yok, sadece BLE dinleniyor")
         return
     print("[Boot] user_code.py CORE1'de çalıştırılıyor (boyut:", len(code), "byte)")
+    # Bayrağı thread başlamadan ÖNCE kaldır — uygulama tam aradaki anda
+    # sorgularsa yarış olmasın. Başlatma başarısızsa geri indirilir.
+    _RX_C1 = 1
     try:
-        _thread.start_new_thread(_run_user_code_body, (code,))
+        _thread.start_new_thread(_run_user_code_core1_entry, (code,))
     except Exception as e:
+        _RX_C1 = 0
         print("[Boot] core1 başlatma HATA:", e, "— core0'a düşülüyor")
         _run_user_code_body(code)
 
@@ -694,7 +717,7 @@ def _run_user_code_on_core1():
 # ============================================================
 
 print("RoboExx Pico W — BLE bootloader başlıyor...")
-print("__RX_BOOT__ v1.1")
+print("__RX_BOOT__ v1.2")
 
 # roboexx kütüphanesini boot'ta pre-load et — MSG_KEY IRQ handler'ı bunu
 # cache'ten alacak (anlık). roboexx yüklenmemişse klavye desteği devre dışı,

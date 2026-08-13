@@ -226,13 +226,7 @@ export class SerialBridge {
     this.cancelled = true; // süren işlemler temiz düşsün
     this._setState('disconnected');
     this.liveRun = false;
-    this.readLoopGen++; // aktif read loop'u geçersiz kıl
-    try { await this.reader?.cancel(); } catch {}
-    try { this.writer?.releaseLock(); } catch {}
-    try { await this.port?.close(); } catch {}
-    this.port = null;
-    this.writer = null;
-    this.reader = null;
+    await this._teardownPipes('bağlantı kesildi'); // süre sınırlı — asılı kalamaz
     this.portInfo = null;
     this.esp32 = false;
     this.uartBridge = false;
@@ -428,6 +422,9 @@ export class SerialBridge {
   /** Tek çalıştırma denemesi — runCode'un oto-kurtarma sarmalayıcısı çağırır. */
   private async _runCodeAttempt(code: string): Promise<void> {
     await this._enterRaw();
+    // Çekirdek-1'de eski program koşuyorsa önce kartı temiz başlat —
+    // iki programın aynı anda koşması (pin/PWM çakışması) kökten engellenir.
+    await this._ensureExclusive();
     // EL SIKIŞMA DOĞRULAMASI: raw REPL'in gerçekten komut çalıştırdığını
     // KANITLA. Bu, "raw REPL banner'ı geldi ama kart aslında sıkışık"
     // durumlarını (yarım protokol, bayat tampon) yakalar.
@@ -458,7 +455,7 @@ export class SerialBridge {
         await this._uploadCodeAttempt(code, onProgress);
       } catch (e) {
         if (this.cancelled || this.state === 'disconnected') throw e;
-        this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
+        this.onLog('info', '⟳ Yükleme takıldı (' + (e as Error).message + ') — kart otomatik resetlenip bir kez daha denenecek…');
         const ok = await this._hardResetAndReconnect({ captureRepl: true });
         if (!ok || this.cancelled) throw e;
         this._setState('busy');
@@ -485,6 +482,9 @@ export class SerialBridge {
     const CHUNK_BYTES = this.uartBridge ? 1024 : 2048;
 
       await this._enterRaw();
+      // Çekirdek-1'de eski program koşuyorsa flash yazımından ÖNCE kartı
+      // temiz başlat — hem yazım riski hem pin çakışması kökten biter.
+      await this._ensureExclusive();
       onProgress?.({ pct: 0, bytesSent: 0, bytesTotal, speedKBs: 0 });
 
       // 0) Bootloader'ın çekirdek-1 gözcüsünü durdur — flash'a yazarken
@@ -496,16 +496,29 @@ export class SerialBridge {
       //    "çalıştırıcı"dır (BLE bootloader'ı ya da mini stub — ikisi de
       //    BERRYBOT-BOOT imzalı). Eski davranış (kodu main.py'ye yazmak)
       //    BLE bootloader'ını EZİYORDU.
-      await this._execRaw(`f=open('user_code.py','wb')\nprint('__OPEN__')\n`);
+      //    Açılış SONUCU KONTROL EDİLİR — eskiden hata sessizce yutuluyor,
+      //    bozuk dosya sistemi/dolu flash "Yükleme başarılı" diye geçiyordu.
+      const opened = await this._execRaw(`f=open('user_code.py','wb')\nprint('__OPEN__')\n`);
+      if ((opened.error && opened.error.trim()) || !opened.output.includes('__OPEN__')) {
+        throw new Error('Dosya karta açılamadı: ' + (opened.error.trim().split('\n').pop() || 'kart yanıt vermedi'));
+      }
 
-      // 2) Chunk'lar halinde yaz — Pico'nun RAM'i taşmasın
+      // 2) Chunk'lar halinde yaz — Pico'nun RAM'i taşmasın.
+      //    Her parçanın SONUCU kontrol edilir (ENOSPC, I/O hatası vb. anında
+      //    yakalanır; eskiden yarım dosya sessizce geçebiliyordu).
       let offset = 0;
       while (offset < bytesTotal) {
         if (this.cancelled) throw new Error('Yükleme iptal edildi');
         const end = Math.min(offset + CHUNK_BYTES, bytesTotal);
         const chunk = codeBytes.slice(offset, end);
         const literal = pythonBytesLiteralFromBytes(chunk);
-        await this._execRaw(`f.write(${literal})\nprint('__C__')\n`);
+        const wr = await this._execRaw(`f.write(${literal})\nprint('__C__')\n`);
+        if (wr.error && wr.error.trim()) {
+          throw new Error('Karta yazma hatası: ' + wr.error.trim().split('\n').pop());
+        }
+        if (!wr.output.includes('__C__')) {
+          throw new Error('Karta yazma doğrulanamadı (parça yanıtı gelmedi)');
+        }
         offset = end;
         const elapsed = (Date.now() - start) / 1000;
         const speedKBs = elapsed > 0 ? offset / 1024 / elapsed : 0;
@@ -517,17 +530,28 @@ export class SerialBridge {
         });
       }
 
-      // 3) Kapat ve doğrula
+      // 3) Kapat, FLASH'A SENKRONLA ve boyutu doğrula.
+      //    os.sync(): BLE bootloader'daki "sync beklenmezse machine.reset()
+      //    yazımın ortasına denk gelir ve user_code.py KAYBOLUR" dersinin
+      //    USB karşılığı — "içine yüklenmedi" vakalarının kök nedenlerinden.
       const { output, error } = await this._execRaw(
-        `f.close()\nimport os\nprint('__OK__',os.stat('user_code.py')[6])\n`
+        `f.close()\nimport os\ntry:\n    os.sync()\nexcept AttributeError:\n    pass\nprint('__OK__',os.stat('user_code.py')[6])\n`
       );
 
       if (error && error.trim()) {
         throw new Error(error.trim());
       }
-      if (!output.includes('__OK__')) {
+      const sizeMatch = output.match(/__OK__\s*(\d+)/);
+      if (!sizeMatch) {
         throw new Error('Yazma doğrulaması başarısız');
       }
+      // 3b) BOYUT EŞİTLİĞİ — eskiden stat çıktısı yazdırılıyor ama beklenen
+      //     boyutla KARŞILAŞTIRILMIYORDU; eksik yazım "başarılı" görünürdü.
+      const writtenSize = parseInt(sizeMatch[1], 10);
+      if (writtenSize !== bytesTotal) {
+        throw new Error(`Eksik yazım: karta ${writtenSize} bayt indi, beklenen ${bytesTotal} — otomatik tekrar denenecek`);
+      }
+      this.onLog('system', `✓ Kod, karttaki user_code.py dosyasına yazıldı ve doğrulandı (${bytesTotal} bayt) — main.py sadece çalıştırıcıdır`);
 
       // 4) main.py bir çalıştırıcı mı? (BLE bootloader veya stub — ikisi de
       //    'BERRYBOT-BOOT' imzası taşır.) Değilse/yoksa user_code.py'yi
@@ -589,20 +613,17 @@ export class SerialBridge {
       try {
         // Raw REPL'in içindeyiz — reset'i exec olarak kör gönder.
         // (Cevap beklenmez; komut koşar koşmaz kart zaten yeniden başlar.)
-        await this._write('import machine\r\nmachine.reset()\r\n\x04');
+        // 250ms settle: os.sync() sonrası littlefs metadata'sının flash'a
+        // kesin inmesi için pay — BLE bootloader'daki "reset flash yazımının
+        // ortasında olursa user_code.py kaybolur" dersinin USB karşılığı.
+        await this._write('import machine,time\r\ntime.sleep_ms(250)\r\nmachine.reset()\r\n\x04');
       } catch {
         // port bu esnada düşmüş olabilir — reset büyük ihtimalle başladı
       }
 
-      // USB'nin düşmesi için bekle, eski portu tamamen kapat
+      // USB'nin düşmesi için bekle, eski boruyu süre sınırlı kapat
       await new Promise((r) => setTimeout(r, 700));
-      this.readLoopGen++;
-      try { await this.reader?.cancel(); } catch {}
-      try { this.writer?.releaseLock(); } catch {}
-      this.writer = null;
-      this.reader = null;
-      try { await this.port?.close(); } catch {}
-      this.port = null;
+      await this._teardownPipes('yükleme sonrası reset');
 
       // Kart yeniden numaralandırılınca portu aç — ama HİÇBİR ŞEY YAZMA
       const serial = this._serialApi();
@@ -628,7 +649,7 @@ export class SerialBridge {
           return;
         } catch {
           const halfOpen = this.port as SerialPortLike | null;
-          try { await halfOpen?.close(); } catch {}
+          try { await this._settle(halfOpen?.close(), 1000); } catch {}
           this.port = null;
           this.writer = null;
         }
@@ -658,7 +679,7 @@ export class SerialBridge {
         await this._uploadLibraryAttempt(filename, code, onProgress);
       } catch (e) {
         if (this.cancelled || this.state === 'disconnected') throw e;
-        this.onLog('info', '⟳ Yükleme takıldı — kart otomatik resetlenip bir kez daha denenecek…');
+        this.onLog('info', '⟳ Yükleme takıldı (' + (e as Error).message + ') — kart otomatik resetlenip bir kez daha denenecek…');
         const ok = await this._hardResetAndReconnect({ captureRepl: true });
         if (!ok || this.cancelled) throw e;
         this._setState('busy');
@@ -734,6 +755,39 @@ export class SerialBridge {
   }
 
   // ====== Private ======
+
+  /**
+   * ÇEKİRDEK-1 ZOMBİSİ KONTROLÜ — yeni işlemden önce kartın TEK program
+   * çalıştırdığından emin ol.
+   *
+   * Senaryo: yükleme sonrası bootloader kullanıcı kodunu core1'de otomatik
+   * başlatır. Sonraki Çalıştır/Yükle'de Ctrl-C yalnız core0'ı keser; core1'de
+   * ESKİ program koşmaya devam eder. Yeni kod core0'da başlayınca iki program
+   * aynı pinleri/PWM/I2C'yi paylaşır (robot "delirir"), flash yazımı riske
+   * girer — çocuk çareyi fiziksel RESET'te arıyordu.
+   *
+   * Bootloader v1.2+ core1'de kod koşarken __main__ içinde _RX_C1=1 bayrağını
+   * tutar (Ctrl-C sonrası REPL aynı globals'ı görür). Bayrak 1 ise kart
+   * yönetimli resetlenir (süpervizör !RST zinciri + boot penceresi yakalama)
+   * ve raw REPL'e temiz durumda yeniden girilir. Eski bootloader'larda bayrak
+   * yoktur (0 döner) — davranış değişmez.
+   */
+  private async _ensureExclusive(): Promise<void> {
+    let out = '';
+    try {
+      const probe = await this._execRaw(`print('__C1__', globals().get('_RX_C1', 0))\n`);
+      out = probe.output;
+    } catch {
+      return; // sorgulanamadı — eski akışla devam
+    }
+    if (!/__C1__\s*1/.test(out)) return;
+    this.onLog('info', "⟳ Önceki program hâlâ çekirdek-1'de koşuyor — kart temiz başlatılıyor (RESET tuşuna gerek yok)…");
+    const ok = await this._hardResetAndReconnect({ captureRepl: true });
+    if (!ok || this.cancelled) {
+      throw new Error('Kart temiz başlatılamadı — USB kablosunu kontrol edip tekrar dene');
+    }
+    await this._enterRaw();
+  }
 
   /** Bootloader v3/v4 gözcüsünü (çekirdek-1) durdur — flash yazımı öncesi. */
   private async _stopWatcher(): Promise<void> {
@@ -886,6 +940,44 @@ export class SerialBridge {
     this.silentBuffer = '';
   }
 
+  /** Bir promise'i en fazla `ms` bekle; hata/askı durumunda sessizce dön. */
+  private async _settle(p: Promise<unknown> | undefined | null, ms: number): Promise<void> {
+    if (!p) return;
+    await Promise.race([
+      p.catch(() => {}),
+      new Promise<void>((r) => setTimeout(r, ms)),
+    ]);
+  }
+
+  /**
+   * BORU HATTI YIKIMI — writer/reader/port'u ZORLA ve SÜRE SINIRLI kapat.
+   *
+   * Neden kritik: WritableStream yazmaları FIFO kuyruğa girer. Kartın stdin
+   * tamponu dolduğunda (USB CDC NAK) tek bir write() süresiz askıda kalır ve
+   * sonraki HER yazma — kurtarma komutları dahil — onun arkasında bekler.
+   * Üstelik pending write varken releaseLock()+port.close() Chrome'da
+   * süresiz asılı kalabilir; eski kod tam bu yüzden kilitleniyordu ve tek
+   * çıkış karttaki fiziksel RESET (USB re-enum → disconnect eventi) oluyordu.
+   *
+   * Doğru sıra: writer.abort() (bekleyen USB OUT transferini iptal eder) →
+   * reader.cancel → port.close, hepsi zaman sınırlı. Ardından her şey null:
+   * üst kattaki oto-kurtarma (getPorts ile) TAZE bir boru açar.
+   */
+  private async _teardownPipes(reason: string): Promise<void> {
+    const port = this.port;
+    const writer = this.writer;
+    const reader = this.reader;
+    this.readLoopGen++;  // aktif read loop'u geçersiz kıl
+    this.port = null;    // yeni yazmalar anında 'Yazıcı hazır değil' alsın
+    this.writer = null;
+    this.reader = null;
+    try { await this._settle(writer?.abort(new Error(reason)), 1000); } catch {}
+    try { writer?.releaseLock(); } catch {}
+    try { await this._settle(reader?.cancel(), 1000); } catch {}
+    try { reader?.releaseLock(); } catch {}
+    try { await this._settle(port?.close(), 1500); } catch {}
+  }
+
   /**
    * SON ÇARE — kartı yazılımsal olarak resetle ve otomatik yeniden bağlan.
    *
@@ -900,7 +992,6 @@ export class SerialBridge {
    * Başarılıysa true döner; kart temiz boot etmiş, REPL'e girilebilir durumda.
    */
   private async _hardResetAndReconnect(opts?: { captureRepl?: boolean }): Promise<boolean> {
-    if (!this.port) return false;
     const captureRepl = opts?.captureRepl !== false;
     this.onLog('info', '⟳ Kart yazılımsal olarak resetleniyor (RESET tuşuna gerek yok)…');
     this.rebooting = true;
@@ -911,27 +1002,38 @@ export class SerialBridge {
       //       dinleyicisi REPL kilitli olsa bile bunu görüp machine.reset()
       //       yapar (kullanıcı kodu core1'de koşarken TEK güvenilir yol)
       //    c. Klasik REPL üzerinden machine.reset()
-      try {
-        await this._write('\r\x03\x03');
-        await new Promise((r) => setTimeout(r, 200));
-        await this._write('\x06!RST\n');
-        await new Promise((r) => setTimeout(r, 180));
-        await this._write('\r\x03');
-        await new Promise((r) => setTimeout(r, 120));
-        await this._write('import machine\r\nmachine.reset()\r\n');
-      } catch {
-        // yazma hatası — port zaten kopmuş olabilir, devam
+      //    Boru bir yazma zaman aşımıyla zaten yıkıldıysa (port==null) bu
+      //    faz atlanır; kart resetlenmemiş olsa bile aşağıdaki yeniden
+      //    açma + _bootCapture'ın Ctrl-C pokeları kartı REPL'e döndürür
+      //    (\x03 MicroPython'da ISR seviyesinde işlenir — stdin tamponu
+      //    dolu olsa bile KeyboardInterrupt üretir).
+      if (this.writer) {
+        try {
+          await this._write('\r\x03\x03');
+          await new Promise((r) => setTimeout(r, 200));
+          await this._write('\x06!RST\n');
+          await new Promise((r) => setTimeout(r, 180));
+          await this._write('\r\x03');
+          await new Promise((r) => setTimeout(r, 120));
+          // Kör reset kartın O ANKİ moduna bakılmaksızın çalışmalı:
+          //  - \x01: friendly REPL'den raw'a girer; zaten raw ise banner
+          //    yenilenir (her iki durumda da raw moddayız)
+          //  - komut + \x04: raw REPL exec — ESKİ hali \x04'süz düz satırdı
+          //    ve kart raw REPL'deyken (örn. zombi temizliği raw girişten
+          //    hemen sonra çağrıldığında) reset HİÇ çalışmıyordu; bu açık
+          //    simülasyon testinde (T2) yakalandı.
+          await this._write('\x01');
+          await new Promise((r) => setTimeout(r, 150));
+          await this._write('import machine\r\nmachine.reset()\r\n\x04');
+        } catch {
+          // yazma hatası — port kopmuş ya da boru yıkılmış olabilir, devam
+        }
       }
 
-      // 2) USB'nin düşmesi için bekle, sonra eski portu tamamen kapat
+      // 2) USB'nin düşmesi için bekle, sonra eski boruyu tamamen kapat
+      //    (süre sınırlı teardown — pending write varken close asılı KALAMAZ)
       await new Promise((r) => setTimeout(r, 700));
-      this.readLoopGen++; // eski read loop'u geçersiz kıl
-      try { await this.reader?.cancel(); } catch {}
-      try { this.writer?.releaseLock(); } catch {}
-      this.writer = null;
-      this.reader = null;
-      try { await this.port?.close(); } catch {}
-      this.port = null;
+      await this._teardownPipes('yazılımsal reset');
 
       // 3) Kart yeniden numaralandırılana kadar portu ara (en fazla 12sn).
       //    300ms aralıkla — bootloader'ın USB-aktivite penceresini (3 sn)
@@ -974,7 +1076,7 @@ export class SerialBridge {
           // (this.port'u yerel değişkene al — TS, _openPort içindeki
           // atamayı takip edemediği için tipi 'null'a daraltıyor.)
           const halfOpen = this.port as SerialPortLike | null;
-          try { await halfOpen?.close(); } catch {}
+          try { await this._settle(halfOpen?.close(), 1000); } catch {}
           this.port = null;
           this.writer = null;
         }
@@ -1112,14 +1214,30 @@ export class SerialBridge {
     if (!this.writer) throw new Error('Yazıcı hazır değil');
     const bytes = typeof data === 'string' ? this.encoder.encode(data) : data;
     // Zaman aşımı emniyeti: USB yığını sıkışırsa write() hiç dönmeyebilir ve
-    // tüm uygulama "Meşgul"de kalır. 4sn'de dönmezse hata fırlat — üst
-    // katman (enterRaw stratejileri) kurtarmayı devralır.
-    await Promise.race([
-      this.writer.write(bytes),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Seri porta yazma zaman aşımı — kart cevap vermiyor')), 4000)
-      ),
-    ]);
+    // tüm uygulama "Meşgul"de kalır.
+    // KRİTİK: zaman aşımında SADECE hata fırlatmak YETMEZ — takılan write
+    // kuyrukta kalır ve sonraki her yazma (kurtarma dahil) arkasında bekler;
+    // "arada bir donuyor, karttaki RESET'e basınca düzeliyor" şikayetinin
+    // uygulama tarafındaki kökü buydu. Zaman aşımında boru hattı ZORLA
+    // yıkılır (abort + süre sınırlı close); oto-kurtarma taze port açar.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.writer.write(bytes),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('__WRITE_TIMEOUT__')), 4000);
+        }),
+      ]);
+    } catch (e) {
+      if ((e as Error)?.message === '__WRITE_TIMEOUT__') {
+        this.onLog('info', '⚠ USB yazma tıkandı — bağlantı borusu yenileniyor…');
+        await this._teardownPipes('yazma zaman aşımı');
+        throw new Error('Seri porta yazma zaman aşımı — bağlantı yenilendi, işlem otomatik tekrar denenecek');
+      }
+      throw e;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   private async _waitForBuffer(needle: string, timeoutMs = 5000): Promise<void> {
