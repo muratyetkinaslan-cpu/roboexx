@@ -532,8 +532,12 @@ export class SerialBridge {
       // 4) main.py bir çalıştırıcı mı? (BLE bootloader veya stub — ikisi de
       //    'BERRYBOT-BOOT' imzası taşır.) Değilse/yoksa user_code.py'yi
       //    çalıştıran mini stub'ı yaz. Bootloader'a ASLA dokunma.
+      //    GERİYE UYUM: sahadaki eski RoboExx bootloader'larında (v1.1)
+      //    imza yoktu — başlıktaki 'BLE Boot Loader' metni de çalıştırıcı
+      //    kabul edilir; yoksa her USB yüklemesi bootloader'ı stub ile
+      //    ezer ve kart BLE'den kaybolurdu.
       const probe = await this._execRaw(
-        `h=''\ntry:\n    f=open('main.py')\n    h=f.read(120)\n    f.close()\nexcept Exception:\n    pass\nprint('__BOOT__' if 'BERRYBOT-BOOT' in h else '__NOBOOT__')\n`
+        `h=''\ntry:\n    f=open('main.py')\n    h=f.read(120)\n    f.close()\nexcept Exception:\n    pass\nprint('__BOOT__' if ('BERRYBOT-BOOT' in h or 'BLE Boot Loader' in h) else '__NOBOOT__')\n`
       );
       if (!probe.output.includes('__BOOT__')) {
         const stub = [

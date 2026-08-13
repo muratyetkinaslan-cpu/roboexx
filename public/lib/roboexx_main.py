@@ -1,5 +1,11 @@
+# BERRYBOT-BOOT v1.2 — RoboExx Pico W BLE Boot Loader (bu satırdaki imza silinmemeli!)
 # ============================================================
 # RoboExx Pico W — BLE Boot Loader
+# ------------------------------------------------------------
+# DİKKAT: İlk satırdaki 'BERRYBOT-BOOT' imzası, uygulamanın USB yükleme
+# akışındaki "main.py bir çalıştırıcı mı?" kontrolü içindir (bridge.ts).
+# İmza SİLİNİRSE her USB "Yükle" bu bootloader'ı mini stub ile EZER ve
+# BLE / klavye sürüş / supervisor (!RST) özellikleri kaybolur.
 # ------------------------------------------------------------
 # Bu dosya Pico'ya `main.py` olarak yüklenir. Açılışta:
 #   1) BLE GATT server başlatılır (IRQ tabanlı, her zaman aktif)
