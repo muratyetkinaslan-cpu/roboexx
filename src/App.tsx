@@ -296,6 +296,14 @@ export default function App() {
   };
   /** Aktivite throttle — her edit'te değil, en fazla 1sn'de bir broadcast et */
   const lastActivityBroadcastRef = useRef(0);
+  // Karta EN SON gönderilen tuş paketi ve gönderim zamanı.
+  // Tuş paketleri artık 50 ms'de bir KOŞULSUZ değil, yalnız DEĞİŞİNCE
+  // (ve tuş basılıyken seyrek bir canlı-tutma ile) gönderilir. Nedeni:
+  // kartın USB stdin tamponu 256 bayt; programda kimse okumazsa saniyede
+  // 40 bayt onu ~6 sn'de doldurur, kart NAK'lar ve o andan itibaren
+  // "Durdur"un Ctrl-C'si karta ULAŞAMAZ.
+  const lastKeysSentRef = useRef<string | null>(null);
+  const lastKeysAtRef = useRef(0);
 
   useEffect(() => {
     applyThemeVars(theme);
@@ -617,12 +625,23 @@ export default function App() {
       // Gamepad bağlıysa popup'a 🎮 ikonu, sadece klavye varsa ⌨
       setPressedKeysDisplay(display);
       setGamepadActive(gamepadConnected);
-      // Hangi bridge bağlıysa ona gönder
+      // Hangi bridge bağlıysa ona gönder — SADECE GEREKTİĞİNDE.
+      // Protokol durum tabanlı: set_pressed_keys("wa") yeni paket gelene
+      // dek geçerlidir, o yüzden her 50 ms'de tekrarlamaya gerek yok.
+      // Tuş basılıyken 400 ms'de bir canlı-tutma paketi gönderilir (BLE'de
+      // paket düşerse durum takılı kalmasın); hiç tuş yokken TRAFİK YOK.
       if (picoLive) {
-        if (connectionMode === 'ble') {
-          bleBridge.sendKeys(keys).catch(() => {});
-        } else {
-          serialBridge.sendKeys(keys).catch(() => {});
+        const now = Date.now();
+        const changed = keys !== lastKeysSentRef.current;
+        const keepAlive = keys !== '' && now - lastKeysAtRef.current > 400;
+        if (changed || keepAlive) {
+          lastKeysSentRef.current = keys;
+          lastKeysAtRef.current = now;
+          if (connectionMode === 'ble') {
+            bleBridge.sendKeys(keys).catch(() => {});
+          } else {
+            serialBridge.sendKeys(keys).catch(() => {});
+          }
         }
       }
       // Arduino canlı bağlantısı açıksa ona da gönder (kapalıysa no-op)
@@ -636,7 +655,9 @@ export default function App() {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('gamepadconnected', onGamepadConnected as EventListener);
       window.removeEventListener('gamepaddisconnected', onGamepadDisconnected as EventListener);
-      // Son boş gönder
+      // Son boş gönder (tuşlar bırakıldı bilgisi)
+      lastKeysSentRef.current = null;
+      lastKeysAtRef.current = 0;
       if (connectionMode === 'ble') {
         bleBridge.sendKeys('').catch(() => {});
       } else {

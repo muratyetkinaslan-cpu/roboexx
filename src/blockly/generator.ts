@@ -44,6 +44,11 @@ pythonGenerator.init = function (workspace: any) {
   // definitions_ Blockly tarafından sorted insertion ile kodun en üstüne konur
   this.definitions_['_rx_import_time'] = 'import time';
   this.definitions_['_rx_import_lib'] = 'from roboexx import *';
+  // USB tamponu boşaltıcı — sonsuz döngülerin her turunda çağrılır.
+  // Karttaki roboexx.py eskiyse (klavye_guncelle henüz yoksa) sessizce
+  // no-op'a düşer, üretilen kod yine çalışır.
+  this.definitions_['_rx_tick_def'] =
+    "_rx_tick = globals().get('klavye_guncelle', lambda: None)";
 };
 
 // ====================================================================
@@ -60,6 +65,13 @@ pythonGenerator.forBlock['rx_on_start'] = function (block, generator) {
 pythonGenerator.forBlock['rx_forever'] = function (block, generator) {
   let statements = generator.statementToCode(block, 'DO');
   if (!statements) statements = generator.INDENT + 'pass\n';
+  // USB TAMPONUNU BOŞALT — "Durdur" garantisi.
+  // Bilgisayardan gelen tuş paketleri okunmazsa kartın stdin tamponu
+  // (256 bayt) dolar; kart USB'de NAK'lamaya başlar ve MicroPython
+  // Ctrl-C'yi yalnız tampona ALINAN baytlarda aradığı için "Durdur"un
+  // kesme sinyali karta HİÇ ULAŞAMAZ. _rx_tick() paketleri bloklamadan
+  // tüketir → klavye bloğu kullanılmasa bile Durdur her zaman çalışır.
+  statements += generator.INDENT + '_rx_tick()\n';
   // Loop sonuna küçük bir sleep ekle — CPU'yu boğmasın, BLE/donanım IRQ'ları
   // nefes alabilsin. 10ms hem hassas davranış için yeterli hem de RP2040
   // watchdog/BLE stack için güvenli. Çocuklar bu farkı hissetmez.

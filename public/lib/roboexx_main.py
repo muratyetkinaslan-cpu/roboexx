@@ -1,4 +1,4 @@
-# BERRYBOT-BOOT v1.2 — RoboExx Pico W BLE Boot Loader (bu satırdaki imza silinmemeli!)
+# BERRYBOT-BOOT v1.3 — RoboExx Pico W BLE Boot Loader (bu satırdaki imza silinmemeli!)
 # ============================================================
 # RoboExx Pico W — BLE Boot Loader
 # ------------------------------------------------------------
@@ -19,12 +19,23 @@
 # v1.1 — "Çalıştır ilk basışta tutmuyor" kesin çözümü:
 #   * Boot'ta '__RX_BOOT__' işareti basılır (uygulama boot'u tanır)
 #   * USB aktivite penceresi 2sn → 3sn; yakalanınca '__RX_REPL__' basılır
-#   * SUPERVISOR KOMUTLARI: core0 dinleyicisi '\x06!RST\n' görünce
-#     machine.reset() yapar. Kullanıcı kodu core1'de koşarken Ctrl-C
-#     core1'i DURDURAMAZ — uygulama bu komutla kartı her durumda temiz
-#     resetleyebilir; çocuğun fiziksel RESET'e basması gerekmez.
+#   * SUPERVISOR KOMUTLARI: '\x06!RST\n' görülünce machine.reset()
 #
-# Sürüm: 1.1.0
+# v1.3 — "sürekli RESET'e basmak zorunda kalıyoruz" KESİN çözümü:
+#   * KULLANICI KODU ARTIK CORE0'DA ÇALIŞIR (eskiden core1/_thread).
+#     core1'in bedeli ağırdı:
+#       - Ctrl-C yalnız core0'a gider → "Durdur" programı DURDURAMIYORDU
+#       - Ctrl-D (yumuşak reset) core1'in bitmesini SONSUZA DEK bekler
+#         → tek çıkış machine.reset() → her yüklemede USB yeniden
+#           numaralandırma → tarayıcı tarafında port/kilit kaosu
+#       - Sonuç: çocuk fiziksel RESET'e / güç kesmeye mecbur kalıyordu
+#     BLE zaten IRQ tabanlıdır (_irq + micropython.schedule); core0'da
+#     kullanıcı kodu koşarken de sorunsuz çalışır. core1'e GEREK YOK.
+#   * Supervisor komutları (!RST/!PING) ve klavye paketleri artık
+#     roboexx._pump_serial_keys() içinde işlenir (kullanıcı kodunun
+#     döngüsünden çağrılır) — core0'ı bloklayan dinleyici kalktı.
+#
+# Sürüm: 1.3.0
 # ============================================================
 
 import bluetooth
@@ -640,6 +651,10 @@ def _run_user_code_body(code_str):
         print("[Boot] user_code.py çalıştırılıyor...")
         exec(code_str, {'__name__': '__main__'})
         print("[Boot] user_code.py BİTTİ (normal çıkış)")
+    except KeyboardInterrupt:
+        # "Durdur" (Ctrl-C). Kullanıcı kodu core0'da koştuğu için buraya
+        # düşer; hata gibi göstermiyoruz, finally motorları susturuyor.
+        print("[Boot] user_code.py DURDURULDU (Ctrl-C)")
     except Exception as e:
         print("=" * 50)
         print("[Boot] user_code.py HATA:")
@@ -697,6 +712,11 @@ def _run_user_code_core1_entry(code_str):
 
 def _run_user_code_on_core1():
     """
+    ESKİ YOL — v1.3'ten itibaren KULLANILMIYOR (geriye uyum için duruyor).
+    Neden bırakıldı: core1'de koşan kod Ctrl-C ile durdurulamıyor, Ctrl-D
+    yumuşak reset core1'i sonsuza dek bekliyor ve kart yalnız fiziksel
+    RESET ile geri geliyordu. Ayrıntı için dosya başlığındaki v1.3 notu.
+
     user_code.py'yi Pico W'nin İKİNCİ çekirdeğinde (core1) çalıştırır.
     KRİTİK: dosyayı core0'da oku, içeriği core1 thread'ine string olarak ver.
     İki ayrı os.stat / open çağrısı arasında littlefs cache race yaşanmasın diye.
@@ -732,7 +752,7 @@ def _run_user_code_on_core1():
 # ============================================================
 
 print("RoboExx Pico W — BLE bootloader başlıyor...")
-print("__RX_BOOT__ v1.2")
+print("__RX_BOOT__ v1.3")
 
 # roboexx kütüphanesini boot'ta pre-load et — MSG_KEY IRQ handler'ı bunu
 # cache'ten alacak (anlık). roboexx yüklenmemişse klavye desteği devre dışı,
@@ -778,70 +798,32 @@ except Exception as _e:
     print("[Boot] USB tespiti atlandı:", _e)
 
 if not _skip_user_code:
-    print("BLE aktif, kullanıcı kodu core1'de başlatılıyor...")
-    _run_user_code_on_core1()
-    print("[Boot] BLE bekleme moduna geçildi (core0)")
-    # Core0: USB seri stdin'den klavye mesajlarını dinle.
-    # Protokol: \x06 + ASCII tuşlar + \n  (örn b"\x06wa\n")
-    # Tarayıcı her 50ms gönderir. Diğer baytlar yutulur (REPL karışmasın).
-    # Bu dinleyici stdin'in tek okuyucusu olduğundan roboexx'in kendi
-    # otomatik pump'ını kapat — çift okuma/race olmasın.
-    if _roboexx_ref is not None:
-        try:
-            _roboexx_ref.disable_serial_pump()
-        except Exception:
-            pass
+    # ------------------------------------------------------------------
+    # KULLANICI KODU CORE0'DA ÇALIŞIR (v1.3).
+    # Böylece:
+    #   * Ctrl-C ("Durdur") programı GERÇEKTEN durdurur
+    #   * Ctrl-D (yumuşak reset) takılmaz → uygulama her yüklemede
+    #     machine.reset() yapmak zorunda kalmaz → USB kopmaz
+    #   * Aynı anda iki program koşma (core0+core1 pin/PWM çakışması) biter
+    # BLE kesintisiz çalışmaya devam eder: _irq IRQ tabanlıdır ve
+    # micropython.schedule ile ana thread'e iş verir.
+    # ------------------------------------------------------------------
+    print("BLE aktif, kullanıcı kodu core0'da başlatılıyor...")
     try:
-        import select as _select
-        import sys as _sys
-        _kbp = _select.poll()
-        _kbp.register(_sys.stdin, _select.POLLIN)
-        _kb_buf = ''
-        _kb_in_msg = False
-        while True:
-            evs = _kbp.poll(500)  # 500ms timeout
-            if not evs:
-                continue
-            try:
-                ch = _sys.stdin.read(1)
-            except Exception:
-                continue
-            if not ch:
-                continue
-            if ch == '\x06':
-                # MSG_KEY başlangıcı
-                _kb_in_msg = True
-                _kb_buf = ''
-            elif _kb_in_msg:
-                if ch == '\n':
-                    # mesaj bitti
-                    if _kb_buf.startswith('!'):
-                        # ---- SUPERVISOR KOMUTLARI (RoboExx uygulaması) ----
-                        # Kullanıcı kodu core1'de koşarken Ctrl-C onu
-                        # DURDURAMAZ (KeyboardInterrupt yalnız core0'a gider).
-                        # '!RST': tüm çipi temiz resetle — uygulamanın
-                        # "Çalıştır"ı kartı her durumda geri alabilsin.
-                        if _kb_buf == '!RST':
-                            print("__RX_RST__")
-                            time.sleep_ms(80)   # işaret USB'den çıksın
-                            machine.reset()
-                        elif _kb_buf == '!PING':
-                            print("__RX_ALIVE__")
-                    elif _roboexx_ref is not None:
-                        try:
-                            _roboexx_ref.set_pressed_keys(_kb_buf)
-                        except Exception:
-                            pass
-                    _kb_in_msg = False
-                    _kb_buf = ''
-                else:
-                    if len(_kb_buf) < 32:
-                        _kb_buf += ch
-            # else: REPL bytes — yut (kullanıcının yazıp duracağı yok zaten)
-    except Exception as _kbe:
-        print("[Boot] USB klavye dinleyici hata:", _kbe)
-        while True:
-            time.sleep(1)
+        # Ctrl-C kesme karakteri KESİN açık olsun (bazı kütüphaneler
+        # kbd_intr(-1) ile kapatabiliyor — "Durdur" o zaman ölürdü).
+        micropython.kbd_intr(3)
+    except Exception:
+        pass
+    # roboexx'in stdin pump'ı AÇIK kalmalı: klavye paketlerini ve
+    # supervisor komutlarını (!RST/!PING) artık O işliyor. Ayrıca her
+    # turda tamponu boşaltarak Ctrl-C'nin karta ulaşmasını garanti eder.
+    # (disable_serial_pump ÇAĞIRILMIYOR — eski core0 dinleyicisi kalktı.)
+    _run_user_code()
+    # Kod bitti ya da Ctrl-C ile kesildi → REPL'e dön. BLE IRQ'ları
+    # çalışmaya devam eder; uygulama raw REPL'e girip yeni kod yükleyebilir.
+    print("[Boot] Kullanıcı kodu bitti — REPL açık")
+    print("__RX_REPL__")
 else:
     # USB modu — script çık, MicroPython REPL'e dönsün
     print("[Boot] Script çıkıyor, REPL açık")

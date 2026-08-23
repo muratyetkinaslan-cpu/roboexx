@@ -1200,9 +1200,46 @@ def disable_serial_pump():
     _serial_pump_enabled = False
 
 
+def _handle_supervisor(cmd):
+    """
+    RoboExx uygulamasından gelen YÖNETİM komutları.
+
+    v1.3 öncesinde bunları main.py'nin core0 dinleyicisi işliyordu; artık
+    kullanıcı kodu core0'da koştuğu için o dinleyici yok ve komutlar
+    buraya taşındı. Böylece kart, kullanıcı programı koşarken de
+    uygulamanın kontrolünde kalır — çocuğun fiziksel RESET'e basması
+    gerekmez.
+
+      '!RST'  → motorları sustur, kartı temiz resetle
+      '!PING' → hayatta olduğunu bildir
+    """
+    if cmd == '!RST':
+        try:
+            all_stop()
+        except Exception:
+            pass
+        print('__RX_RST__')
+        try:
+            time.sleep_ms(80)   # işaret USB'den çıksın
+        except Exception:
+            pass
+        try:
+            import machine
+            machine.reset()
+        except Exception:
+            pass
+    elif cmd == '!PING':
+        print('__RX_ALIVE__')
+
+
 def _pump_serial_keys():
     """USB seri stdin'inde bekleyen \\x06...\\n klavye paketlerini bloklamadan
-    oku ve state'i güncelle. Veri yoksa anında döner."""
+    oku ve state'i güncelle. Veri yoksa anında döner.
+
+    AYRICA KRİTİK BİR GÖREVİ VAR: kartın USB stdin tamponunu boşaltır.
+    Tampon (256 bayt) dolarsa kart USB'de NAK'lar ve MicroPython Ctrl-C'yi
+    tampona ALINAN baytlarda aradığı için "Durdur" karta HİÇ ULAŞAMAZ.
+    Bu yüzden üretilen sonsuz döngülerin her turunda çağrılır."""
     global _kb_in_msg, _kb_buf
     if not _serial_pump_enabled or _kb_poll is None:
         return
@@ -1221,7 +1258,10 @@ def _pump_serial_keys():
             _kb_buf = ''
         elif _kb_in_msg:
             if ch == '\n':
-                set_pressed_keys(_kb_buf)
+                if _kb_buf[:1] == '!':
+                    _handle_supervisor(_kb_buf)
+                else:
+                    set_pressed_keys(_kb_buf)
                 _kb_in_msg = False
                 _kb_buf = ''
             elif len(_kb_buf) < 32:

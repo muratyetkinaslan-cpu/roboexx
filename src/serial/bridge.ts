@@ -22,6 +22,24 @@ interface SerialPortLike {
   addEventListener(event: 'disconnect', cb: () => void): void;
 }
 
+/**
+ * Yönetilen port — writer/reader handle'ları ve "açık mı" bilgisi PORT
+ * NESNESİNİN üzerinde saklanır.
+ *
+ * Neden: Chrome, aynı fiziksel cihaz için her zaman AYNI SerialPort
+ * nesnesini döndürür. Handle'ları sadece bridge alanlarında tutmak,
+ * bir zaman aşımı ya da yarış araya girdiğinde referansın kaybolmasına
+ * ve kilidin KALICI olarak sızmasına yol açıyordu; o noktadan sonra
+ * port.open() "already open", port.close() ise "locked" diye reddediliyor,
+ * cihaz ancak kablo çıkarılınca / güç kesilince geri geliyordu.
+ */
+type ManagedPort = SerialPortLike & {
+  __rxDiscHooked?: boolean;
+  __rxOpen?: boolean;
+  __rxReader?: ReadableStreamDefaultReader<Uint8Array> | null;
+  __rxWriter?: WritableStreamDefaultWriter<Uint8Array> | null;
+};
+
 interface SerialAPI {
   requestPort(opts?: { filters?: Array<{ usbVendorId?: number }> }): Promise<SerialPortLike>;
   getPorts(): Promise<SerialPortLike[]>;
@@ -99,6 +117,31 @@ export class SerialBridge {
    * artırır, eski loop kendi jenerasyonu eskiyince sessizce çıkar.
    */
   private readLoopGen = 0;
+
+  /**
+   * Kontrollü reset/yeniden açma sırasında düşen GECİKMİŞ 'disconnect'
+   * olaylarını yoksay. Sadece `this.port !== port` kontrolü yetmiyordu:
+   * Chrome aynı port nesnesini yeniden kullandığı için, reset'ten saniyeler
+   * sonra gelen olay TAZE bağlantıyı kapatıp "USB bağlantısı kesildi"
+   * gösteriyordu.
+   */
+  private ignoreDisconnectUntil = 0;
+
+  /** Kart raw-paste (akış kontrollü aktarım) biliyor mu? Port başına ölçülür. */
+  private rawPaste: 'unknown' | 'yes' | 'no' = 'unknown';
+
+  /**
+   * Raw-paste sırasında HAM baytları yakalayan geçici dinleyici.
+   * (Pencere büyüklüğü gibi 0x80+ baytlar UTF-8 decode'da bozulur.)
+   */
+  private binaryTap: ((chunk: Uint8Array) => void) | null = null;
+
+  /**
+   * Bu ana kadar klavye/gamepad paketi GÖNDERME.
+   * Kart boot penceresindeyken tek bir bayt bile yeni yüklenen kodun
+   * başlamamasına neden olur; "Durdur"da ise kuyruğu temiz tutar.
+   */
+  private keyMuteUntil = 0;
 
   // Public callbacks
   onStateChange: (state: BridgeState) => void = () => {};
@@ -252,13 +295,37 @@ export class SerialBridge {
    *   - L9110 pinlerine kısa fren darbesi (iki giriş HIGH) verilir
    */
   async interrupt(): Promise<void> {
-    if (!this.writer) return;
+    if (!this.port) return;
+
+    // 0) TUŞ PAKETLERİNİ SUSTUR.
+    //    Bu, "Durdur çalışmıyor" şikâyetinin kök nedeniydi: uygulama 50 ms'de
+    //    bir tuş paketi gönderiyor, kartın USB stdin tamponu (256 bayt)
+    //    programda kimse okumadığı için ~6 sn'de doluyordu. Tampon dolunca
+    //    kart USB'de NAK'lar; MicroPython Ctrl-C'yi tampona ALINAN baytlarda
+    //    arar — yani Ctrl-C karta FİZİKSEL OLARAK ULAŞAMAZ hale gelir.
+    this.keyMuteUntil = Date.now() + 3000;
+
     // 1) Süren işlemi (enterRaw/exec/upload) İPTAL ET — tüm bekleme
     //    noktaları 50ms içinde hata fırlatır, finally→_forceIdle temiz çıkar.
     this.cancelled = true;
-    // 2) Karta hard interrupt gönder
-    try { await this._write('\r\x03\x03'); } catch {}
-    // 3) İşlemin kendini toplaması için kısa bekle; AYNI işlem hâlâ busy
+
+    // 2) YAZMA KUYRUĞUNU DÜŞÜR. Bekleyen tuş/kod yazmaları varsa Ctrl-C
+    //    onların arkasında sıraya girer. Writer'ı yenilemek kuyruğu atar;
+    //    port AÇIK kalır, USB düşmez.
+    await this._renewWriter();
+
+    // 3) Ctrl-C'yi ISRARLA gönder. Kartın tamponu hâlâ doluysa ilk deneme
+    //    yutulabilir; program tamponu boşalttıkça sonrakiler yakalanır.
+    for (let i = 0; i < 6; i++) {
+      try {
+        await this._write('\r\x03\x03');
+      } catch {
+        break; // boru koptu — _write zaten yıkımı yaptı
+      }
+      await new Promise((r) => setTimeout(r, 70));
+    }
+
+    // 4) İşlemin kendini toplaması için kısa bekle; AYNI işlem hâlâ busy
     //    ise zorla idle. (opCount kontrolü: aradan yeni Run/Yükle başladıysa
     //    ona dokunma — yoksa yeni işlemi yanlışlıkla düşürürdük.)
     const myOp = this.opCount;
@@ -269,7 +336,43 @@ export class SerialBridge {
     // ardından motor/PWM temizliği (fire-and-forget, hata yutulur)
     setTimeout(() => {
       this._sendMotorCleanup().catch(() => {});
-    }, 400);
+    }, 500);
+  }
+
+  /** Tuş paketlerini `ms` boyunca sustur (boot penceresi, Durdur vb.). */
+  muteKeys(ms: number): void {
+    this.keyMuteUntil = Math.max(this.keyMuteUntil, Date.now() + ms);
+  }
+
+  /**
+   * Yazma kuyruğunu düşürüp TAZE bir writer al — port kapanmadan, USB
+   * düşmeden. "Durdur"da kritik: Ctrl-C bekleyen yazmaların arkasında
+   * kalmasın. Kilit port nesnesinde saklandığı için asla sızmaz.
+   */
+  private async _renewWriter(): Promise<void> {
+    const mp = this.port as ManagedPort | null;
+    if (!mp) return;
+    const old = mp.__rxWriter ?? this.writer;
+    mp.__rxWriter = null;
+    this.writer = null;
+    if (old) {
+      // releaseLock() bekleyen yazmaları reddeder (Streams spec) → kuyruk düşer.
+      try {
+        old.releaseLock();
+      } catch {
+        try { await this._settle(old.abort(new Error('durduruldu')), 400); } catch {}
+        try { old.releaseLock(); } catch {}
+      }
+    }
+    try {
+      if (mp.writable && !mp.writable.locked) {
+        const w = mp.writable.getWriter();
+        mp.__rxWriter = w;
+        this.writer = w;
+      }
+    } catch {
+      // kilit alınamadı — sonraki _write hata verir, üst kat kurtarır
+    }
   }
 
   /**
@@ -350,6 +453,13 @@ export class SerialBridge {
   async sendKeys(keys: string): Promise<void> {
     if (!this.writer) return;
     if (this.silent) return; // raw REPL aktarımı sürüyor — karışma
+    // SUSTURMA PENCERESİ — iki kritik durum:
+    //  a) Yükleme sonrası kart boot ediyor. Bootloader açılışta stdin'i
+    //     dinler; TEK bir bayt görürse yeni yüklenen kodu BAŞLATMAZ.
+    //     Tuş paketleri tam bu pencereye düşüyor, çocuk "yükledim ama
+    //     çalışmıyor" deyip RESET'e basıyordu.
+    //  b) "Durdur" sırasında kuyruğu temiz tut ki Ctrl-C öne geçsin.
+    if (Date.now() < this.keyMuteUntil) return;
     const canSend =
       this.state === 'connected' || (this.state === 'busy' && this.liveRun);
     if (!canSend) return;
@@ -608,7 +718,23 @@ export class SerialBridge {
    * kodun otomatik başlamasını istiyoruz.
    */
   private async _rebootAfterUpload(): Promise<void> {
+    // Kart boot ederken tuş paketi göndermek YASAK: bootloader açılışta
+    // stdin'de bayt görürse yeni yüklenen kodu BAŞLATMAZ.
+    this.keyMuteUntil = Date.now() + 6000;
+
+    // A) ÖNCE YUMUŞAK RESET (Ctrl-D) — USB DÜŞMEZ.
+    //    "Üst üste yüklemede birkaç seferde bir kart kayboluyor" sorununun
+    //    ana kaynağı, HER yüklemede yapılan machine.reset() + USB yeniden
+    //    numaralandırma döngüsüydü. Yumuşak reset portu açık bırakır:
+    //    kapat/aç, kilit devri, getPorts araması — hiçbiri gerekmez.
+    //    (Bootloader v1.3'ten itibaren kullanıcı kodu core0'da koştuğu için
+    //    yumuşak reset güvenlidir; core1 thread'i beklenmez.)
+    if (await this._softResetAfterUpload()) return;
+
+    // B) Yumuşak reset tutmadı (eski bootloader core1'de thread açmış
+    //    olabilir) → koşulsuz donanım reseti + yeniden bağlanma.
     this.rebooting = true;
+    this.ignoreDisconnectUntil = Date.now() + 15000;
     try {
       try {
         // Raw REPL'in içindeyiz — reset'i exec olarak kör gönder.
@@ -648,15 +774,60 @@ export class SerialBridge {
           this.onLog('info', '✓ Kart yeniden başladı — yüklenen kod çalışıyor');
           return;
         } catch {
-          const halfOpen = this.port as SerialPortLike | null;
-          try { await this._settle(halfOpen?.close(), 1000); } catch {}
+          // Yarım açık kalan handle'ları KİLİT SIZDIRMADAN bırak; aksi
+          // halde bir sonraki deneme "already open"/"locked" ile ölür ve
+          // kart ancak güç kesilince geri gelirdi.
+          const halfOpen = this.port as ManagedPort | null;
+          if (halfOpen) { try { await this._releaseHandles(halfOpen); } catch {} }
           this.port = null;
           this.writer = null;
+          this.reader = null;
         }
       }
       this.onLog('error', 'Kart reset sonrası bulunamadı — USB kablosunu çıkarıp takıp "Bağlan"a bas');
     } finally {
       this.rebooting = false;
+    }
+  }
+
+  /**
+   * Ctrl-D YUMUŞAK RESET — kartı USB'ye dokunmadan yeniden başlatır.
+   * Başarı ölçütü: boot banner'ı süresi içinde gelmeli. Gelmezse false
+   * döner ve çağıran donanım resetine düşer.
+   */
+  private async _softResetAfterUpload(): Promise<boolean> {
+    try {
+      this.silent = true;
+      this._drainStale();
+      await this._write('\r\x02');   // raw REPL → friendly REPL
+      await new Promise((r) => setTimeout(r, 150));
+      this._drainStale();
+      await this._write('\x04');      // friendly REPL'de Ctrl-D = yumuşak reset
+      // KESİN işaretler: 'MPY: soft reboot' her MicroPython'da yumuşak reset
+      // anında basılır, '__RX_BOOT__' ise bootloader'ın açılış imzasıdır.
+      // Genel 'MicroPython' metnini KABUL ETMİYORUZ — Ctrl-B sonrası friendly
+      // REPL banner'ı da onu içerir ve yanlış \"başarılı\" verirdi.
+      const deadline = Date.now() + 4000;
+      let ok = false;
+      while (Date.now() < deadline) {
+        const b = this.silentBuffer;
+        if (b.includes('soft reboot') || b.includes('__RX_BOOT__')) {
+          ok = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      // Açılış çıktısı Seri Monitör'e CANLI aksın
+      this.silent = false;
+      this.silentBuffer = '';
+      if (ok) {
+        this.onLog('info', '✓ Kart yumuşak resetlendi (USB kopmadı) — yüklenen kod çalışıyor');
+      }
+      return ok;
+    } catch {
+      this.silent = false;
+      this.silentBuffer = '';
+      return false;
     }
   }
 
@@ -890,11 +1061,33 @@ export class SerialBridge {
    * bağlanma (_hardResetAndReconnect) tarafından kullanılır.
    */
   private async _openPort(port: SerialPortLike): Promise<void> {
-    await port.open({ baudRate: 115200, bufferSize: 8192 });
-    this.port = port;
+    const mp = port as ManagedPort;
+
+    // KİLİT SIZINTISI TEMİZLİĞİ — bu blok, "birkaç yüklemeden sonra kart
+    // kayboluyor, güçten kapatmak zorunda kalıyoruz" sorununun uygulama
+    // tarafındaki kesin çözümüdür. Chrome aynı SerialPort nesnesini
+    // yeniden kullandığı için önceki oturumdan kalan writer/reader kilidi
+    // ya da açık handle, port.open()'ı "already open" ile, port.close()'u
+    // "locked" ile kalıcı olarak reddettiriyordu.
+    await this._releaseHandles(mp);
+
+    try {
+      await mp.open({ baudRate: 115200, bufferSize: 8192 });
+    } catch (e: unknown) {
+      const err = e as { name?: string; message?: string };
+      const alreadyOpen =
+        err?.name === 'InvalidStateError' || /already open/i.test(err?.message ?? '');
+      if (!alreadyOpen) throw e;
+      // Port hâlâ açık kalmış: kapat ve TEK sefer daha aç.
+      await this._settleOk(mp.close(), 1500);
+      await mp.open({ baudRate: 115200, bufferSize: 8192 });
+    }
+    mp.__rxOpen = true;
+    this.port = mp;
+    this.rawPaste = 'unknown'; // farklı kart olabilir — yeteneği yeniden ölç
 
     // Kart tipini belirle
-    const rawInfo = port.getInfo();
+    const rawInfo = mp.getInfo();
     this.esp32 = isEsp32Like(rawInfo);
     this.uartBridge = isUartBridge(rawInfo);
 
@@ -905,7 +1098,7 @@ export class SerialBridge {
     // burada açıkça ayarlıyoruz. Pico için DTR assert USB-CDC "bağlı"
     // sinyalidir, o yüzden her kart için güvenli.
     try {
-      await port.setSignals?.({ dataTerminalReady: true, requestToSend: true });
+      await mp.setSignals?.({ dataTerminalReady: true, requestToSend: true });
     } catch {
       // setSignals bazı sürücülerde yok — sessizce geç
     }
@@ -914,30 +1107,76 @@ export class SerialBridge {
     // (Kes→Bağlan döngülerinde aynı SerialPort nesnesi yeniden kullanılır;
     // her seferinde yeni listener eklemek 8-10 döngü sonra üst üste binen
     // disconnect çağrılarına ve tutarsız duruma yol açıyordu.)
-    const marked = port as SerialPortLike & { __rxDiscHooked?: boolean };
-    if (!marked.__rxDiscHooked) {
-      marked.__rxDiscHooked = true;
-      port.addEventListener('disconnect', () => {
+    if (!mp.__rxDiscHooked) {
+      mp.__rxDiscHooked = true;
+      mp.addEventListener('disconnect', () => {
         // Kontrollü yazılımsal reset sırasında USB'nin kopması BEKLENEN bir
         // durum — bridge kendi yeniden bağlanacak, kullanıcıya kopma gösterme.
         if (this.rebooting) return;
-        // Bu port artık aktif port değilse (reset sonrası yenisi açıldı) yoksay
-        if (this.port !== port) return;
+        // GECİKMİŞ OLAY KORUMASI: Chrome aynı port nesnesini yeniden
+        // kullandığı için `this.port !== mp` tek başına yetmiyor; reset'ten
+        // saniyeler sonra düşen olay TAZE bağlantıyı kapatıyordu.
+        if (Date.now() < this.ignoreDisconnectUntil) return;
+        // Bu port artık aktif port değilse yoksay
+        if (this.port !== mp) return;
+        // Cihaz fiziksel olarak gitti → elimizdeki handle'lar da ölü.
+        mp.__rxOpen = false;
+        mp.__rxReader = null;
+        mp.__rxWriter = null;
         this.onLog('system', 'USB bağlantısı kesildi');
         this.disconnect();
       });
     }
 
-    if (port.writable) {
-      this.writer = port.writable.getWriter();
+    if (mp.writable && !mp.writable.locked) {
+      const w = mp.writable.getWriter();
+      mp.__rxWriter = w;
+      this.writer = w;
     }
 
     this.readLoopPromise = this._startReadLoop();
   }
 
+  /**
+   * Bir porta ait writer/reader kilitlerini ve açık handle'ı KESİN olarak
+   * serbest bırak. Handle'lar port NESNESİNİN üzerinde saklandığı için
+   * zaman aşımı/yarış olsa bile referans kaybolmaz, kilit sızmaz.
+   */
+  private async _releaseHandles(mp: ManagedPort): Promise<void> {
+    const w = mp.__rxWriter;
+    const r = mp.__rxReader;
+    mp.__rxWriter = null;
+    mp.__rxReader = null;
+    if (w) {
+      try {
+        w.releaseLock();
+      } catch {
+        try { await this._settle(w.abort(new Error('yeniden açılıyor')), 800); } catch {}
+        try { w.releaseLock(); } catch {}
+      }
+    }
+    if (r) {
+      try { await this._settle(r.cancel(), 800); } catch {}
+      try { r.releaseLock(); } catch {}
+    }
+    if (mp.__rxOpen) {
+      const closed = await this._settleOk(mp.close(), 1500);
+      mp.__rxOpen = !closed; // kapanmadıysa açık say — open() catch'i devralır
+    }
+  }
+
   /** Silent buffer'daki bayat veriyi at (yeni el sıkışmadan önce). */
   private _drainStale(): void {
     this.silentBuffer = '';
+  }
+
+  /** _settle'ın sonucu bildiren hâli: true = promise SORUNSUZ tamamlandı. */
+  private async _settleOk(p: Promise<unknown> | undefined | null, ms: number): Promise<boolean> {
+    if (!p) return true;
+    return await Promise.race([
+      p.then(() => true).catch(() => false),
+      new Promise<boolean>((r) => setTimeout(() => r(false), ms)),
+    ]);
   }
 
   /** Bir promise'i en fazla `ms` bekle; hata/askı durumunda sessizce dön. */
@@ -964,18 +1203,31 @@ export class SerialBridge {
    * üst kattaki oto-kurtarma (getPorts ile) TAZE bir boru açar.
    */
   private async _teardownPipes(reason: string): Promise<void> {
-    const port = this.port;
-    const writer = this.writer;
-    const reader = this.reader;
+    const mp = this.port as ManagedPort | null;
     this.readLoopGen++;  // aktif read loop'u geçersiz kıl
     this.port = null;    // yeni yazmalar anında 'Yazıcı hazır değil' alsın
     this.writer = null;
     this.reader = null;
-    try { await this._settle(writer?.abort(new Error(reason)), 1000); } catch {}
-    try { writer?.releaseLock(); } catch {}
-    try { await this._settle(reader?.cancel(), 1000); } catch {}
-    try { reader?.releaseLock(); } catch {}
-    try { await this._settle(port?.close(), 1500); } catch {}
+    if (!mp) return;
+    // Handle'ları PORT NESNESİNDEN al — eskiden yerel değişkenlerden
+    // alınıyordu ve _settle zaman aşımına uğradığında kilit KALICI olarak
+    // sızıyordu (cihaz ancak güç kesilince geri geliyordu).
+    const w = mp.__rxWriter;
+    const r = mp.__rxReader;
+    mp.__rxWriter = null;
+    mp.__rxReader = null;
+    if (w) {
+      try { await this._settle(w.abort(new Error(reason)), 1000); } catch {}
+      try { w.releaseLock(); } catch {}
+    }
+    if (r) {
+      try { await this._settle(r.cancel(), 1000); } catch {}
+      try { r.releaseLock(); } catch {}
+    }
+    if (mp.__rxOpen) {
+      const closed = await this._settleOk(mp.close(), 1500);
+      mp.__rxOpen = !closed;
+    }
   }
 
   /**
@@ -995,6 +1247,10 @@ export class SerialBridge {
     const captureRepl = opts?.captureRepl !== false;
     this.onLog('info', '⟳ Kart yazılımsal olarak resetleniyor (RESET tuşuna gerek yok)…');
     this.rebooting = true;
+    // Reset boyunca gelen 'disconnect' olayları BEKLENENDİR; gecikmeli
+    // düşenler taze bağlantıyı kapatmasın.
+    this.ignoreDisconnectUntil = Date.now() + 15000;
+    this.keyMuteUntil = Date.now() + 6000;
     try {
       // 1) Kör komutlar (REPL cevap vermese bile zarar yok, sırayla):
       //    a. Ctrl-C'lerle friendly REPL'e dönmeyi dene
@@ -1075,10 +1331,12 @@ export class SerialBridge {
           // port henüz hazır değil / açılamadı — tekrar dene.
           // (this.port'u yerel değişkene al — TS, _openPort içindeki
           // atamayı takip edemediği için tipi 'null'a daraltıyor.)
-          const halfOpen = this.port as SerialPortLike | null;
-          try { await this._settle(halfOpen?.close(), 1000); } catch {}
+          // Aynı kilit sızıntısı koruması (bkz. _rebootAfterUpload).
+          const halfOpen = this.port as ManagedPort | null;
+          if (halfOpen) { try { await this._releaseHandles(halfOpen); } catch {} }
           this.port = null;
           this.writer = null;
+          this.reader = null;
         }
       }
       this.onLog('error', 'Kart reset sonrası bulunamadı — USB kablosunu kontrol et');
@@ -1136,13 +1394,42 @@ export class SerialBridge {
 
   private async _startReadLoop(): Promise<void> {
     const myGen = ++this.readLoopGen;
+    let lockWaits = 0;
     while (this.port?.readable && myGen === this.readLoopGen) {
+      const mp = this.port as ManagedPort;
+      const rs = mp.readable;
+      if (!rs) break;
+      if (rs.locked) {
+        // Eski loop kilidi henüz bırakmadı — kısa bekle, sonsuza dek dönme.
+        if (++lockWaits > 40) {
+          console.warn('Read loop: readable kilidi serbest kalmadı');
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
+      lockWaits = 0;
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
       try {
-        this.reader = this.port.readable.getReader();
+        reader = rs.getReader();
+        if (myGen !== this.readLoopGen) {
+          try { reader.releaseLock(); } catch {}
+          reader = null;
+          break;
+        }
+        mp.__rxReader = reader;
+        this.reader = reader;
         while (true) {
-          const { value, done } = await this.reader.read();
+          const { value, done } = await reader.read();
           if (done) break;
           if (!value) continue;
+
+          // Raw-paste akış kontrolü: baytlar DECODE EDİLMEDEN dinleyiciye
+          // gider (pencere büyüklüğü gibi 0x80+ baytlar UTF-8'de bozulur).
+          if (this.binaryTap) {
+            this.binaryTap(value);
+            continue;
+          }
 
           const text = this.decoder.decode(value, { stream: true });
           if (!text) continue;
@@ -1160,8 +1447,15 @@ export class SerialBridge {
           console.warn('Read loop error:', e);
         }
       } finally {
-        try { this.reader?.releaseLock(); } catch {}
-        this.reader = null;
+        try { reader?.releaseLock(); } catch {}
+        // KRİTİK: yalnız KENDİ reader'ımızı temizle.
+        // Eskiden koşulsuz `this.reader = null` yapılıyordu; reset sonrası
+        // ESKİ loop'un finally'si YENİ loop'un reader'ını siliyor, kilit
+        // sahipsiz kalıyor ve sonraki port.close() sonsuza dek asılı
+        // kalıyordu — tek çıkış fiziksel RESET / kablo çıkarma oluyordu.
+        if (this.reader === reader) this.reader = null;
+        if (mp.__rxReader === reader) mp.__rxReader = null;
+        reader = null;
       }
       if (this.state === 'disconnected') break;
       if (myGen !== this.readLoopGen) break; // yeni loop devraldı
@@ -1394,6 +1688,118 @@ export class SerialBridge {
    *  1. Silent: Kodu chunk'larla gönder, "OK" işaretini bekle
    *  2. Streaming: Çıktıyı canlı olarak Serial Monitor'a yansıt, \x04> ile bitir
    */
+  /**
+   * RAW-PASTE AKTARIMI (MicroPython >= 1.14).
+   *
+   * Protokol:
+   *   Host  → \x05 'A' \x01
+   *   Kart  → 'R' \x01 + pencere(uint16 LE)   (destekliyor)
+   *         | 'R' \x00                        (biliyor, desteklemiyor)
+   *   Host  → veri (pencere kadar), kart her \x01 ile pencereyi yeniler
+   *   Kart  → \x04 gönderirse aktarımı iptal etmiştir
+   *   Host  → \x04 (bitti) ; Kart → \x04 (onay) ; ardından program çıktısı
+   *
+   * Dönüş: onay sonrası gelen KALAN baytlar (program çıktısının başı),
+   *        veya kart desteklemiyorsa null.
+   */
+  private async _rawPasteWrite(
+    codeBytes: Uint8Array,
+    onChunkSent?: (sent: number, total: number) => void
+  ): Promise<Uint8Array | null> {
+    const rx: number[] = [];
+    let pos = 0;
+    this.binaryTap = (c) => {
+      for (let i = 0; i < c.length; i++) rx.push(c[i]);
+    };
+    const waitFor = async (need: number, timeoutMs: number): Promise<boolean> => {
+      const end = Date.now() + timeoutMs;
+      while (rx.length - pos < need) {
+        if (this.cancelled) throw new Error('İşlem iptal edildi');
+        if (Date.now() > end) return false;
+        await new Promise((r) => setTimeout(r, 4));
+      }
+      return true;
+    };
+    try {
+      await this._write('\x05A\x01');
+      if (!(await waitFor(2, 2000))) return null; // kart cevap vermedi
+      const a = rx[pos];
+      const b = rx[pos + 1];
+      if (a === 0x52 /* 'R' */ && b === 0x00) {
+        pos += 2;
+        return null; // biliyor ama desteklemiyor → klasik yola düş
+      }
+      if (!(a === 0x52 && b === 0x01)) {
+        // Çok eski firmware: gönderdiğimiz \x01 raw REPL'i sıfırlar ve
+        // banner basar. Protokolü senkronlamak için banner'ı bekle.
+        const bannerEnd = Date.now() + 2500;
+        while (Date.now() < bannerEnd) {
+          const head = rx.slice(0, Math.min(rx.length, 4096));
+          if (String.fromCharCode(...head).includes('w REPL; CTRL-B to exit')) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return null;
+      }
+      pos += 2;
+      if (!(await waitFor(2, 2000))) return null;
+      const windowSize = rx[pos] | (rx[pos + 1] << 8);
+      pos += 2;
+      if (windowSize <= 0) return null;
+
+      let windowRemain = windowSize;
+      let sent = 0;
+      const total = codeBytes.length;
+      let lastProgress = Date.now();
+
+      for (;;) {
+        // Karttan gelen akış kontrol baytlarını tüket
+        while (pos < rx.length) {
+          const c = rx[pos++];
+          if (c === 0x01) {
+            windowRemain += windowSize;
+            lastProgress = Date.now();
+          } else if (c === 0x04) {
+            await this._write('\x04');
+            throw new Error('Kart aktarımı reddetti (bellek yetersiz olabilir)');
+          }
+        }
+        if (sent >= total) break;
+        if (this.cancelled) throw new Error('İşlem iptal edildi');
+        if (windowRemain === 0) {
+          if (Date.now() - lastProgress > 10000) {
+            throw new Error('Kart akış kontrolüne yanıt vermiyor');
+          }
+          await new Promise((r) => setTimeout(r, 2));
+          continue;
+        }
+        const n = Math.min(windowRemain, total - sent);
+        await this._write(codeBytes.slice(sent, sent + n));
+        sent += n;
+        windowRemain -= n;
+        lastProgress = Date.now();
+        onChunkSent?.(sent, total);
+      }
+
+      // Aktarım bitti → \x04 ; kart \x04 ile onaylar
+      await this._write('\x04');
+      const ackEnd = Date.now() + 8000;
+      for (;;) {
+        while (pos < rx.length) {
+          const c = rx[pos++];
+          if (c === 0x04) {
+            return Uint8Array.from(rx.slice(pos)); // kalan = program çıktısı
+          }
+          // 0x01: gecikmiş pencere yenilemesi — yoksay
+        }
+        if (this.cancelled) throw new Error('İşlem iptal edildi');
+        if (Date.now() > ackEnd) throw new Error('Kart aktarım onayı vermedi');
+        await new Promise((r) => setTimeout(r, 4));
+      }
+    } finally {
+      this.binaryTap = null;
+    }
+  }
+
   private async _execRaw(
     code: string,
     onChunkSent?: (sent: number, total: number) => void,
@@ -1402,41 +1808,67 @@ export class SerialBridge {
     const live = opts?.live === true;
     const codeBytes = this.encoder.encode(code);
     const total = codeBytes.length;
-    // Büyük yüklemelerde kartın yetişmesi için chunk + pause:
-    //  - Pico / Espressif native USB (USB-CDC): 512 bayt + 8ms emniyetli
-    //  - CP210x/CH340/FTDI (gerçek 115200 UART): ESP32'nin UART RX tamponu
-    //    küçük (256B) — 128 bayt + 20ms ile taşma yaşanmıyor
-    const chunkSize = this.uartBridge ? 128 : 512;
-    const pauseMs = this.uartBridge ? 20 : 8;
 
-    for (let i = 0; i < total; i += chunkSize) {
-      if (this.cancelled) throw new Error('İşlem iptal edildi');
-      const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
-      await this._write(chunk);
-      const sent = Math.min(i + chunkSize, total);
-      onChunkSent?.(sent, total);
-      if (i + chunkSize < total) {
-        await new Promise((r) => setTimeout(r, pauseMs));
-      }
+    // ---- AKTARIM ----------------------------------------------------
+    // 1. TERCİH: RAW-PASTE (Ctrl-E A Ctrl-A). Kart pencere büyüklüğünü
+    //    bildirir, her \x01 ile pencereyi yeniler → gönderim hızını KART
+    //    belirler. Eski akış "512 bayt + 8 ms" gibi SABİT bir tahmine
+    //    dayanıyordu; kart yetişemeyince tamponu taşıyor, USB NAK'lıyor,
+    //    write() asılı kalıyor ve tek çıkış fiziksel RESET oluyordu.
+    //    Akış kontrolüyle bu hata SINIFI kökten biter (mpremote de bunu
+    //    kullanır).
+    // 2. YEDEK: kart raw-paste bilmiyorsa (MicroPython < 1.14) eski
+    //    chunk+bekleme yolu aynen devrede.
+    let pasteLeftover: Uint8Array | null = null;
+    if (this.rawPaste !== 'no') {
+      pasteLeftover = await this._rawPasteWrite(codeBytes, onChunkSent);
+      this.rawPaste = pasteLeftover ? 'yes' : 'no';
     }
 
-    // Çalıştır (Ctrl-D)
-    await this._write('\x04');
+    if (!pasteLeftover) {
+      // Büyük yüklemelerde kartın yetişmesi için chunk + pause:
+      //  - Pico / Espressif native USB (USB-CDC): 512 bayt + 8ms emniyetli
+      //  - CP210x/CH340/FTDI (gerçek 115200 UART): ESP32'nin UART RX tamponu
+      //    küçük (256B) — 128 bayt + 20ms ile taşma yaşanmıyor
+      const chunkSize = this.uartBridge ? 128 : 512;
+      const pauseMs = this.uartBridge ? 20 : 8;
 
-    // OK işaretini silent buffer'da bekle. "OK" = kart kodu EKSİKSİZ aldı
-    // ve derleyip çalıştırmaya başladı — çalıştığından emin olduğumuz an.
-    // (3 sn bazen yavaş UART köprülerinde dardı; 6 sn güvenli.)
-    await this._waitForBuffer('OK', 6000);
+      this._drainStale();
+      for (let i = 0; i < total; i += chunkSize) {
+        if (this.cancelled) throw new Error('İşlem iptal edildi');
+        const chunk = codeBytes.slice(i, Math.min(i + chunkSize, total));
+        await this._write(chunk);
+        const sent = Math.min(i + chunkSize, total);
+        onChunkSent?.(sent, total);
+        if (i + chunkSize < total) {
+          await new Promise((r) => setTimeout(r, pauseMs));
+        }
+      }
+
+      // Çalıştır (Ctrl-D)
+      await this._write('\x04');
+
+      // OK işaretini silent buffer'da bekle. "OK" = kart kodu EKSİKSİZ aldı
+      // ve derleyip çalıştırmaya başladı — çalıştığından emin olduğumuz an.
+      // (3 sn bazen yavaş UART köprülerinde dardı; 6 sn güvenli.)
+      await this._waitForBuffer('OK', 6000);
+    }
     if (live) {
       this.onLog('info', '✓ Kart kodu aldı — çalıştırıyor');
     }
 
-    // KRİTİK: "OK" sonrası silent buffer'da kalan veriyi alıp stream parser'a
-    // ver. Yeni Pico firmware'leri "OK" + stream + end-marker'ı tek pakette
-    // gönderiyor. Eğer buffer'ı temizleyip stream moduna geçersek bu veriler
-    // kaybolur, end-marker hiç gelmez ve 60s timeout olur.
-    const okIdx = this.silentBuffer.indexOf('OK');
-    const leftover = this.silentBuffer.slice(okIdx + 2);
+    // KRİTİK: aktarım sonrası tamponda kalan veriyi stream parser'a ver.
+    // Yeni Pico firmware'leri onay + stream + end-marker'ı tek pakette
+    // gönderiyor; atarsak end-marker hiç gelmez ve 60s timeout olurdu.
+    let leftover: string;
+    if (pasteLeftover) {
+      leftover = pasteLeftover.length
+        ? this.decoder.decode(pasteLeftover, { stream: true })
+        : '';
+    } else {
+      const okIdx = this.silentBuffer.indexOf('OK');
+      leftover = this.silentBuffer.slice(okIdx + 2);
+    }
     this.silent = false;
     this.silentBuffer = '';
 
