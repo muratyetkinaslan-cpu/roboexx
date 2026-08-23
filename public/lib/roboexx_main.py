@@ -440,6 +440,12 @@ def _init_indicators():
         import roboexx
         _ind_oled = roboexx
         _ind_rgb = roboexx
+        # Buzzer pinini açılışta LOW'a çek. Boşta (floating) kalırsa BLE
+        # telsizinin gürültüsünü toplar ve hiç kod olmasa bile cızırdar.
+        try:
+            roboexx.buzzer_silence()
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -646,6 +652,15 @@ def _run_user_code_body(code_str):
             for _ in range(6):
                 led.value(1); time.sleep_ms(120)
                 led.value(0); time.sleep_ms(120)
+        except Exception:
+            pass
+    finally:
+        # KRİTİK: PWM donanımı program bitse de çalışmaya devam eder.
+        # Kullanıcı kodu ton çalarken hata verir ya da durdurulursa
+        # buzzer sonsuza kadar öter. Burada her şeyi susturuyoruz.
+        try:
+            import roboexx
+            roboexx.all_stop()
         except Exception:
             pass
 

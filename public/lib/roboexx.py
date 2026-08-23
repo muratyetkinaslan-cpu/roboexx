@@ -470,21 +470,93 @@ def servo_angle(pin, angle):
         pass
 
 
+BUZZER_PIN = 20   # RoboBricks varsayılan buzzer pini
+
+
 def buzzer_tone(pin, freq, dur_ms):
     """Buzzer'da belirli frekansta ton çal, süre dolunca sus."""
     if pin not in _pwm_cache:
         _pwm_cache[pin] = PWM(Pin(pin))
     p = _pwm_cache[pin]
-    p.freq(int(freq))
-    p.duty_u16(32768)
-    time.sleep_ms(int(dur_ms))
+    freq = int(freq)
+    if freq <= 0:
+        p.duty_u16(0)
+        return
+    # Önce sustur, sonra frekansı değiştir — frekans değişirken duty
+    # açık kalırsa hoparlörde "çıt/cızırtı" duyulur.
     p.duty_u16(0)
+    p.freq(freq)
+    p.duty_u16(32768)
+    try:
+        time.sleep_ms(int(dur_ms))
+    finally:
+        # Kod Ctrl-C ile kesilse bile ses açık kalmasın.
+        p.duty_u16(0)
 
 
 def buzzer_off(pin):
     """Buzzer'ı sustur."""
     if pin in _pwm_cache:
         _pwm_cache[pin].duty_u16(0)
+    else:
+        # Hiç ton çalınmamışsa pin hâlâ FLOATING input olabilir.
+        # Boşta kalan pin gürültü toplar ve buzzer cızırdar — LOW sür.
+        Pin(pin, Pin.OUT).value(0)
+
+
+def buzzer_silence(pin=None):
+    """
+    Buzzer pinini kesin olarak sessize alır ve LOW sürer.
+
+    NEDEN GEREKLİ:
+    Kart açılışında GPIO'lar yüksek empedanslı GİRİŞ durumdadır. Buzzer
+    pini hiçbir şey tarafından sürülmediği için havada kalır (floating);
+    Pico W'de sürekli dönen BLE telsizi ve anahtarlama gürültüsü bu pinde
+    birkaç yüz mV'luk salınım yaratır. Buzzer bunu yükseltip cızırtı
+    olarak duyurur — hiç kod yazılmamış olsa bile.
+
+    Çözüm: pini çıkış yapıp LOW'a çekmek. Boşta kalan uç kalmaz, gürültü
+    biter.
+    """
+    if pin is None:
+        pin = BUZZER_PIN
+    p = _pwm_cache.pop(pin, None)
+    if p is not None:
+        try:
+            p.duty_u16(0)
+            p.deinit()
+        except Exception:
+            pass
+    try:
+        Pin(pin, Pin.OUT).value(0)
+    except Exception:
+        pass
+
+
+def all_stop():
+    """
+    Her şeyi güvenli duruma al: tüm PWM'ler (buzzer/servo/LED) sussun,
+    DC motorlar dursun, RGB sönsün, buzzer pini LOW'a çekilsin.
+
+    Kullanıcı kodu bittiğinde veya hata verdiğinde çağrılmalı — yoksa
+    PWM donanımı çalışmaya devam eder ve program bitse bile buzzer öter.
+    """
+    for pin, p in list(_pwm_cache.items()):
+        try:
+            p.duty_u16(0)
+        except Exception:
+            pass
+    buzzer_silence()
+    try:
+        if _np is not None:
+            _np.fill((0, 0, 0))
+            _np.write()
+    except Exception:
+        pass
+    try:
+        dc_motor_stop_all()
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -1194,4 +1266,3 @@ def tus_basildi(key):
         _pressed_once.discard(k)
         return True
     return False
-
