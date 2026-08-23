@@ -21,12 +21,13 @@
 # Sürüm: 1.0.0
 # ============================================================
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from machine import Pin, ADC, PWM, I2C
 import time
 import framebuf
 import sys
+import array
 
 # ============================================================
 # PLATFORM ALGILAMA — Pico (rp2) / ESP32
@@ -590,19 +591,123 @@ def rx_map(v, fl, fh, tl, th):
 
 
 # ============================================================
-# NEOPIXEL (lazy import — sadece kullanılırsa yüklenir)
+# NEOPIXEL / WS2812 — PIO tabanlı sürücü
+# ------------------------------------------------------------
+# NEDEN PIO?
+# MicroPython'un hazır `neopixel` modülü RP2040'ta machine.bitstream
+# kullanır: yazılımda döngü sayarak zamanlama üretir. WS2812'de bir bit
+# 1.25us; bu döngü kesmeyle veya çekirdek çakışmasıyla bir tık uzarsa
+# LED bitleri yanlış okur.
+#
+# roboexx_main.py kullanıcı kodunu CORE1'de çalıştırırken CORE0'da BLE
+# yığını dönüyor. BLE kesmeleri bitstream'in zamanlamasını bozuyor ve
+# her bit "1" okunuyor -> LED HER ZAMAN BEYAZ yanıyor. Renk ne seçilirse
+# seçilsin sonuç değişmiyor.
+#
+# PIO donanımda zamanlama üretir; kesmeden ve ikinci çekirdekten
+# etkilenmez. berrybot.py zaten bu yüzden PIO kullanıyor.
+#
+# ESP32'de rp2/PIO yok; orada hazır `neopixel` modülü RMT donanımını
+# kullandığı için sorunsuz — platforma göre otomatik seçiliyor.
 # ============================================================
 
-_neopixel_mod = None
 _np = None
+_np_sm_id = 0
+
+if not _IS_ESP32:
+    import rp2
+
+    @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
+                 autopull=True, pull_thresh=24)
+    def _ws2812_pio():
+        T1 = 2; T2 = 5; T3 = 3
+        wrap_target()
+        label("bitloop")
+        out(x, 1)               .side(0)    [T3 - 1]
+        jmp(not_x, "do_zero")   .side(1)    [T1 - 1]
+        jmp("bitloop")          .side(1)    [T2 - 1]
+        label("do_zero")
+        nop()                   .side(0)    [T2 - 1]
+        wrap()
+
+    class PioNeoPixel:
+        """
+        Hazır neopixel.NeoPixel ile aynı arayüz:
+            len(np) / np[i] = (r,g,b) / np[i] -> (r,g,b) / np.write()
+        Böylece roboexx_main.py'deki _ind_rgb._np kullanımı aynen çalışır.
+        """
+
+        def __init__(self, pin, n, sm_id=0):
+            self.n = n
+            self.pin = pin
+            self.ar = array.array("I", [0] * n)   # 0x00GGRRBB
+            self.brightness = 1.0
+            self.sm = rp2.StateMachine(sm_id, _ws2812_pio, freq=8_000_000,
+                                       sideset_base=Pin(pin))
+            self.sm.active(1)
+
+        def __len__(self):
+            return self.n
+
+        def __setitem__(self, i, color):
+            if 0 <= i < self.n:
+                r, g, b = color
+                self.ar[i] = ((int(g) & 0xFF) << 16) | \
+                             ((int(r) & 0xFF) << 8) | (int(b) & 0xFF)
+
+        def __getitem__(self, i):
+            c = self.ar[i]
+            return ((c >> 8) & 0xFF, (c >> 16) & 0xFF, c & 0xFF)
+
+        def fill(self, color):
+            for i in range(self.n):
+                self[i] = color
+
+        def write(self):
+            if self.brightness >= 1.0:
+                out = self.ar
+            else:
+                out = array.array("I", [0] * self.n)
+                br = self.brightness
+                for i, c in enumerate(self.ar):
+                    r = int(((c >> 8) & 0xFF) * br)
+                    g = int(((c >> 16) & 0xFF) * br)
+                    b = int((c & 0xFF) * br)
+                    out[i] = (g << 16) | (r << 8) | b
+            # Buradaki 8 ZORUNLU: 24 bitlik GRB değerini 32 bitlik
+            # kelimenin üst tarafına kaydırır. Olmazsa LED çöp veri okur.
+            self.sm.put(out, 8)
+            time.sleep_us(100)      # >50us reset/latch darbesi
+
+        def deinit(self):
+            try:
+                self.sm.active(0)
+            except Exception:
+                pass
 
 
-def neopixel_init(pin, count):
-    """NeoPixel şerit başlat. Global _np değişkenine atar."""
-    global _neopixel_mod, _np
-    if _neopixel_mod is None:
-        import neopixel as _neopixel_mod
-    _np = _neopixel_mod.NeoPixel(Pin(pin), count)
+def neopixel_init(pin, count, sm_id=None):
+    """
+    NeoPixel/WS2812 şerit başlat. Global _np değişkenine atar.
+    İki kez çağrılırsa eskisini kapatır (StateMachine çakışması olmaz).
+    """
+    global _np, _np_sm_id
+    if sm_id is None:
+        sm_id = _np_sm_id
+    else:
+        _np_sm_id = sm_id
+
+    if _np is not None and hasattr(_np, 'deinit'):
+        _np.deinit()
+
+    if _IS_ESP32:
+        import neopixel
+        _np = neopixel.NeoPixel(Pin(pin), count)
+    else:
+        _np = PioNeoPixel(Pin(pin), count, sm_id)
+
+    _np.fill((0, 0, 0))
+    _np.write()
     return _np
 
 
@@ -868,14 +973,25 @@ def rgb_rainbow(step=0):
 
 
 def rgb_brightness(percent):
-    """Mevcut renkleri yüzdeye ölçekle (0-100). Yeni renk uygulamadan."""
+    """
+    Parlaklık ayarla (0-100). Bundan sonraki tüm renklere uygulanır.
+
+    NOT: Eskiden bu fonksiyon tampondaki renkleri kalıcı olarak
+    ölçeklerdi; iki kez çağrılınca ışık iki kez sönerdi ve
+    rgb_brightness(100) geri getiremezdi. Artık ölçekleme gönderim
+    anında yapılıyor — renkler bozulmuyor, %100 her zaman geri dönüyor.
+    """
     if _np is None:
         return
     scale = max(0, min(100, percent)) / 100.0
-    for i in range(len(_np)):
-        r, g, b = _np[i]
-        _np[i] = (int(r * scale), int(g * scale), int(b * scale))
-    _np.write()
+    if hasattr(_np, 'brightness'):          # Pico / PIO sürücüsü
+        _np.brightness = scale
+        _np.write()
+    else:                                   # ESP32 — hazır neopixel modülü
+        for i in range(len(_np)):
+            r, g, b = _np[i]
+            _np[i] = (int(r * scale), int(g * scale), int(b * scale))
+        _np.write()
 
 
 # ============================================================
@@ -1078,3 +1194,4 @@ def tus_basildi(key):
         _pressed_once.discard(k)
         return True
     return False
+
