@@ -25,45 +25,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-/**
- * RoboExx sensör kiti pin haritası (referans test yazılımı ile birebir).
- * Bloklardaki varsayılan pinler bu değerlerle aynıdır.
- */
-export const KIT_PINS = {
-  OLED_SDA: 4,
-  OLED_SCL: 5,
-  RGB: 6,
-  RGB_COUNT: 1,
-  BUTTON: 7,
-  LED: 10,
-  DHT: 11,
-  MQ2_DIGITAL: 13,
-  SERVO: [14, 15, 21, 22] as const,
-  TRIG: 18,
-  ECHO: 19,
-  BUZZER: 20,
-  POT: 26,
-  LDR: 27,
-  MQ2_ANALOG: 28,
-} as const;
-
-/**
- * WS2812 şeridi kesinlikle başlatılmış olsun.
- *
- * NEDEN: "RGB LED başlat" bloğu unutulursa şerit hiç veri almaz ve
- * WS2812 açılışta latch'lediği rastgele değeri (genelde BEYAZ) tutar —
- * kullanıcıya "LED yanmıyor, beyaz kalıyor" gibi görünür. Bu yüzden
- * herhangi bir renk bloğu kullanıldığında kod başına kit varsayılanıyla
- * bir rgb_init() düşürüyoruz. Kullanıcı kendi başlat bloğunu koyarsa
- * o zaten programın içinde sonradan çalışır ve bunu ezer.
- */
-function ensureRgbInit(generator: any) {
-  if (!generator.definitions_['rx_rgb_autoinit']) {
-    generator.definitions_['rx_rgb_autoinit'] =
-      `rgb_init(${KIT_PINS.RGB}, ${KIT_PINS.RGB_COUNT})`;
-  }
-}
-
 function dedentOneLevel(code: string, indent: string): string {
   if (!code) return code;
   return code
@@ -219,14 +180,12 @@ pythonGenerator.forBlock['rx_neopixel_init'] = function (block) {
 };
 
 pythonGenerator.forBlock['rx_neopixel_set'] = function (block, generator) {
-  ensureRgbInit(generator);
   const index = generator.valueToCode(block, 'INDEX', Order.NONE) || '0';
   const { r, g, b } = hexToRgb(block.getFieldValue('COLOUR'));
   return `neopixel_set(${index}, ${r}, ${g}, ${b})\n`;
 };
 
-pythonGenerator.forBlock['rx_neopixel_show'] = function (block, generator) {
-  ensureRgbInit(generator);
+pythonGenerator.forBlock['rx_neopixel_show'] = function () {
   return `neopixel_show()\n`;
 };
 
@@ -240,10 +199,8 @@ pythonGenerator.forBlock['rx_oled_init'] = function (block) {
   const bus = block.getFieldValue('I2C_BUS');
   const size = block.getFieldValue('SIZE');
   const addr = block.getFieldValue('ADDR');
-  // DRIVER alanı sonradan eklendi — eski kayıtlı projelerde olmayabilir.
-  const driver = block.getFieldValue('DRIVER') || 'ssd1306';
   const [w, h] = size === '128x32' ? ['128', '32'] : ['128', '64'];
-  return `oled_init(${sda}, ${scl}, bus=${bus}, width=${w}, height=${h}, addr=${addr}, driver='${driver}')\n`;
+  return `oled_init(${sda}, ${scl}, bus=${bus}, width=${w}, height=${h}, addr=${addr})\n`;
 };
 
 pythonGenerator.forBlock['rx_oled_clear'] = function () {
@@ -397,26 +354,22 @@ pythonGenerator.forBlock['rx_rgb_init'] = function (block) {
   return `rgb_init(${pin}, ${count})\n`;
 };
 
-pythonGenerator.forBlock['rx_rgb_set_all'] = function (block, generator) {
-  ensureRgbInit(generator);
+pythonGenerator.forBlock['rx_rgb_set_all'] = function (block) {
   const { r, g, b } = hexToRgb(block.getFieldValue('COLOUR'));
   return `rgb_set_all(${r}, ${g}, ${b})\n`;
 };
 
 pythonGenerator.forBlock['rx_rgb_set_one'] = function (block, generator) {
-  ensureRgbInit(generator);
   const idx = generator.valueToCode(block, 'INDEX', Order.NONE) || '0';
   const { r, g, b } = hexToRgb(block.getFieldValue('COLOUR'));
   return `rgb_set_one(${idx}, ${r}, ${g}, ${b})\n`;
 };
 
-pythonGenerator.forBlock['rx_rgb_clear'] = function (block, generator) {
-  ensureRgbInit(generator);
+pythonGenerator.forBlock['rx_rgb_clear'] = function () {
   return `rgb_clear()\n`;
 };
 
 pythonGenerator.forBlock['rx_rgb_rainbow'] = function (block, generator) {
-  ensureRgbInit(generator);
   const step = generator.valueToCode(block, 'STEP', Order.NONE) || '0';
   return `rgb_rainbow(${step})\n`;
 };
