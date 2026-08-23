@@ -243,7 +243,7 @@ Blockly.Blocks['rx_servo_angle'] = {
     this.appendDummyInput()
       .appendField(icon(ICONS.servo))
       .appendField('Servo pin')
-      .appendField(new Blockly.FieldNumber(15, 0, 28, 1), 'PIN')
+      .appendField(new Blockly.FieldNumber(14, 0, 28, 1), 'PIN')
       .appendField('açı');
     this.appendValueInput('ANGLE').setCheck('Number');
     this.appendDummyInput().appendField('°');
@@ -331,7 +331,7 @@ Blockly.Blocks['rx_neopixel_init'] = {
     this.appendDummyInput()
       .appendField(icon(ICONS.rgb))
       .appendField('NeoPixel başlat · pin')
-      .appendField(new Blockly.FieldNumber(0, 0, 28, 1), 'PIN')
+      .appendField(new Blockly.FieldNumber(6, 0, 28, 1), 'PIN')
       .appendField('LED sayısı')
       .appendField(new Blockly.FieldNumber(1, 1, 256, 1), 'COUNT');
     this.setStyle('rgb_blocks');
@@ -379,11 +379,11 @@ Blockly.Blocks['rx_button_pressed'] = {
     this.appendDummyInput()
       .appendField(icon(ICONS.button))
       .appendField('Buton pin')
-      .appendField(new Blockly.FieldNumber(10, 0, 28, 1), 'PIN')
+      .appendField(new Blockly.FieldNumber(7, 0, 28, 1), 'PIN')
       .appendField('basıldı mı?');
     this.setStyle('button_blocks');
     this.setOutput(true, 'Boolean');
-    this.setTooltip('Pull-up bağlı butonun basılma durumu (LOW = basılı = True)');
+    this.setTooltip('Butona basılı mı? Kart üzerinde pull-down var: basılı = HIGH = True. RoboExx sensör kiti varsayılanı: GP7');
   },
 };
 
@@ -496,9 +496,9 @@ Blockly.Blocks['rx_ultrasonic_distance'] = {
     this.appendDummyInput()
       .appendField(icon(ICONS.ruler))
       .appendField('Ultrasonik mesafe · trig')
-      .appendField(new Blockly.FieldNumber(3, 0, 28, 1), 'TRIG')
+      .appendField(new Blockly.FieldNumber(18, 0, 28, 1), 'TRIG')
       .appendField('echo')
-      .appendField(new Blockly.FieldNumber(2, 0, 28, 1), 'ECHO');
+      .appendField(new Blockly.FieldNumber(19, 0, 28, 1), 'ECHO');
     this.setStyle('ultra_blocks');
     this.setOutput(true, 'Number');
     this.setTooltip('HC-SR04 ultrasonik sensörle santimetre cinsinden mesafe ölçer');
@@ -608,12 +608,20 @@ Blockly.Blocks['rx_oled_init'] = {
           ['0x3D', '0x3D'],
         ]),
         'ADDR'
+      )
+      .appendField('Sürücü')
+      .appendField(
+        new Blockly.FieldDropdown([
+          ['SSD1306', 'ssd1306'],
+          ['SH1106', 'sh1106'],
+        ]),
+        'DRIVER'
       );
     this.setStyle('oled_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(false);
-    this.setTooltip("SSD1306 OLED ekranı başlatır. Varsayılan: SDA=GP4, SCL=GP5 (I2C0).");
+    this.setTooltip("OLED ekranı başlatır. Varsayılan: SDA=GP4, SCL=GP5 (I2C0). Ekran bozuk/kaymış görünüyorsa Sürücü menüsünden SH1106 seç.");
   },
 };
 
@@ -819,7 +827,7 @@ Blockly.Blocks['rx_led_external'] = {
     this.appendDummyInput()
       .appendField(icon(ICONS.led))
       .appendField('LED pin')
-      .appendField(new Blockly.FieldNumber(7, 0, 28, 1), 'PIN')
+      .appendField(new Blockly.FieldNumber(10, 0, 28, 1), 'PIN')
       .appendField(
         new Blockly.FieldDropdown([
           ['yak', 'ON'],
@@ -831,7 +839,7 @@ Blockly.Blocks['rx_led_external'] = {
     this.setStyle('led_blocks');
     this.setPreviousStatement(true);
     this.setNextStatement(true);
-    this.setTooltip('Harici bir LED\'i kontrol eder (anot pin'+ ' tarafı + dirençle). Varsayılan: GP7');
+    this.setTooltip('Kart üzerindeki LED\'i kontrol eder. RoboExx sensör kiti varsayılanı: GP10');
   },
 };
 

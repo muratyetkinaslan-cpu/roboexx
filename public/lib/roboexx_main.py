@@ -455,10 +455,13 @@ def _show_upload_progress(received, total, phase):
                 _ind_oled.oled_clear()
                 _ind_oled.oled_text('Kod yukleniyor', align='TOPCENTER', y=8, size=1)
                 _ind_oled.oled_show()
-            # RGB başlat — yoksa default pin 6, 8 LED
+            # RGB başlat — kit pin haritasından (roboexx.KIT_RGB_*)
             if hasattr(_ind_rgb, '_np') and _ind_rgb._np is None:
                 try:
-                    _ind_rgb.rgb_init(6, 8)
+                    _ind_rgb.rgb_init(
+                        getattr(_ind_rgb, 'KIT_RGB_PIN', 6),
+                        getattr(_ind_rgb, 'KIT_RGB_COUNT', 1),
+                    )
                 except Exception:
                     pass
         elif phase == 'chunk':
@@ -498,6 +501,13 @@ def _rgb_kitt(received):
         return
     n = len(_ind_rgb._np)
     if n == 0:
+        return
+    if n == 1:
+        # Tek LED'li kit: KITT yerine mor nabız
+        _kitt_step = (_kitt_step + 1) % 10
+        lvl = _kitt_step if _kitt_step < 5 else (9 - _kitt_step)
+        _ind_rgb._np[0] = (36 * lvl, 0, 51 * lvl)
+        _ind_rgb._np.write()
         return
     _kitt_step = (_kitt_step + 1) % (n * 2)
     pos = _kitt_step if _kitt_step < n else (2 * n - 1 - _kitt_step)

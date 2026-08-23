@@ -21,7 +21,7 @@
 # Sürüm: 1.0.0
 # ============================================================
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from machine import Pin, ADC, PWM, I2C
 import time
@@ -34,6 +34,43 @@ import sys
 # ============================================================
 
 _IS_ESP32 = sys.platform == "esp32"
+
+# ============================================================
+# KIT PIN HARİTASI (RoboExx sensör kiti — RP2040/RP2350)
+# ------------------------------------------------------------
+# Bloklardaki varsayılan pinler bu harita ile birebir aynıdır.
+# Bir fonksiyona pin verilmezse buradaki değer kullanılır.
+#
+#   OLED  SDA=4  SCL=5   (I2C0, SH1106/SSD1306 0x3C)
+#   RGB (WS2812) .... 6      (1 LED)
+#   BUTON ........... 7      (aktif-HIGH, harici pull-down)
+#   LED ............. 10
+#   DHT11 ........... 11
+#   MQ2 dijital ..... 13
+#   SERVO ........... 14, 15, 21, 22
+#   ESP-01 UART ..... TX=16  RX=17
+#   HC-SR04 ......... TRIG=18 ECHO=19
+#   BUZZER .......... 20
+#   POT ............. 26 (ADC0)
+#   LDR ............. 27 (ADC1)
+#   MQ2 analog ...... 28 (ADC2)
+# ============================================================
+
+KIT_OLED_SDA = 4
+KIT_OLED_SCL = 5
+KIT_RGB_PIN = 6
+KIT_RGB_COUNT = 1
+KIT_BUTTON_PIN = 7
+KIT_LED_PIN = 10
+KIT_DHT_PIN = 11
+KIT_MQ2_DO_PIN = 13
+KIT_SERVO_PINS = (14, 15, 21, 22)
+KIT_TRIG_PIN = 18
+KIT_ECHO_PIN = 19
+KIT_BUZZER_PIN = 20
+KIT_POT_PIN = 26
+KIT_LDR_PIN = 27
+KIT_MQ2_AO_PIN = 28
 
 _adc_cache = {}
 
@@ -84,16 +121,23 @@ _SET_CHARGE_PUMP = const(0x8D)
 
 
 class SSD1306(framebuf.FrameBuffer):
-    def __init__(self, width, height, external_vcc):
+    def __init__(self, width, height, external_vcc, driver="ssd1306"):
         self.width = width
         self.height = height
         self.external_vcc = external_vcc
+        # "sh1106" sürücüsü: SH1106 denetleyici 132x64'tür, görünür alan
+        # 2 piksel sağa kaymıştır ve yatay adresleme modunu desteklemez.
+        self.driver = "sh1106" if str(driver).lower() == "sh1106" else "ssd1306"
+        self.col_offset = 2 if self.driver == "sh1106" else 0
         self.pages = self.height // 8
         self.buffer = bytearray(self.pages * self.width)
         super().__init__(self.buffer, self.width, self.height, framebuf.MONO_VLSB)
         self.init_display()
 
     def init_display(self):
+        if self.driver == "sh1106":
+            self._init_sh1106()
+            return
         for cmd in (
             _SET_DISP | 0x00,
             _SET_MEM_ADDR, 0x00,
@@ -129,7 +173,34 @@ class SSD1306(framebuf.FrameBuffer):
     def invert(self, invert):
         self.write_cmd(_SET_NORM_INV | (invert & 1))
 
+    def _init_sh1106(self):
+        for cmd in (
+            0xAE,        # ekran kapalı
+            0x02,        # düşük sütun adresi
+            0x10,        # yüksek sütun adresi
+            0x40,        # başlangıç satırı
+            0x81, 0x80,  # kontrast
+            0xA1,        # segment remap
+            0xA6,        # normal (ters değil)
+            0xA8, self.height - 1,
+            0xAD, 0x8B,  # DC-DC dönüştürücü açık
+            0x33,        # pompa voltajı 9.0V
+            0xC8,        # COM tarama yönü ters
+            0xD3, 0x00,  # ekran offset
+            0xD5, 0x80,  # saat bölücü
+            0xD9, 0x1F,  # ön şarj
+            0xDA, 0x12,  # COM pin yapılandırması
+            0xDB, 0x40,  # VCOM deselect
+            0xAF,        # ekran açık
+        ):
+            self.write_cmd(cmd)
+        self.fill(0)
+        self.show()
+
     def show(self):
+        if self.driver == "sh1106":
+            self._show_sh1106()
+            return
         x0 = 0
         x1 = self.width - 1
         if self.width == 64:
@@ -143,14 +214,26 @@ class SSD1306(framebuf.FrameBuffer):
         self.write_cmd(self.pages - 1)
         self.write_data(self.buffer)
 
+    def _show_sh1106(self):
+        """SH1106: yatay adresleme yok — sayfa sayfa gönderilir."""
+        w = self.width
+        off = self.col_offset
+        for page in range(self.pages):
+            self.write_cmd(0xB0 | page)
+            self.write_cmd(0x00 | (off & 0x0F))
+            self.write_cmd(0x10 | (off >> 4))
+            start = page * w
+            self.write_data(memoryview(self.buffer)[start:start + w])
+
 
 class SSD1306_I2C(SSD1306):
-    def __init__(self, width, height, i2c, addr=0x3C, external_vcc=False):
+    def __init__(self, width, height, i2c, addr=0x3C, external_vcc=False,
+                 driver="ssd1306"):
         self.i2c = i2c
         self.addr = addr
         self.temp = bytearray(2)
         self.write_list = [b"\x40", None]
-        super().__init__(width, height, external_vcc)
+        super().__init__(width, height, external_vcc, driver)
 
     def write_cmd(self, cmd):
         self.temp[0] = 0x80
@@ -197,26 +280,50 @@ def get_i2c(sda_pin=4, scl_pin=5, bus=0, freq=400000):
 oled = None
 
 
-def oled_init(sda_pin, scl_pin, bus=0, width=128, height=64, addr=0x3C):
-    """OLED başlatma. SDA/SCL pin numaraları, I2C bus, boyut, adres."""
+def oled_init(sda_pin=None, scl_pin=None, bus=0, width=128, height=64,
+              addr=0x3C, driver="ssd1306"):
+    """OLED başlatma. SDA/SCL pin numaraları, I2C bus, boyut, adres.
+
+    driver: "ssd1306" (varsayılan) veya "sh1106".
+    Ekran bozuk/kaymış görünüyorsa bloktan diğer sürücüyü seç.
+    """
     global oled
+    if sda_pin is None:
+        sda_pin = KIT_OLED_SDA
+    if scl_pin is None:
+        scl_pin = KIT_OLED_SCL
     i2c = get_i2c(sda_pin, scl_pin, bus)
-    oled = SSD1306_I2C(width, height, i2c, addr=addr)
+    oled = SSD1306_I2C(width, height, i2c, addr=addr, driver=driver)
     oled.fill(0)
     oled.show()
     return oled
 
 
+def _oled_ensure():
+    """OLED başlatılmamışsa kit varsayılanları ile başlat.
+
+    "OLED başlat" bloğunu koymayı unutan öğrencinin ekranı yine de
+    çalışsın diye. Hata olursa sessizce None döner.
+    """
+    global oled
+    if oled is None:
+        try:
+            oled_init(KIT_OLED_SDA, KIT_OLED_SCL)
+        except Exception:
+            return None
+    return oled
+
+
 def oled_clear():
     """Tampondaki içeriği siler. show() ile ekrana yansıt."""
-    if oled is None:
+    if _oled_ensure() is None:
         return
     oled.fill(0)
 
 
 def oled_show():
     """Tamponu ekrana yansıt."""
-    if oled is None:
+    if _oled_ensure() is None:
         return
     oled.show()
 
@@ -227,7 +334,7 @@ def oled_text(txt, x=0, y=0, size=1, align="TOPLEFT"):
     Hizalama: TOPLEFT, CENTER, TOPCENTER, BOTTOMCENTER, TOPRIGHT
     Boyut: 1 (8x8), 2 (16x16), 3 (24x24)
     """
-    if oled is None:
+    if _oled_ensure() is None:
         return
     txt = str(txt)
     w_per_char = 8 * size
@@ -266,7 +373,7 @@ def oled_scroll_text(txt, y=24, size=2, speed=30, direction="LEFT"):
     speed: piksel başına ms (büyük = yavaş). 30 = orta hız.
     direction: 'LEFT' (sağdan→sola, varsayılan) veya 'RIGHT' (soldan→sağa)
     """
-    if oled is None:
+    if _oled_ensure() is None:
         return
     txt = str(txt)
     w_per_char = 8 * size
@@ -288,7 +395,7 @@ def oled_scroll_text(txt, y=24, size=2, speed=30, direction="LEFT"):
 
 def oled_circle(xc, yc, r, color=1, fill=False):
     """Daire çiz (midpoint algoritması)."""
-    if oled is None:
+    if _oled_ensure() is None:
         return
     x = 0
     y = r
@@ -321,7 +428,7 @@ def oled_image(img_bytes, x=0, y=0, width=None, height=None):
     Mono bitmap çiz. img_bytes: VLSB framebuf formatında bytes/bytearray.
     width/height belirtilmezse OLED'in tam boyutu kullanılır.
     """
-    if oled is None:
+    if _oled_ensure() is None:
         return
     w = width if width else oled.width
     h = height if height else oled.height
@@ -331,7 +438,7 @@ def oled_image(img_bytes, x=0, y=0, width=None, height=None):
 
 def oled_shape(shape, x, y, size=20, color=1):
     """Şekil çiz. shape: CIRCLE/CIRCLE_FILL/RECT/RECT_FILL/LINE(yatay)/LINE_V(dikey)/PIXEL"""
-    if oled is None:
+    if _oled_ensure() is None:
         return
     if shape == "CIRCLE":
         r = max(1, size // 2)
@@ -357,7 +464,7 @@ def oled_eyes(kind):
     kind: NORMAL, LEFT, RIGHT, UP, DOWN, SLEEP, SURPRISED, LOVE,
           ANGRY, CLOSED, SAD, HAPPY
     """
-    if oled is None:
+    if _oled_ensure() is None:
         return
     sw, sh = oled.width, oled.height
     # Ekran boyutuna göre orantılı pozisyon
@@ -508,9 +615,12 @@ def led_init():
 _btn_cache = {}
 
 
-def button_pressed(pin):
-    """PicoBricks butonu — basılınca pin HIGH olur (harici pull-down).
-    'Dijital pin oku' ile aynı elektriksel davranış: basılı = 1."""
+def button_pressed(pin=None):
+    """Kit butonu — basılınca pin HIGH olur (harici pull-down).
+    'Dijital pin oku' ile aynı elektriksel davranış: basılı = 1.
+    Kit varsayılanı: GP7."""
+    if pin is None:
+        pin = KIT_BUTTON_PIN
     if pin not in _btn_cache:
         _btn_cache[pin] = Pin(pin, Pin.IN, Pin.PULL_DOWN)
     return _btn_cache[pin].value() == 1
@@ -521,8 +631,13 @@ def button_pressed(pin):
 # ============================================================
 
 
-def ultrasonic_distance(trig_pin, echo_pin):
-    """HC-SR04 ile cm cinsinden mesafe ölçer. Hata = -1."""
+def ultrasonic_distance(trig_pin=None, echo_pin=None):
+    """HC-SR04 ile cm cinsinden mesafe ölçer. Hata = -1.
+    Kit varsayılanı: TRIG=GP18, ECHO=GP19."""
+    if trig_pin is None:
+        trig_pin = KIT_TRIG_PIN
+    if echo_pin is None:
+        echo_pin = KIT_ECHO_PIN
     trig = Pin(trig_pin, Pin.OUT)
     echo = Pin(echo_pin, Pin.IN)
     trig.value(0)
@@ -572,8 +687,10 @@ def internal_temp():
 # ============================================================
 
 
-def potentiometer(pin):
-    """ADC pininden 0-100 arası okuma (Pico + ESP32)."""
+def potentiometer(pin=None):
+    """ADC pininden 0-100 arası okuma (Pico + ESP32). Kit: GP26."""
+    if pin is None:
+        pin = KIT_POT_PIN
     return int(_adc(pin).read_u16() * 100 / 65535)
 
 
@@ -590,32 +707,97 @@ def rx_map(v, fl, fh, tl, th):
 
 
 # ============================================================
-# NEOPIXEL (lazy import — sadece kullanılırsa yüklenir)
+# NEOPIXEL / WS2812 (lazy import — sadece kullanılırsa yüklenir)
+# ------------------------------------------------------------
+# ÖNEMLİ DAVRANIŞ: Bu bölümdeki hiçbir fonksiyon "sessizce hiçbir şey
+# yapmaz" değildir. Kullanıcı "RGB LED başlat" bloğunu koymayı unutsa
+# bile ilk renk komutunda şerit KIT_RGB_PIN / KIT_RGB_COUNT ile
+# otomatik başlatılır. Aksi halde WS2812 açılışta latch'lediği rastgele
+# veriyi (çoğunlukla BEYAZ) tutmaya devam eder ve LED "yanmıyor,
+# beyaz kalıyor" gibi görünür.
 # ============================================================
 
 _neopixel_mod = None
 _np = None
+_np_pin = None
+_np_count = 0
+
+# Mantıksal renkler (parlaklıktan bağımsız). Parlaklık yazma anında
+# uygulanır — böylece rgb_brightness() tekrar tekrar çağrılınca
+# renkler kalıcı olarak kararmaz.
+_rgb_colors = []
+_rgb_scale = 1.0
 
 
-def neopixel_init(pin, count):
-    """NeoPixel şerit başlat. Global _np değişkenine atar."""
-    global _neopixel_mod, _np
+def neopixel_init(pin=None, count=None):
+    """WS2812/NeoPixel şeridi başlat (idempotent).
+
+    Aynı pin ve LED sayısı ile tekrar çağrılırsa şeridi yeniden
+    kurmaz — böylece bu blok döngü içinde kullanılsa bile sorun olmaz.
+    Yeni kurulumda şerit her zaman TEMİZLENİR ve write() yapılır;
+    bu, açılıştaki rastgele/beyaz durumu ortadan kaldırır.
+    """
+    global _neopixel_mod, _np, _np_pin, _np_count, _rgb_colors
+    if pin is None:
+        pin = KIT_RGB_PIN
+    if count is None:
+        count = KIT_RGB_COUNT
+    pin = int(pin)
+    count = max(1, int(count))
+
+    if _np is not None and _np_pin == pin and _np_count == count:
+        return _np
+
     if _neopixel_mod is None:
         import neopixel as _neopixel_mod
-    _np = _neopixel_mod.NeoPixel(Pin(pin), count)
+
+    _np = _neopixel_mod.NeoPixel(Pin(pin, Pin.OUT), count)
+    _np_pin = pin
+    _np_count = count
+    _rgb_colors = [(0, 0, 0)] * count
+
+    # Açılışta şeritte kalan çöp veriyi temizle.
+    for i in range(count):
+        _np[i] = (0, 0, 0)
+    _np.write()
     return _np
 
 
+def _rgb_ensure():
+    """Şerit başlatılmamışsa kit varsayılanları ile başlat."""
+    if _np is None:
+        neopixel_init(KIT_RGB_PIN, KIT_RGB_COUNT)
+    return _np
+
+
+def _rgb_apply():
+    """Mantıksal renkleri parlaklıkla ölçekleyip şeride yaz."""
+    if _np is None:
+        return
+    s = _rgb_scale
+    for i in range(_np_count):
+        r, g, b = _rgb_colors[i]
+        if s >= 0.999:
+            _np[i] = (r, g, b)
+        else:
+            _np[i] = (int(r * s), int(g * s), int(b * s))
+    _np.write()
+
+
 def neopixel_set(index, r, g, b):
-    """Bir LED rengini ayarla. Önce neopixel_init çağrılmış olmalı."""
-    if _np is not None:
-        _np[index] = (r, g, b)
+    """Bir LED rengini ayarla. Gösterim için neopixel_show() çağır."""
+    _rgb_ensure()
+    if _np is None:
+        return
+    index = int(index)
+    if 0 <= index < _np_count:
+        _rgb_colors[index] = (int(r), int(g), int(b))
 
 
 def neopixel_show():
-    """Tüm LED renklerini şeride gönder."""
-    if _np is not None:
-        _np.write()
+    """Ayarlanan tüm LED renklerini şeride gönder."""
+    _rgb_ensure()
+    _rgb_apply()
 
 
 # ============================================================
@@ -646,9 +828,17 @@ def relay_toggle(pin):
 # ============================================================
 
 
-def ldr_read(pin):
-    """LDR'den 0-100 arası ışık şiddeti okur. Yüksek = aydınlık."""
-    return int(_adc(pin).read_u16() * 100 / 65535)
+def ldr_read(pin=None):
+    """LDR'den 0-100 arası ışık şiddeti okur. Yüksek = aydınlık.
+
+    Kit kartında LDR bölücüsü, ışık arttıkça ADC değerinin DÜŞTÜĞÜ
+    şekilde bağlıdır (referans test kodu ile aynı). Bu yüzden ham
+    değer ters çevrilir; blok etiketindeki "yüksek = aydınlık"
+    anlamı korunur.
+    """
+    if pin is None:
+        pin = KIT_LDR_PIN
+    return 100 - int(_adc(pin).read_u16() * 100 / 65535)
 
 
 # ============================================================
@@ -817,27 +1007,32 @@ def ir_read_code():
 # ============================================================
 
 
-def rgb_init(pin=6, count=8):
-    """WS2812 RGB LED şeritini başlat. Varsayılan: pin GP6, 8 LED."""
+def rgb_init(pin=None, count=None):
+    """RGB LED (WS2812) başlat. Varsayılan: kit değerleri (GP6, 1 LED)."""
     return neopixel_init(pin, count)
 
 
 def rgb_set_all(r, g, b):
-    """Tüm LED'leri aynı renge boya ve göster."""
+    """Tüm LED'leri aynı renge boya ve hemen göster."""
+    global _rgb_colors
+    _rgb_ensure()
     if _np is None:
         return
-    for i in range(len(_np)):
-        _np[i] = (r, g, b)
-    _np.write()
+    c = (int(r), int(g), int(b))
+    for i in range(_np_count):
+        _rgb_colors[i] = c
+    _rgb_apply()
 
 
 def rgb_set_one(index, r, g, b):
-    """Tek bir LED'i boya ve hemen göster."""
+    """Tek bir LED'i boya ve hemen göster (0 = ilk LED)."""
+    _rgb_ensure()
     if _np is None:
         return
-    if 0 <= index < len(_np):
-        _np[index] = (r, g, b)
-        _np.write()
+    index = int(index)
+    if 0 <= index < _np_count:
+        _rgb_colors[index] = (int(r), int(g), int(b))
+        _rgb_apply()
 
 
 def rgb_clear():
@@ -850,32 +1045,37 @@ def rgb_rainbow(step=0):
     Tüm şeride gökkuşağı yay. step parametresi animasyon için —
     döngüde step'i artırarak çağırınca renkler kayar.
     """
+    global _rgb_colors
+    _rgb_ensure()
     if _np is None:
         return
-    n = len(_np)
+    n = _np_count
+    step = int(step)
     for i in range(n):
         h = ((i * 256 // n) + step) % 256
         # HSV → RGB (basit, max parlaklık)
         region = h // 43
         rem = (h - region * 43) * 6
-        if region == 0:    _np[i] = (255, rem, 0)
-        elif region == 1:  _np[i] = (255 - rem, 255, 0)
-        elif region == 2:  _np[i] = (0, 255, rem)
-        elif region == 3:  _np[i] = (0, 255 - rem, 255)
-        elif region == 4:  _np[i] = (rem, 0, 255)
-        else:              _np[i] = (255, 0, 255 - rem)
-    _np.write()
+        if region == 0:    _rgb_colors[i] = (255, rem, 0)
+        elif region == 1:  _rgb_colors[i] = (255 - rem, 255, 0)
+        elif region == 2:  _rgb_colors[i] = (0, 255, rem)
+        elif region == 3:  _rgb_colors[i] = (0, 255 - rem, 255)
+        elif region == 4:  _rgb_colors[i] = (rem, 0, 255)
+        else:              _rgb_colors[i] = (255, 0, 255 - rem)
+    _rgb_apply()
 
 
 def rgb_brightness(percent):
-    """Mevcut renkleri yüzdeye ölçekle (0-100). Yeni renk uygulamadan."""
-    if _np is None:
-        return
-    scale = max(0, min(100, percent)) / 100.0
-    for i in range(len(_np)):
-        r, g, b = _np[i]
-        _np[i] = (int(r * scale), int(g * scale), int(b * scale))
-    _np.write()
+    """Parlaklığı yüzde olarak ayarla (0-100).
+
+    Renkleri BOZMAZ: ölçek yazma anında uygulanır, bu yüzden
+    parlaklığı düşürüp tekrar yükseltince orijinal renkler geri gelir.
+    """
+    global _rgb_scale
+    _rgb_ensure()
+    p = max(0, min(100, int(percent)))
+    _rgb_scale = p / 100.0
+    _rgb_apply()
 
 
 # ============================================================
