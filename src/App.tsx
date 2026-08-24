@@ -466,9 +466,15 @@ export default function App() {
     }
 
     const pressed = new Set<string>();
-    const normalize = (e: KeyboardEvent): string | null => {
+    // ignoreTarget: BASMA olaylarında yazı kutusuna yazarken tuş göndermeyiz,
+    // ama BIRAKMA olayları HER ZAMAN işlenmeli. Aksi halde: Ctrl+C'ye kutunun
+    // dışında bas → 'c' pressed'e girer → kutuya tıkla → keyup'ta target INPUT
+    // olduğu için normalize null döner → 'c' SONSUZA DEK basılı kalır ve
+    // 400 ms'lik canlı-tutma onu karta yollamaya devam eder. (input() bu
+    // paketi yakalayıp "\x06c" döndürüyordu.)
+    const normalize = (e: KeyboardEvent, ignoreTarget = false): string | null => {
       const tgt = e.target as HTMLElement;
-      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) {
+      if (!ignoreTarget && tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) {
         return null;
       }
       const k = e.key;
@@ -483,6 +489,13 @@ export default function App() {
       return null;
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd/Alt kombinasyonları robot tuşu DEĞİLDİR (Ctrl+C = Durdur,
+      // Ctrl+V = yapıştır...). Kombinasyonlarda keyup sık sık kaybolduğu için
+      // tuşu eklemek yerine listeyi tamamen temizliyoruz.
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        pressed.clear();
+        return;
+      }
       const k = normalize(e);
       if (k === null) return;
       if (['w','a','s','d',' ','\x11','\x12','\x13','\x14'].includes(k)) {
@@ -491,7 +504,7 @@ export default function App() {
       pressed.add(k);
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      const k = normalize(e);
+      const k = normalize(e, true); // BIRAKMA her zaman işlenir
       if (k === null) return;
       pressed.delete(k);
     };

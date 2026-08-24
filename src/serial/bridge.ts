@@ -277,11 +277,27 @@ export class SerialBridge {
   }
 
   /**
-   * Friendly REPL'e komut gönder (Serial Monitor input'u için).
+   * Serial Monitor yazı kutusundan karta metin gönder.
+   *
+   * İKİ DURUMDA ÇALIŞIR:
+   *   - state 'connected'      → friendly REPL komutu (eski davranış)
+   *   - state 'busy' + liveRun → canlı "Çalıştır" sürüyor; metin çalışan
+   *                              programın sys.stdin'ine akar. input()
+   *                              BU SAYEDE ÇALIŞIR. Eskiden burada
+   *                              sessizce return ediliyordu: monitör
+   *                              satırı "gönderildi" diye gösteriyor ama
+   *                              karta hiçbir şey gitmiyordu.
+   *
+   * Satır sonu olarak SADECE \r gönderilir. Eskiden \r\n gönderiliyordu;
+   * MicroPython'ın satır okuyucusu \r'de bitirdiği için artakalan \n bir
+   * sonraki input() çağrısına boş satır olarak düşüyordu.
    */
   async sendCommand(cmd: string): Promise<void> {
-    if (this.state !== 'connected') return;
-    await this._write(cmd + '\r\n');
+    if (this.silent) return; // raw REPL dosya aktarımı sürüyor — karışma
+    const canSend =
+      this.state === 'connected' || (this.state === 'busy' && this.liveRun);
+    if (!canSend) return;
+    await this._write(cmd + '\r');
   }
 
   /**
