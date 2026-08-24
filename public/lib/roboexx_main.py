@@ -38,7 +38,6 @@
 # Sürüm: 1.3.0
 # ============================================================
 
-import bluetooth
 import struct
 import time
 import machine
@@ -46,10 +45,32 @@ import os
 import micropython
 from micropython import const
 
+# ------------------------------------------------------------
+# BLE OPSİYONEL (v1.3.1)
+# Kablosuz OLMAYAN kartlarda (Pico, Pico 2 / RP2350) MicroPython
+# firmware'inde 'bluetooth' modülü YOKTUR. Eskiden bu satır
+#     ImportError: no module named 'bluetooth'
+# ile main.py'yi daha ilk satırlarda öldürüyordu → bootloader hiç
+# çalışmıyor, USB'den kod çalıştırma/klavye/supervisor devre dışı
+# kalıyordu. Artık import korumalı: BLE yoksa kart USB modunda
+# sorunsuz açılır.
+# ------------------------------------------------------------
+try:
+    import bluetooth
+    _HAS_BLE = True
+except ImportError:
+    bluetooth = None
+    _HAS_BLE = False
+
 # RoboExx BLE Servis UUID'leri (RoboExx için özel üretilmiş)
-_UART_SERVICE_UUID = bluetooth.UUID('6E400001-B5A3-F393-E0A9-E50E24DCCA9E')
-_UART_RX_CHAR_UUID = bluetooth.UUID('6E400002-B5A3-F393-E0A9-E50E24DCCA9E')  # write
-_UART_TX_CHAR_UUID = bluetooth.UUID('6E400003-B5A3-F393-E0A9-E50E24DCCA9E')  # notify
+if _HAS_BLE:
+    _UART_SERVICE_UUID = bluetooth.UUID('6E400001-B5A3-F393-E0A9-E50E24DCCA9E')
+    _UART_RX_CHAR_UUID = bluetooth.UUID('6E400002-B5A3-F393-E0A9-E50E24DCCA9E')  # write
+    _UART_TX_CHAR_UUID = bluetooth.UUID('6E400003-B5A3-F393-E0A9-E50E24DCCA9E')  # notify
+else:
+    _UART_SERVICE_UUID = None
+    _UART_RX_CHAR_UUID = None
+    _UART_TX_CHAR_UUID = None
 
 # BLE IRQ event sabitleri
 _IRQ_CENTRAL_CONNECT = const(1)
@@ -631,8 +652,12 @@ def _read_device_name():
 
 
 def _start_ble():
-    """BLE bootloader başlat."""
+    """BLE bootloader başlat. Kartta BLE yoksa None döner (USB modu)."""
     _init_indicators()
+    if not _HAS_BLE:
+        print("[BLE] Bu kartta bluetooth modülü yok — sadece USB modu aktif.")
+        print("[BLE] (Kablosuz için Pico W / Pico 2 W firmware'i gerekir.)")
+        return None
     ble = bluetooth.BLE()
     device_name = _read_device_name()
     print("[BLE] Cihaz adı:", device_name)
@@ -751,7 +776,7 @@ def _run_user_code_on_core1():
 # BAŞLANGIÇ
 # ============================================================
 
-print("RoboExx Pico W — BLE bootloader başlıyor...")
+print("RoboExx bootloader başlıyor... (BLE: %s)" % ("var" if _HAS_BLE else "YOK — USB modu"))
 print("__RX_BOOT__ v1.3")
 
 # roboexx kütüphanesini boot'ta pre-load et — MSG_KEY IRQ handler'ı bunu
