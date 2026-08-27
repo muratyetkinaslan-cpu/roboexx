@@ -3,6 +3,7 @@ import {
   BOARDS,
   fetchFirmwareList,
   downloadFirmware,
+  firmwareKey,
   writeFirmwareToDrive,
   isFileSystemAccessSupported,
   type BoardOption,
@@ -62,7 +63,7 @@ export function FirmwareUploader({ open, onClose }: Props) {
 
       // 1) UF2 indir
       const { buffer, filename, version } = await downloadFirmware(
-        selectedBoard.id,
+        firmwareKey(selectedBoard),
         (loaded, total) => setProgress({ loaded, total }),
       );
 
@@ -143,7 +144,7 @@ export function FirmwareUploader({ open, onClose }: Props) {
               {list && (
                 <div className="fw-board-grid">
                   {BOARDS.map((board) => {
-                    const info = list[board.id];
+                    const info = list[firmwareKey(board)];
                     const hasError = info?.error;
                     return (
                       <button

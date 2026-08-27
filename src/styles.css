@@ -6753,6 +6753,16 @@ g.blocklyDraggable > path:first-of-type {
 .toolbar[data-target="berrybot"]::after {
   background: linear-gradient(90deg, transparent, color-mix(in srgb, #8aa347 60%, transparent) 50%, transparent);
 }
+.toolbar[data-target="robocytron"] {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, #5b4bd6 22%, var(--rx-surface)) 0%,
+    color-mix(in srgb, #5b4bd6 9%, var(--rx-surface)) 45%,
+    var(--rx-surface) 100%);
+  border-bottom-color: color-mix(in srgb, #7a6bf0 45%, var(--rx-border));
+}
+.toolbar[data-target="robocytron"]::after {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #8f80ff 58%, transparent) 50%, transparent);
+}
 .toolbar[data-target="arduino"] {
   background: linear-gradient(90deg,
     color-mix(in srgb, #00979d 22%, var(--rx-surface)) 0%,
@@ -6771,6 +6781,10 @@ g.blocklyDraggable > path:first-of-type {
 .toolbar[data-target="berrybot"] .tb-dropdown-target .tb-dd-trigger {
   border-color: color-mix(in srgb, #8aa347 55%, var(--rx-border));
   background: color-mix(in srgb, #5a6f2b 16%, var(--rx-surface2));
+}
+.toolbar[data-target="robocytron"] .tb-dropdown-target .tb-dd-trigger {
+  border-color: color-mix(in srgb, #8f80ff 55%, var(--rx-border));
+  background: color-mix(in srgb, #5b4bd6 15%, var(--rx-surface2));
 }
 .toolbar[data-target="arduino"] .tb-dropdown-target .tb-dd-trigger {
   border-color: color-mix(in srgb, #00c4cc 55%, var(--rx-border));

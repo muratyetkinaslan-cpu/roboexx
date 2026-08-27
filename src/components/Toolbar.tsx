@@ -4,11 +4,12 @@ import type { BridgeState, PortInfo } from '../serial/types';
 import type { ThemeId } from '../themes/types';
 import { branding } from '../config/branding';
 
-type CodeTargetT = 'micropython' | 'arduino' | 'berrybot';
+type CodeTargetT = 'micropython' | 'arduino' | 'berrybot' | 'robocytron';
 
 const TARGET_META: Record<CodeTargetT, { emoji: string; label: string; hint: string }> = {
   micropython: { emoji: '🐍', label: 'MicroPython', hint: 'Pico / ESP32' },
   berrybot:    { emoji: '🪖', label: 'RoboPANZER',  hint: 'Bluetooth ile kablosuz' },
+  robocytron:  { emoji: '🤖', label: 'RoboCYTRON',  hint: 'Cytron Maker Pi RP2040' },
   arduino:     { emoji: '🔌', label: 'Arduino',     hint: 'Uno / Nano · C++' },
 };
 
@@ -69,10 +70,10 @@ interface Props {
   /** Pico'ya UF2 firmware (MicroPython) yükle */
   onFirmwareUpload: () => void;
 
-  /** Kod hedefi — MicroPython (Pico / ESP32), Arduino veya BerryBot */
-  codeTarget: 'micropython' | 'arduino' | 'berrybot';
+  /** Kod hedefi — MicroPython (Pico / ESP32), Arduino, RoboPANZER veya RoboCYTRON */
+  codeTarget: CodeTargetT;
   /** Kod hedefini değiştir */
-  onTargetChange: (target: 'micropython' | 'arduino' | 'berrybot') => void;
+  onTargetChange: (target: CodeTargetT) => void;
   /** 🍓 BerryBot pil yüzdesi (BLE bağlıyken) — null: bilinmiyor/ölçüm yok */
   batteryPct?: number | null;
   /** Arduino'ya derle+yükle popup'ını aç */
@@ -311,7 +312,9 @@ export function Toolbar(props: Props) {
                     <span className="tb-dd-item-text">
                       <span className="tb-dd-item-name">Modülleri Yükle</span>
                       <span className="tb-dd-item-hint">
-                        {props.codeTarget === 'berrybot'
+                        {props.codeTarget === 'robocytron'
+                          ? 'RoboCYTRON kütüphanesi (robocytron.py) — bir kez yeter'
+                          : props.codeTarget === 'berrybot'
                           ? 'RoboPANZER kütüphanesi + bootloader — bir kez yeter'
                           : 'RoboExx kütüphanesini karta yaz — bir kez yeter'}
                       </span>

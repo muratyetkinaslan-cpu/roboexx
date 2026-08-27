@@ -10,7 +10,13 @@
  *  6. UF2'yi sürücüye yaz → Pico otomatik resetlenir
  */
 
-export type BoardId = 'RPI_PICO' | 'RPI_PICO_W' | 'RPI_PICO2' | 'RPI_PICO2_W';
+/** micropython.org'da UF2 yayınlanan kart kimlikleri. */
+export type FirmwareBoardId = 'RPI_PICO' | 'RPI_PICO_W' | 'RPI_PICO2' | 'RPI_PICO2_W';
+
+/** Listede gösterilen kart kimlikleri. Bazı kartların kendi UF2'si yoktur
+ *  (ör. Cytron Maker Pi RP2040 birebir Pico donanımıdır) — onlar
+ *  `firmwareId` ile başka bir kartın UF2'sini kullanır. */
+export type BoardId = FirmwareBoardId | 'MAKER_PI_RP2040';
 
 export interface BoardOption {
   id: BoardId;
@@ -20,6 +26,13 @@ export interface BoardOption {
   chip: 'RP2040' | 'RP2350';
   volumeName: string;        // BOOTSEL modunda görünen sürücü adı
   description: string;
+  /** Hangi kartın UF2'si indirilecek. Belirtilmezse `id` kullanılır. */
+  firmwareId?: FirmwareBoardId;
+}
+
+/** Bir kartın firmware listesi/indirme anahtarı. */
+export function firmwareKey(board: BoardOption): FirmwareBoardId {
+  return board.firmwareId ?? (board.id as FirmwareBoardId);
 }
 
 export const BOARDS: BoardOption[] = [
@@ -49,6 +62,16 @@ export const BOARDS: BoardOption[] = [
     chip: 'RP2350',
     volumeName: 'RP2350',
     description: 'Yeni nesil çip, daha hızlı — kablosuz yok',
+  },
+  {
+    id: 'MAKER_PI_RP2040',
+    name: 'Cytron Maker Pi RP2040',
+    shortName: 'Maker Pi RP2040',
+    hasWifi: false,
+    chip: 'RP2040',
+    volumeName: 'RPI-RP2',
+    description: 'RoboCYTRON kartı — Pico UF2 kullanır (fabrika CircuitPython\'unun üzerine yazılır)',
+    firmwareId: 'RPI_PICO',
   },
   {
     id: 'RPI_PICO2_W',
@@ -102,7 +125,7 @@ export async function fetchFirmwareList(): Promise<FirmwareList> {
 
 /** UF2'yi indir — progress callback ile */
 export async function downloadFirmware(
-  boardId: BoardId,
+  boardId: FirmwareBoardId,
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<{ buffer: ArrayBuffer; filename: string; version: string }> {
   const url = getServerBaseUrl() + '/firmware/download/' + boardId;

@@ -10,6 +10,7 @@
  * style'larını paylaşır — tema paletinden gelir.
  */
 import { berrybotToolboxCategory } from './berrybot-blocks';
+import { robocytronToolboxCategory } from './robocytron-blocks';
 
 export const toolboxXml = `
 <xml id="roboexx-toolbox" style="display: none">
@@ -122,6 +123,10 @@ export const toolboxXml = `
   <sep></sep>
 
 ${berrybotToolboxCategory}
+
+  <sep></sep>
+
+${robocytronToolboxCategory}
 
   <sep></sep>
 

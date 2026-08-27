@@ -421,7 +421,7 @@ export default function App() {
   useEffect(() => arduinoLiveLink.onStateChange((st) => setArduinoLiveOpen(st === 'open')), []);
   const [codeTarget, setCodeTarget] = useState<CodeTarget>(() => {
     const saved = localStorage.getItem('roboexx.code-target');
-    if (saved === 'arduino' || saved === 'berrybot') return saved;
+    if (saved === 'arduino' || saved === 'berrybot' || saved === 'robocytron') return saved;
     return 'micropython';
   });
 
@@ -1520,9 +1520,72 @@ export default function App() {
     }
   };
 
+  /**
+   * 🤖 RoboCYTRON modüllerini yükler (Cytron Maker Pi RP2040):
+   *  - robocytron.py (kart donanım kütüphanesi — motor/servo/RGB/buzzer/buton)
+   *  - roboexx.py    (genel bloklar: pin, zaman, OLED, NeoPixel… — üretilen
+   *                   kodun başındaki `from roboexx import *` bunu ister)
+   *  - songs.py      (hazır melodiler — "Müzik" blokları için)
+   *  - pca9685.py    (harici I2C servo sürücü — "Servo v3" blokları için)
+   *
+   * Kartta BLE modülü yok; bootloader yazılmaz. Blok kodu her "Yükle"de
+   * user_code.py'ye gider, main.py çalıştırıcısını köprü kendisi kurar.
+   */
+  const runUploadRoboCytronLibrary = async () => {
+    addLine('system', '🤖 RoboCYTRON modülleri indiriliyor…');
+    const files: { name: string; code: string }[] = [];
+    try {
+      const names = ['robocytron.py', 'roboexx.py', 'songs.py', 'pca9685.py'];
+      const results = await Promise.all(
+        names.map((n) => fetch(`${import.meta.env.BASE_URL}lib/${n}`)),
+      );
+      for (let i = 0; i < names.length; i++) {
+        if (!results[i].ok) throw new Error(`${names[i]} HTTP ${results[i].status}`);
+        files.push({ name: names[i], code: await results[i].text() });
+      }
+    } catch (e) {
+      addLine('error', `Kütüphane dosyası okunamadı: ${(e as Error).message}`);
+      return;
+    }
+
+    // Her dosya toplam ilerlemenin eşit bir dilimini kaplar
+    const slice = 100 / files.length;
+    for (let i = 0; i < files.length; i++) {
+      const { name, code } = files[i];
+      const base = slice * i;
+      addLine('system', `⬆ ${name} yükleniyor (${code.length} bayt)`);
+      setUploadProgress({ phase: 'uploading', pct: base, bytesSent: 0, bytesTotal: code.length, speedKBs: 0 });
+      try {
+        await activeBridge.uploadLibrary(name, code, (p) => {
+          setUploadProgress({
+            phase: 'uploading',
+            pct: base + p.pct * (slice / 100),
+            bytesSent: p.bytesSent,
+            bytesTotal: p.bytesTotal,
+            speedKBs: p.speedKBs,
+          });
+        });
+        addLine('system', `✓ ${name} yüklendi`);
+      } catch (e) {
+        const err = e as Error;
+        setUploadProgress((prev) => prev ? { ...prev, phase: 'error', error: err.message } : null);
+        addLine('error', `${name} yükleme hatası: ${err.message}`);
+        return;
+      }
+    }
+
+    setUploadProgress((prev) => prev ? { ...prev, phase: 'success', pct: 100 } : null);
+    addLine('system', '✓ RoboCYTRON modülleri hazır — artık blok kodu yükleyebilirsin');
+    addLine('info', 'Ses çıkmıyorsa kartın yan tarafındaki buzzer anahtarını AÇIK konuma al');
+  };
+
   const runUploadLibrary = async () => {
     if (codeTarget === 'berrybot') {
       await runUploadBerryBotLibrary();
+      return;
+    }
+    if (codeTarget === 'robocytron') {
+      await runUploadRoboCytronLibrary();
       return;
     }
     addLine('system', `📚 RoboExx modülleri indiriliyor…`);
@@ -1942,12 +2005,12 @@ export default function App() {
                   <button
                     className="preview-show-btn"
                     onClick={() => setPreviewOpen(true)}
-                    title={`${codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER MicroPython' : 'MicroPython'} kod önizlemesini göster`}
+                    title={`${codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER MicroPython' : codeTarget === 'robocytron' ? 'RoboCYTRON MicroPython' : 'MicroPython'} kod önizlemesini göster`}
                   >
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                       <path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <span>{codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER 🪖' : 'MicroPython'}</span>
+                    <span>{codeTarget === 'arduino' ? 'Arduino' : codeTarget === 'berrybot' ? 'RoboPANZER 🪖' : codeTarget === 'robocytron' ? 'RoboCYTRON 🤖' : 'MicroPython'}</span>
                   </button>
                 )}
               </div>
@@ -1961,7 +2024,7 @@ export default function App() {
                 <div className="code-editor-header">
                   <span className="code-editor-title">
                     <span className="dot-indicator" />
-                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : codeTarget === 'berrybot' ? 'RoboPANZER · user_code.py' : 'MicroPython · main.py'}
+                    {codeTarget === 'arduino' ? 'Arduino · sketch.ino' : codeTarget === 'berrybot' ? 'RoboPANZER · user_code.py' : codeTarget === 'robocytron' ? 'RoboCYTRON · user_code.py' : 'MicroPython · main.py'}
                     {codeWasEdited && <span className="edited-badge">düzenlendi</span>}
                   </span>
                   <span className="code-editor-hint">
