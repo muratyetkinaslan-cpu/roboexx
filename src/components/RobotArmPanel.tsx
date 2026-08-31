@@ -19,11 +19,13 @@ import { calistir as vmCalistir, bloklariAc, type CalismaAlani } from '../robota
 import { gorevKontrol, type KontrolSonucu } from '../robotarm/checker';
 import { bulgulariIsaretle, isaretleriTemizle, blogaGit, calisanBlok } from '../robotarm/block-marks';
 import { type Gorev } from '../robotarm/tasks';
-import { TaskPanel } from './TaskPanel';
-import { HardwareStrip } from './HardwareStrip';
+import { ManualBench } from './ManualBench';
 
 /** App'in serial telemetrisini panele iletmesi için imperative handle. */
 export interface RobotArmHandle {
+  /** Kodlu modda programı çalıştır (blok sütunundaki düğme çağırır). */
+  runBlocks: () => void;
+  stopBlocks: () => void;
   /** Firmware'den gelen servo telemetrisi: gerçek→sim yansıtma. */
   applyServoTelemetry(code: number, id: number, angle: number): void;
 }
@@ -37,6 +39,12 @@ interface Props {
   /** Çalışma modu — App yönetir (blok sütunu buna göre gösterilir). */
   mode: ArmMode;
   onModeChange: (m: ArmMode) => void;
+  /** Kodlu modda kontrol edilecek görev — App seçer, panel çalıştırır. */
+  gorev: Gorev | null;
+  /** Kontrol bitince App'e bildir (rapor blok tarafında gösterilir). */
+  onKontrolSonucu: (s: KontrolSonucu | null) => void;
+  onKontrolBasladi: () => void;
+  onCalisiyorDegisti: (c: boolean) => void;
   /** Tek/çok satırlık MicroPython'u REPL'e gönder (App uygular). */
   onSendCode: (code: string) => void;
   /** Tam ekran mı? */
@@ -58,7 +66,8 @@ const ID_MIN: Record<ServoKind, number> = { normal: 0, driver: 1, pca: 0 };
 const SIM_URL = '/robot/arm-sim.html';
 
 export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArmPanel(
-  { connected, mode, onModeChange, onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
+  { connected, mode, onModeChange, gorev, onKontrolSonucu, onKontrolBasladi,
+    onCalisiyorDegisti, onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
 ) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [cfg, setCfg] = useState<ArmConfig>(() => loadArmConfig());
@@ -89,11 +98,12 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [simRunning, setSimRunning] = useState(false);
   const [simRunErr, setSimRunErr] = useState<string | null>(null);
 
-  // ── GÖREV SEÇİMİ + OTOMATİK KONTROL (kodlu mod) ──────────────────
-  const [gorev, setGorev] = useState<Gorev | null>(null);
-  const [kontrol, setKontrol] = useState<KontrolSonucu | null>(null);
-  const [kontrolEdiliyor, setKontrolEdiliyor] = useState(false);
+  /** Kodsuz modda kaydırıcıların gösterdiği açılar. */
+  const [manualAngles, setManualAngles] = useState<number[]>([90, 90, 90, 40]);
+
+  // Görev App'te tutulur (rapor blok sütununda gösteriliyor).
   const gorevRef = useRef<Gorev | null>(null); gorevRef.current = gorev;
+  useEffect(() => { onCalisiyorDegisti(simRunning); }, [simRunning, onCalisiyorDegisti]);
   const [simLog, setSimLog] = useState<string[]>([]);
   const simLogRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -315,7 +325,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const runBlocks = () => {
     if (simRunning) return;
     setSimRunErr(null);
-    setKontrol(null);
+    onKontrolSonucu(null);
 
     const ws = Blockly.getMainWorkspace() as Blockly.WorkspaceSvg | null;
     if (!ws) { setSimRunErr('Blok çalışma alanı bulunamadı.'); return; }
@@ -342,10 +352,10 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     // (1)+(2) Kontrol arka planda anında koşar, sonucu bloklara işlenir.
     const hedefGorev = gorevRef.current;
     if (hedefGorev) {
-      setKontrolEdiliyor(true);
+      onKontrolBasladi();
       gorevKontrol(alan, hedefGorev.anahtar)
         .then((sonuc) => {
-          setKontrol(sonuc);
+          onKontrolSonucu(sonuc);
           const n = bulgulariIsaretle(ws, sonuc.bulgular);
           setSimLog((l) => [...l,
             sonuc.puan >= 90
@@ -353,8 +363,10 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               : `◐ Görev kontrolü: ${sonuc.puan}/100 · ${n} blok işaretlendi`,
           ]);
         })
-        .catch((e: Error) => setSimLog((l) => [...l, 'Kontrol yapılamadı: ' + e.message]))
-        .finally(() => setKontrolEdiliyor(false));
+        .catch((e: Error) => {
+          onKontrolSonucu(null);
+          setSimLog((l) => [...l, 'Kontrol yapılamadı: ' + e.message]);
+        });
     }
 
     // (3) Canlı simülasyon — servo pinleri panel ayarından da eşlenir.
@@ -449,6 +461,8 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
   // App → bu panel: gerçek servo telemetrisi → sim yansıtma
   useImperativeHandle(ref, () => ({
+    runBlocks: () => runBlocks(),
+    stopBlocks: () => stopBlocks(),
     applyServoTelemetry(code: number, id: number, angle: number) {
       const joint = jointForServo(cfgRef.current, code, id);
       if (joint < 0) return;
@@ -619,19 +633,11 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           Ekran ikiye bölük: bloklar App tarafında solda, burası sağ yarı.
           Üstte görev seçici + Çalıştır, ortada simülasyon, altta donanım. */}
       {mode === 'kodlu' ? (
+        /* ══ KODLU MOD ═════════════════════════════════════════════
+           Bu yarı sadece SİMÜLASYON gösterir. Görev metni, Çalıştır
+           düğmesi ve hata raporu blok sütununda (ArmTaskBar) durur —
+           çocuk hatayı okurken gözünü bloklardan ayırmasın diye. */
         <div className="robotarm-body ra-kodlu">
-          <TaskPanel
-            seciliId={gorev?.id ?? 0}
-            onGorevSec={(g) => { setGorev(g); setKontrol(null); isaretleriTemizle(Blockly.getMainWorkspace()); }}
-            calisiyor={simRunning}
-            onCalistir={runBlocks}
-            onDurdur={stopBlocks}
-            sonuc={kontrol}
-            kontrolEdiliyor={kontrolEdiliyor}
-            onBlogaGit={(bid) => blogaGit(Blockly.getMainWorkspace(), bid)}
-            hazirMi={simReady}
-          />
-
           <div className="robotarm-stage ra-kodlu-stage">
             <iframe
               ref={iframeRef}
@@ -640,8 +646,6 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               className="robotarm-iframe"
             />
           </div>
-
-          <HardwareStrip gerekli={gerekliGirisler} />
 
           {simRunErr && <p className="ra-warn ra-kodlu-err">{simRunErr}</p>}
 
@@ -652,9 +656,10 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       ) : (
 
       /* ══ KODSUZ MOD ═════════════════════════════════════════════
-         Eski tam panel: kaydırıcılar, Tıkla-Git, nokta tekrarı,
-         küp alma, eklem eşlemesi, gripper — kod yazmadan keşif. */
-      <div className="robotarm-body">
+         Kod yok. Sadece robot kol ve üstündeki parçalar: dört eklem,
+         RGB LED, buzzer, röle. Kalibrasyon/pin eşlemesi/nokta tekrarı
+         gibi ayarlar burada YOK — çocuk parçaları tanısın diye. */
+      <div className="robotarm-body ra-kodsuz">
         <div className="robotarm-stage">
           <iframe
             ref={iframeRef}
@@ -664,320 +669,27 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           />
         </div>
 
-        <aside className="robotarm-config">
+        <aside className="robotarm-config ra-kodsuz-yan">
           <div className="robotarm-config-scroll">
-            {/* KART & SİMÜLASYONDA ÇALIŞTIR */}
-            <div className="ra-section">
-              <h4 className="ra-h">Kart &amp; Çalıştır</h4>
-              <label className="ra-field">
-                <span>Kontrol kartı</span>
-                <select
-                  value={board}
-                  onChange={(e) => setCfg((c) => ({ ...c, board: e.target.value as 'pico' | 'arduino' }))}
-                >
-                  <option value="pico">Pico W (USB · MicroPython)</option>
-                  <option value="arduino">Arduino Uno / Nano (canlı sketch)</option>
-                </select>
-              </label>
-
-              <div className="ra-row">
-                {simRunning ? (
-                  <button className="btn btn-danger" onClick={stopBlocks} style={{ flex: 1 }}>
-                    ■ Durdur
-                  </button>
-                ) : (
-                  <button className="btn btn-primary" onClick={runBlocks} style={{ flex: 1 }}>
-                    ▶ Simülasyonda çalıştır
-                  </button>
-                )}
-              </div>
-              {simRunErr && <p className="ra-warn">{simRunErr}</p>}
-              {simLog.length > 0 && (
-                <pre ref={simLogRef} className="ra-simlog">{simLog.join('\n')}</pre>
-              )}
-              <p className="ra-hint">
-                Bloklardaki 🦾 kol hareketleri <b>kart olmadan</b> simülasyonda oynar.
-                {board === 'pico'
-                  ? ' Pico bağlıysa gerçek kol da aynı anda hareket eder.'
-                  : ' Arduino canlı bağlantısı açıksa gerçek kol da aynı anda hareket eder.'}
-                {' '}Eğitim için: 🎓 Eğitmen Kütüphanesi → RoboArm Kiti → <b>20 görev</b>.
-              </p>
-
-              {board === 'arduino' && (
-                <>
-                  <div className="ra-live-row">
-                    <span className={`robotarm-dot ${armLive ? 'ok' : ''}`} />
-                    <span>Arduino canlı bağlantı: <b>{armLive ? 'açık' : 'kapalı'}</b></span>
-                  </div>
-                  <button className="btn btn-secondary" onClick={() => setArmUpOpen(true)}>
-                    ⬆ Kol kontrol sketch'ini yükle (gerekli)
-                  </button>
-                  {armHasNonNormalJoints(cfg) && (
-                    <p className="ra-warn">
-                      Sürücü/PCA9685 tipli eklemler Arduino canlı kontrolde desteklenmez —
-                      bu eklemler varsayılan pine (3/5/6/9) düşer. Tip: "Normal servo" seç.
-                    </p>
-                  )}
-                  <p className="ra-hint">
-                    <b>Kurulum (bir kez):</b> ① Aşağıdaki "Eklemler"den servo pinlerini gir
-                    (Uno/Nano önerisi: 3·5·6·9). ② <b>Sketch'i yükle</b>'ye bas — derlenip karta
-                    yazılır, bağlantı otomatik açılır. ③ Artık kaydırıcı, Tıkla-Git ve
-                    "Simülasyonda çalıştır" gerçek kolu da sürer. Pin değiştirirsen sketch'i
-                    yeniden yükle. (Blok programını kalıcı yazmak için üstteki
-                    <b> Arduino'ya Yükle</b> ayrıdır.)
-                  </p>
-                </>
-              )}
-            </div>
-
-            <div className="ra-section">
-              <div className="ra-actions">
-                <button className={`btn btn-secondary ra-goto ${gotoOn ? 'is-on' : ''}`} onClick={toggleGoto}>
-                  {gotoOn ? '● Tıkla-Git açık' : 'Tıkla-Git (IK)'}
-                </button>
-                <button className="btn btn-ghost" onClick={homeAll} title="Sim + gerçek kolu 90°'ye getir">
-                  Tümü 90° (kalibrasyon)
-                </button>
-              </div>
-              <p className="ra-hint">
-                {gotoOn
-                  ? 'Sahnede zemine tıkla — kol oraya gider; bağlıysa gerçek kol da gider.'
-                  : 'Simülasyonu 90°, fiziksel kolu da 90° yap; sonra birlikte çalışırlar.'}
-                {lastReach !== null && <> · son hedef sapma: <b>{lastReach} cm</b></>}
-              </p>
-              {board === 'pico' && !connected && (
-                <p className="ra-warn">Pico bağlı değil — komutlar yalnızca simülasyonda çalışır.</p>
-              )}
-              {board === 'arduino' && !armLive && (
-                <p className="ra-warn">Arduino canlı bağlantı kapalı — üstteki bölümden sketch'i yükle.</p>
-              )}
-              {board === 'pico' && connected && !bootDone && (
-                <button className="btn btn-ghost ra-boot" onClick={ensureBoot}>Modülleri hazırla (import)</button>
-              )}
-            </div>
-
-            <div className="ra-section">
-              <h4 className="ra-h">Nokta tekrarı (pick &amp; place)</h4>
-              <div className="ra-actions">
-                <button
-                  className={`btn btn-secondary ${pointModeOn ? 'is-on ra-goto' : ''}`}
-                  onClick={togglePointMode}
-                  disabled={repeating}
-                >
-                  {pointModeOn ? `● Nokta ekle açık (${pointCount})` : 'Nokta ekle'}
-                </button>
-                <div className="ra-row">
-                  <button
-                    className={`btn ${repeating ? 'btn-danger' : 'btn-primary'}`}
-                    onClick={toggleRepeat}
-                    disabled={pointCount < 2}
-                    style={{ flex: 1 }}
-                  >
-                    {repeating ? '■ Durdur' : `▶ Tekrarla (${pointCount} nokta)`}
-                  </button>
-                  <button className="btn btn-ghost" onClick={clearPoints} disabled={repeating}>Temizle</button>
-                </div>
-                <label className="ra-field ra-field-inline">
-                  <span>Bekleme (ms)</span>
-                  <input
-                    type="number" min={0} max={5000} step={50} value={dwell}
-                    onChange={(e) => setDwell(Math.max(0, +e.target.value))}
-                    disabled={repeating}
-                  />
-                </label>
-              </div>
-              <p className="ra-hint">
-                <b>Nokta ekle</b>'yi aç, sahnede zemine sırayla tıklayarak 2+ hedef nokta koy.
-                Sonra <b>Tekrarla</b> ile kol noktalar arasında döngüye girer; bağlıysa gerçek kol da
-                aynı sırayı tekrarlar.
-              </p>
-            </div>
-
-            <div className="ra-section">
-              <h4 className="ra-h">Küp alma</h4>
-              <div className="ra-row">
-                <label className="ra-field">
-                  <span>Küp kenarı (cm)</span>
-                  <input
-                    type="number" min={0.5} max={15} step={0.5}
-                    value={cfg.pick.cubeCm}
-                    onChange={(e) => setCubeCm(Math.max(0.5, +e.target.value || 3))}
-                  />
-                </label>
-                <label className="ra-field">
-                  <span>Hedef yükseklik (cm)</span>
-                  <input
-                    type="number" min={0} max={40} step={0.5}
-                    value={cfg.pick.heightCm}
-                    onChange={(e) => setHeightCm(Math.max(0, +e.target.value || 0))}
-                  />
-                </label>
-              </div>
-              <label className="ra-grip-slider">
-                <span>Yükseklik</span>
-                <input
-                  type="range" min={0} max={40} step={0.5}
-                  value={cfg.pick.heightCm}
-                  onChange={(e) => setHeightCm(+e.target.value)}
-                />
-                <b>{cfg.pick.heightCm.toFixed(1)}</b>
-              </label>
-              <label className="ra-check">
-                <input
-                  type="checkbox"
-                  checked={cfg.pick.stance180}
-                  onChange={(e) => setStance180(e.target.checked)}
-                />
-                <span>Robot duruşunu 180° çevir (tüm kol)</span>
-              </label>
-
-              <div className="ra-actions">
-                <button
-                  className={`btn ${holding ? 'btn-danger' : 'btn-primary'}`}
-                  onClick={() => {
-                    if (holding) { postToSim({ type: 'rx:placeCancel' }); }
-                    else { postToSim({ type: 'rx:pickHold' }); }
-                  }}
-                >
-                  {holding ? '■ Tutmayı bırak (iptal)' : '✊ Küpü Al ve Tut'}
-                </button>
-              </div>
-              {holding && (
-                <p className="ra-hint" style={{ color: 'var(--rx-accent)' }}>
-                  Küp tutuluyor. <b>Bırakmak için simülasyonda hedef noktaya tıkla</b> — kol oraya gider,
-                  küpü bırakır (gerçek kol da aynısını yapar).
-                </p>
-              )}
-              <p className="ra-hint">
-                <b>Hedef yükseklik</b> ile "Tıkla-Git" artık zemine değil, <b>havada</b> o yükseklikteki
-                noktaya gider — Z/yükseklikte istediğin yere taşı. Küp kenarını gerçek küpüne göre gir.
-              </p>
-              {pickReport && (
-                <div className="ra-pick-report">
-                  <div>Hedef: <b>{pickReport.target.x}, {pickReport.target.y}, {pickReport.target.z}</b> cm</div>
-                  <div>Ulaşılan: <b>{pickReport.reached.x}, {pickReport.reached.y}, {pickReport.reached.z}</b> cm</div>
-                  <div className={pickReport.err > 2.5 ? 'ra-pick-bad' : 'ra-pick-ok'}>
-                    Sapma: <b>{pickReport.err} cm</b>{pickReport.err > 2.5 ? ' — erişemiyor, Z/yükseklik ayarla' : ''}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="ra-section">
-              <h4 className="ra-h">Eklem → Servo eşlemesi & kalibrasyon</h4>
-              {cfg.joints.map((j, i) => (
-                <div className="ra-joint" key={i}>
-                  <div className="ra-joint-label">{j.label}</div>
-                  <div className="ra-joint-grid">
-                    <label className="ra-field">
-                      <span>Tip</span>
-                      <select
-                        value={j.kind}
-                        onChange={(e) => updateJoint(i, { kind: e.target.value as ServoKind })}
-                      >
-                        <option value="normal">{KIND_LABELS.normal}</option>
-                        <option value="driver">{KIND_LABELS.driver}</option>
-                        <option value="pca">{KIND_LABELS.pca}</option>
-                      </select>
-                    </label>
-                    <label className="ra-field ra-field-narrow">
-                      <span>{ID_LABEL[j.kind]}</span>
-                      <input
-                        type="number"
-                        min={ID_MIN[j.kind]}
-                        max={ID_MAX[j.kind]}
-                        value={j.id}
-                        onChange={(e) => updateJoint(i, { id: +e.target.value })}
-                      />
-                    </label>
-                    <label className="ra-field ra-field-narrow">
-                      <span>Ofset°</span>
-                      <input
-                        type="number"
-                        min={-90}
-                        max={90}
-                        value={j.offset}
-                        onChange={(e) => updateJoint(i, { offset: +e.target.value })}
-                      />
-                    </label>
-                    <label className="ra-field ra-field-check">
-                      <input
-                        type="checkbox"
-                        checked={j.invert}
-                        onChange={(e) => updateJoint(i, { invert: e.target.checked })}
-                      />
-                      <span>Ters</span>
-                    </label>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {usesPca && (
-              <div className="ra-section">
-                <h4 className="ra-h">PCA9685 I2C</h4>
-                <div className="ra-joint-grid">
-                  <label className="ra-field ra-field-narrow">
-                    <span>SDA</span>
-                    <input type="number" min={0} max={28} value={cfg.pca.sda}
-                      onChange={(e) => setCfg((c) => ({ ...c, pca: { ...c.pca, sda: +e.target.value } }))} />
-                  </label>
-                  <label className="ra-field ra-field-narrow">
-                    <span>SCL</span>
-                    <input type="number" min={0} max={28} value={cfg.pca.scl}
-                      onChange={(e) => setCfg((c) => ({ ...c, pca: { ...c.pca, scl: +e.target.value } }))} />
-                  </label>
-                  <label className="ra-field ra-field-narrow">
-                    <span>Adres 0x</span>
-                    <input type="text" value={cfg.pca.addr.toString(16).toUpperCase()}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value || '40', 16);
-                        if (!Number.isNaN(v)) setCfg((c) => ({ ...c, pca: { ...c.pca, addr: v } }));
-                      }} />
-                  </label>
-                </div>
-                <p className="ra-hint">PCA tipi eklemler için bir kez init edilir.</p>
-              </div>
-            )}
-
-            <div className="ra-section">
-              <h4 className="ra-h">Aparatı çevir (gripper'a dokunmaz)</h4>
-              <p className="ra-hint">
-                Çevrilecek <b>aparatı</b> aşağıdan seç (üzerine gelince simülasyonda parlar),
-                sonra <b>180°</b> ile yerinde ters çevir. Sadece seçili parça döner; gripper ve
-                diğer parçalar yerinde kalır.
-              </p>
-
-              <div className="ra-grip-flips">
-                <span>180° çevir:</span>
-                <button className="btn btn-ghost" onClick={() => flip(0)}>X</button>
-                <button className="btn btn-ghost" onClick={() => flip(1)}>Y</button>
-                <button className="btn btn-ghost" onClick={() => flip(2)}>Z</button>
-                <button className="btn btn-ghost ra-grip-reset" onClick={resetGripper}>Sıfırla</button>
-              </div>
-
-              <div className="ra-parts">
-                {partsList.length === 0 && <span className="ra-hint">Parçalar yükleniyor…</span>}
-                {partsList
-                  .filter((p) => p.group !== 'grip')
-                  .map((p) => {
-                    const on = cfg.gripper.parts.includes(p.name);
-                    return (
-                      <label
-                        key={p.name}
-                        className={`ra-part ${on ? 'is-on' : ''}`}
-                        onMouseEnter={() => hl(p.name)}
-                        onMouseLeave={() => hl(null)}
-                      >
-                        <input type="checkbox" checked={on} onChange={() => toggleGripPart(p.name)} />
-                        <span className="ra-part-sw" style={{ background: '#' + p.color.toString(16).padStart(6, '0') }} />
-                        <span className="ra-part-name">{p.name}</span>
-                        <span className="ra-part-grp">{p.group}</span>
-                      </label>
-                    );
-                  })}
-              </div>
-            </div>
+            <ManualBench
+              aciler={manualAngles}
+              onEklem={(eklem, aci) => {
+                setManualAngles((a) => { const y = [...a]; y[eklem] = aci; return y; });
+                anglesRef.current[eklem] = aci;
+                postToSim({ type: 'rx:setJoint', joint: eklem, angle: Math.round(aci) });
+                hwJointRef.current(eklem, Math.round(aci));
+              }}
+              onHome={() => {
+                const ev = [90, 90, 90, 40];
+                setManualAngles(ev);
+                ev.forEach((v, j) => {
+                  anglesRef.current[j] = v;
+                  postToSim({ type: 'rx:setJoint', joint: j, angle: v });
+                  hwJointRef.current(j, v);
+                });
+                bench.sifirla();
+              }}
+            />
           </div>
         </aside>
       </div>

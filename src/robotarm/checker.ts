@@ -26,11 +26,16 @@ export type Onem = 'hata' | 'uyari' | 'ipucu' | 'iyi';
 export interface Bulgu {
   onem: Onem;
   kod: string;
+  /** Çocuğun anlayacağı kısa başlık. */
   baslik: string;
-  /** Öğrenciye gösterilen açıklama — ne yanlış, neden önemli. */
+  /** Ne olduğu — teknik değil, gündelik dille. */
   aciklama: string;
-  /** Somut düzeltme adımı. */
+  /** 1. kademe: yönlendiren soru. Cevabı vermez, düşündürür. */
+  ipucu?: string;
+  /** 2. kademe: somut düzeltme adımı. */
   cozum: string;
+  /** 3. kademe: doğrudan cevap — hangi blok, hangi değer. */
+  cevap?: string;
   /** Varsa: hatayı üreten bloğun id'si. Panel bu bloğu işaretler. */
   bid?: string;
 }
@@ -138,8 +143,10 @@ export async function gorevKontrol(
   anahtar: CalismaAlani,
 ): Promise<KontrolSonucu> {
   const bulgular: Bulgu[] = [];
-  const ekle = (onem: Onem, kod: string, baslik: string, aciklama: string, cozum: string, bid?: string) =>
-    bulgular.push({ onem, kod, baslik, aciklama, cozum, bid });
+  const ekle = (
+    onem: Onem, kod: string, baslik: string, aciklama: string,
+    cozum: string, bid?: string, ipucu?: string, cevap?: string,
+  ) => bulgular.push({ onem, kod, baslik, aciklama, cozum, bid, ipucu, cevap });
 
   const oBlok = bloklariAc(ogrenci);
   const aBlok = bloklariAc(anahtar);
@@ -148,9 +155,11 @@ export async function gorevKontrol(
     return {
       puan: 0, karar: 'bos',
       bulgular: [{
-        onem: 'hata', kod: 'BOS', baslik: 'Çalışma alanı boş',
-        aciklama: 'Hiç blok yok. Soldaki blok kutusundan blokları sürükleyerek programı yaz.',
-        cozum: 'Önce "Başlangıçta" bloğunu al, komutları içine tak.',
+        onem: 'hata', kod: 'BOS', baslik: 'Henüz hiç blok koymamışsın',
+        aciklama: 'Çalışma alanı boş. Yukarıdaki görev metnini oku, sonra soldaki renkli kutulardan blokları sürüklemeye başla.',
+        cozum: 'Önce 🔁 Akış kategorisinden "Başlangıçta" bloğunu al.',
+        ipucu: 'Her program "Başlangıçta" bloğuyla başlar. Onu bulup ekrana sürükle.',
+        cevap: '1) 🔁 Akış → "Başlangıçta" bloğunu sürükle.\n2) ⚙ Servo → "servo pin açı" bloğunu içine tak.\n3) ⏱ Zaman → "bekle" bloğunu altına ekle.',
       }],
       davranis: null, senaryolar: [], adimlar: [],
     };
@@ -162,10 +171,12 @@ export async function gorevKontrol(
       'Blokların "Başlangıçta" bloğunun İÇİNE takılı olması gerekir. Şu haliyle karta yüklense bile hiçbiri çalışmaz.',
       'Toolbox → Akış → "Başlangıçta" bloğunu al, bütün zinciri içine sürükle.');
   } else if (!baslangic.inputs?.DO?.block) {
-    ekle('hata', 'BOS_BASLANGIC', '"Başlangıçta" bloğunun içi boş',
-      'Bloklar çalışma alanında duruyor ama "Başlangıçta" bloğuna takılı değil. Boşta duran bloklar çalışmaz.',
-      'Blokları sürükleyip "Başlangıçta" bloğunun ağzına yapıştır — tık sesi gelmeli.',
-      baslangic.id);
+    ekle('hata', 'BOS_BASLANGIC', 'Blokların boşta duruyor',
+      'Bloklar ekranda var ama "Başlangıçta" bloğuna takılı değil. Takılı olmayan bloklar hiç çalışmaz.',
+      'Blokları sürükleyip "Başlangıçta" bloğunun içine yapıştır.',
+      baslangic.id,
+      'Bloklar lego gibi birbirine geçmeli. Seninkiler ayrı ayrı mı duruyor?',
+      'Blok yığınını tut, "Başlangıçta" bloğunun ağzına götür — tık diye geçtiğini göreceksin.');
   }
 
   /* ── 1. HER SENARYODA İKİ PROGRAMI DA KOŞTUR ── */
@@ -195,10 +206,12 @@ export async function gorevKontrol(
     const iyi = kosular.filter((k) => k.puan >= 85).map((k) => k.ad);
     const kotu = kosular.filter((k) => k.puan < 85).map((k) => k.ad);
     if (iyi.length && kotu.length) {
-      ekle('hata', 'ESIK', `Sensör eşiği yanlış — "${kotu.join(', ')}" durumunda bozuluyor`,
-        `Programın ${iyi.join(', ')} durumunda doğru çalışıyor ama ${kotu.join(', ')} durumunda cevap anahtarından farklı davranıyor. Koddaki karşılaştırma sayısı (eşik) yanlış. Tek bir mesafede denersen bu hatayı fark edemezsin.`,
-        'Görev metnindeki eşik değerini "eğer" bloğuna birebir yaz.',
-        oBlok.find((b) => b.type === 'logic_compare')?.id);
+      ekle('hata', 'ESIK', 'Karşılaştırma sayısı yanlış',
+        `Programın ${iyi.join(' ve ')} durumunda doğru çalışıyor ama ${kotu.join(' ve ')} durumunda yanlış davranıyor. "Eğer" bloğundaki sayı doğru değil. Tek bir mesafede denersen bu hatayı göremezsin — o yüzden simülasyon üç farklı mesafede denedi.`,
+        'Görev metnindeki sayıyı "eğer" bloğuna birebir yaz.',
+        oBlok.find((b) => b.type === 'logic_compare')?.id,
+        'Görev metninde bir sayı geçiyor (kaç santimden yakınsa...). Senin "eğer" bloğunda aynı sayı yazıyor mu?',
+        'Görev metnindeki eşik sayısını bul ve karşılaştırma bloğuna aynısını yaz.');
     }
   }
 
@@ -209,9 +222,12 @@ export async function gorevKontrol(
   }
 
   if (oc.length === 0 && ac.length > 0) {
-    ekle('hata', 'HAREKET_YOK', 'Kol hiç hareket etmiyor',
-      'Program çalışıyor ama tek bir servo, ses veya ışık komutu üretmiyor. Bloklar büyük ihtimalle boşta duruyor.',
-      'Komut bloklarının "Başlangıçta" zincirine takılı olduğundan emin ol.');
+    ekle('hata', 'HAREKET_YOK', 'Hiçbir şey olmuyor',
+      'Program çalıştı ama kol kıpırdamadı, ses çıkmadı, ışık yanmadı. Komut blokların ya boşta duruyor ya da hiç yok.',
+      'Komut bloklarını "Başlangıçta" bloğunun içine tak.',
+      undefined,
+      'Bloklarına bak: hepsi birbirine geçmiş mi, yoksa bazıları kenarda mı duruyor?',
+      'Önce "Başlangıçta" bloğunu koy, sonra servo bloklarını içine sürükle.');
   }
 
   /* ── 2. DAVRANIŞ FARKLARI ── */
@@ -223,17 +239,23 @@ export async function gorevKontrol(
     const a = x.anahtar, o = x.ogrenci;
     if (a.k === 'servo') {
       const fark = Math.abs((a.val ?? 0) - (o.val ?? 0));
-      ekle(fark > 10 ? 'uyari' : 'ipucu', 'ACI', `${EKLEM_AD[a.joint ?? 0]} açısı tutmuyor`,
-        `Bu adımda ${EKLEM_AD[a.joint ?? 0]} ${a.val}° olmalı, senin kodunda ${o.val}° yazıyor (${fark}° fark).`,
-        `Açıyı ${a.val} yap.`, o.bid);
+      ekle(fark > 10 ? 'uyari' : 'ipucu', 'ACI', `${EKLEM_AD[a.joint ?? 0]} açısı biraz kaymış`,
+        `Bu adımda ${EKLEM_AD[a.joint ?? 0].toLowerCase()} ${a.val}° olmalı, sende ${o.val}° yazıyor.`,
+        `Açıyı ${a.val} yap.`, o.bid,
+        'Görev metnindeki sayılarla blokların içindeki sayıları tek tek karşılaştır.',
+        `İşaretli bloktaki ${o.val} sayısını ${a.val} yap.`);
     } else if (a.k === 'tone') {
       ekle('uyari', 'FREKANS', 'Buzzer frekansı farklı',
         `Beklenen ${a.freq} Hz, senin kodunda ${o.freq} Hz.`,
         `Frekansı ${a.freq} yap.`, o.bid);
     } else if (a.k === 'rgb' && a.color !== o.color) {
-      ekle('uyari', 'RENK', 'Yanlış renk yanıyor',
-        `Bu adımda ${renkAdi(a.color)} yanmalı, senin kodun ${renkAdi(o.color)} yakıyor. RGB modülünde D9 kırmızı, D10 yeşil, D11 mavi bacağı sürer — pinlerden biri karışmış olabilir.`,
-        `${renkAdi(a.color)} için D9/D10/D11 durumlarını düzelt.`, o.bid);
+      const dogruPin = a.color === '#ff0000' ? 9 : a.color === '#00ff00' ? 10 : a.color === '#0000ff' ? 11 : 0;
+      ekle('uyari', 'RENK', `${renkAdi(a.color)} yanmalıydı, ${renkAdi(o.color)} yanıyor`,
+        'RGB LED\'in üç bacağı var ve her biri ayrı bir renk yakar. Bir pin karışmış görünüyor.',
+        `Bu adımda ${renkAdi(a.color)} yanmalı.`, o.bid,
+        'RGB LED bir ampul değil, üç ampul: kırmızı, yeşil, mavi. Hangi pinin hangi rengi yaktığını kodsuz simülasyondan deneyebilirsin.',
+        `🌈 D9 = kırmızı · D10 = yeşil · D11 = mavi\n\n` +
+        (dogruPin ? `${renkAdi(a.color)} için D${dogruPin} AÇIK, diğer ikisi kapalı olmalı.` : ''));
     }
   }
 
@@ -248,15 +270,20 @@ export async function gorevKontrol(
       if (b) { capa = b; break; }
     }
     const sonMu = ilkEksikIdx === adimlar.length - eksikler.length;
+    const ilkEksik = eksikler[0].anahtar!;
     ekle(eksikler.length > ac.length * 0.35 ? 'hata' : 'uyari', 'EKSIK',
-      `${eksikler.length} adım eksik`,
-      `Görevin beklediği şu hareketler programında yok:\n${ornek}` +
-      (eksikler.length > 4 ? `\n… ve ${eksikler.length - 4} adım daha.` : '') +
-      (capa ? `\n\nİşaretlenen bloğun ${sonMu ? 'ARDINA' : 'ARDINA'} eklemen gerekiyor.` : ''),
-      capa
-        ? 'İşaretli bloğun altına eksik komutları ekle.'
-        : 'Eksik komutları sıraya ekle — özellikle hareketin son adımını unutma.',
-      capa);
+      eksikler.length === 1 ? 'Bir adım eksik kalmış' : `${eksikler.length} adım eksik kalmış`,
+      `Görev şunları da yapmanı istiyor ama programında yoklar:\n${ornek}` +
+      (eksikler.length > 4 ? `\n…ve ${eksikler.length - 4} tane daha.` : ''),
+      capa ? 'İşaretli bloğun altına eksik komutları ekle.' : 'Eksik komutları sıraya ekle.',
+      capa,
+      'Görev metnini yukarıdan tekrar oku ve programınla adım adım karşılaştır. Hangi cümlenin karşılığı blokta yok?',
+      `İlk eksik adım şu: ${olayMetni(ilkEksik)}` +
+      (ilkEksik.k === 'servo'
+        ? `\n\nYani: "servo pin D${PIN_OF[ilkEksik.joint ?? 0]} açı ${ilkEksik.val}" bloğunu ekle.`
+        : ilkEksik.k === 'tone'
+          ? `\n\nYani: "buzzer ${ilkEksik.freq} Hz · ${ilkEksik.dur} ms" bloğunu ekle.`
+          : ''));
   }
   if (fazlalar.length > Math.max(2, ac.length * 0.4)) {
     ekle('ipucu', 'FAZLA', `${fazlalar.length} fazladan komut var`,
@@ -275,27 +302,41 @@ export async function gorevKontrol(
   /* ── 3. KAVRAM ── */
   const say = (l: BlokNode[], t: string) => l.filter((b) => b.type === t).length;
   const KAVRAMLAR = [
-    { tip: ['controls_repeat_ext', 'controls_repeat', 'controls_for'], ad: 'tekrar (döngü) bloğu',
-      neden: 'Aynı komutları kopyalayıp çoğaltmak yerine döngü kullanmak bu görevin ana kazanımı.' },
+    { tip: ['controls_repeat_ext', 'controls_repeat', 'controls_for'], ad: 'tekrar bloğu',
+      neden: 'Aynı komutları tek tek kopyalamışsın. Bu görev sana kısayolu öğretiyor: bir kez yaz, kaç kez tekrarlayacağını söyle.',
+      ipucu: 'Aynı hareketi 5 kez yapacaksan, blokları 5 kez kopyalamak yerine ne kullanabilirsin?',
+      cevap: '🔁 Akış kategorisinden "tekrarla" bloğunu al. Kopyaladığın blokların BİR TANESİNİ içine koy, kalanları sil, tekrar sayısını yaz.' },
     { tip: ['procedures_defnoreturn', 'procedures_defreturn'], ad: 'fonksiyon',
-      neden: 'Tekrar eden hareket grubunu fonksiyona almak görevin öğrettiği beceri.' },
+      neden: 'Aynı hareket grubunu programın birkaç yerinde tekrarlıyorsun. Fonksiyon, o gruba bir isim verip her yerde o ismi çağırmanı sağlar.',
+      ipucu: 'Bir hareket grubuna isim verebilseydin, sonra sadece ismini söyleyerek çağırabilirdin. Hangi kategoride?',
+      cevap: '🧩 Fonksiyonlar kategorisinden "bir şey yap" bloğunu al, adını yaz, tekrar eden blokları içine taşı. Sonra o adı istediğin yere sürükle.' },
     { tip: ['variables_set'], ad: 'değişken',
-      neden: 'Değeri tek yerden değiştirebilmek için değişken gerekiyor.' },
+      neden: 'Aynı sayıyı birçok blokta tekrar tekrar yazmışsın. Değişken, o sayıya bir isim verip tek yerden değiştirmeni sağlar.',
+      ipucu: 'Bir sayıyı 6 blokta kullanıyorsun. Sonra fikrini değiştirirsen 6 yeri de tek tek düzeltmen gerekir. Daha kolay yolu ne?',
+      cevap: '📦 Değişkenler kategorisinden yeni bir değişken oluştur, başlangıçta değerini ayarla, sonra sayı yerine değişkeni sürükle.' },
     { tip: ['controls_if'], ad: '"eğer" bloğu',
-      neden: 'Sensöre göre karar vermek için koşul bloğu gerekiyor.' },
+      neden: 'Bu görevde robot bir karar vermeli: sensör şunu söylerse şunu yap, demezse başka bir şey yap.',
+      ipucu: 'Robot mesafeyi ölçüyor. Peki ölçtüğü sayıya göre farklı davranmasını nasıl sağlarsın?',
+      cevap: '🔁 Akış kategorisinden "eğer ... ise" bloğunu al. Sensör bloğunu ve karşılaştırma bloğunu koşul yerine tak.' },
     { tip: ['math_constrain'], ad: '"sınırla" bloğu',
-      neden: 'Değişkenden gelen açıyı güvenli aralıkta tutar; kolu bozulmaktan korur.' },
+      neden: 'Açı bir değişkenden geliyor ve güvenli aralığın dışına çıkabilir. "Sınırla" bloğu kolu korur.',
+      ipucu: 'Değişkenin değeri yanlışlıkla 200 olursa ne olur? Bunu nasıl engellersin?',
+      cevap: '🔢 Matematik kategorisinden "sınırla" bloğunu al, değişkeni içine koy, alt sınır 30 üst sınır 150 yaz.' },
     { tip: ['rx_forever', 'controls_whileUntil'], ad: '"sürekli tekrarla" bloğu',
-      neden: 'Sensörü sürekli okumak için programın döngüde kalması gerekiyor.' },
+      neden: 'Sensör bir kez değil, sürekli okunmalı. Programın hiç durmadan dönmesi gerekiyor.',
+      ipucu: 'Program bir kez çalışıp bitiyor. Sensörü sürekli dinlemesini nasıl sağlarsın?',
+      cevap: '🔁 Akış kategorisinden "sürekli tekrarla" bloğunu al, sensör okuma ve karar bloklarını içine koy.' },
   ];
   for (const k of KAVRAMLAR) {
     const a = k.tip.reduce((s, t) => s + say(aBlok, t), 0);
     const o = k.tip.reduce((s, t) => s + say(oBlok, t), 0);
     if (a > 0 && o === 0) {
-      ekle('hata', 'KAVRAM', `${k.ad} kullanılmamış`,
-        `${k.neden} Cevap anahtarında ${a} tane var, senin programında hiç yok.`,
-        `Blok kutusundan ${k.ad} ekleyip ilgili komutları içine al.`,
-        baslangic?.id);
+      ekle('hata', 'KAVRAM', k.ad.charAt(0).toLocaleUpperCase('tr') + k.ad.slice(1) + ' kullanman gerekiyor',
+        k.neden,
+        `Blok kutusundan ${k.ad} al, tekrar eden komutları içine koy.`,
+        baslangic?.id,
+        k.ipucu,
+        k.cevap);
     }
   }
 
@@ -304,9 +345,11 @@ export async function gorevKontrol(
   if (aTekrar && oTekrar) {
     const an = tekrarSayisi(aTekrar), on = tekrarSayisi(oTekrar);
     if (an != null && on != null && an !== on) {
-      ekle('uyari', 'TEKRAR', 'Tekrar sayısı farklı',
-        `Görev ${an} kez tekrar istiyor, senin bloğunda ${on} yazıyor.`,
-        `Tekrar bloğundaki sayıyı ${an} yap.`, oTekrar.id);
+      ekle('uyari', 'TEKRAR', 'Tekrar sayısı yanlış',
+        `Görev hareketin ${an} kez tekrarlanmasını istiyor, senin tekrar bloğunda ${on} yazıyor.`,
+        `Tekrar bloğundaki sayıyı ${an} yap.`, oTekrar.id,
+        'Görev metnini oku: kaç kez git-gel yapması gerekiyor?',
+        `Sarı çerçeveli tekrar bloğundaki ${on} sayısını ${an} yap.`);
     }
   }
 
@@ -338,11 +381,11 @@ export async function gorevKontrol(
       : undefined;
 
     if (yanlisBlok) {
-      ekle('hata', 'PIN_KARISIK', `Yanlış servo pini — D${karisan} yazılmış, D${p} olmalı`,
-        `${eklemAd} eklemi D${p} pininde. Senin bloğunda D${karisan} yazıyor, yani ` +
-        `${EKLEM_AD[MUFREDAT_PIN_EKLEM[karisan!] ?? 0]} eklemini sürüyorsun. Kol görevdeki hareketi yapmıyor.\n\n` +
-        'Pin haritası: D4 taban · D5 omuz · D6 dirsek · D7 tutucu',
-        `İşaretli bloğun pin alanını ${p} yap.`, yanlisBlok.id);
+      ekle('hata', 'PIN_KARISIK', 'Yanlış parçayı oynatıyorsun',
+        `Bu görev ${eklemAd.toLowerCase()} eklemini oynatmanı istiyor. Ama senin bloğunda D${karisan} yazıyor — o pin ${EKLEM_AD[MUFREDAT_PIN_EKLEM[karisan!] ?? 0].toLowerCase()} eklemine bağlı. Kol yanlış yere kıpırdıyor.`,
+        `İşaretli bloğun pin numarasını ${p} yap.`, yanlisBlok.id,
+        'Her eklem kartta ayrı bir pine bağlı. Kodsuz simülasyonu açıp kaydırıcıları oynatırsan hangi pinin neyi kıpırdattığını görebilirsin.',
+        `🔌 Pin haritası: D4 taban · D5 omuz · D6 dirsek · D7 tutucu\n\nKırmızı çerçeveli bloktaki D${karisan} sayısını ${p} yap.`);
     } else {
       ekle('uyari', 'PIN_EKSIK', `${eklemAd} servosu (D${p}) hiç kullanılmamış`,
         `Görev ${eklemAd} eklemini de hareket ettirmeni istiyor ama D${p} pinine tek komut gitmiyor.`,
@@ -368,10 +411,12 @@ export async function gorevKontrol(
   if (guvensiz.length) {
     const g = guvensiz[0];
     const [lo, hi] = GUVENLI_ACI[g.joint ?? 0];
-    ekle('hata', 'GUVENLIK', 'Servo güvenli açı aralığının dışında',
-      `${EKLEM_AD[g.joint ?? 0]} servosuna ${g.ham ?? g.val}° yazılıyor. Güvenli aralık ${lo}-${hi}°. Gerçek kolda bu, dişliyi zorlar ve servoyu yakar.` +
-      (guvensiz.length > 1 ? ` (${guvensiz.length} komutta oluyor)` : ''),
-      `Açıyı ${lo}-${hi}° arasına çek ya da "sınırla" bloğuyla sar.`, g.bid);
+    ekle('hata', 'GUVENLIK', 'Bu açı kolu kırabilir',
+      `${EKLEM_AD[g.joint ?? 0]} eklemine ${g.ham ?? g.val}° yazmışsın. Bu eklem sadece ${lo}° ile ${hi}° arasında dönebilir. Daha fazlasını zorlarsan gerçek kolda dişliler takılır ve servo bozulur.` +
+      (guvensiz.length > 1 ? ` Bu ${guvensiz.length} yerde oluyor.` : ''),
+      `Açıyı ${lo} ile ${hi} arasında bir sayı yap.`, g.bid,
+      `Kolunu arkaya doğru ne kadar bükebilirsin? Robotun da bir sınırı var. Bu eklem için sınır ${lo}–${hi}°.`,
+      `Kırmızı çerçeveli bloktaki sayıyı ${g.joint === 3 ? (Number(g.ham ?? g.val) < lo ? lo + 10 : hi - 10) : (Number(g.ham ?? g.val) < lo ? lo : hi)} veya yakın bir değer yap.`);
   }
 
   /* ── 6. GÜVENLİK: bekleme ──
@@ -394,9 +439,12 @@ export async function gorevKontrol(
   const oZ = zincirBoyu(ok), aZ = zincirBoyu(ak);
 
   if (aBek.length > 0 && oBek.length === 0) {
-    ekle('hata', 'BEKLEME_YOK', 'Hiç bekleme bloğu yok',
-      `Cevap anahtarında ${aBek.length} bekleme var (toplam ${(aBekMs / 1000).toFixed(1)} sn), senin programında hiç yok. Servolar önceki hareketi bitiremeden yeni komut alır: simülasyonda son poz doğru görünür ama gerçek kol ara pozisyonları hiç yapmaz, titrer ve hedefe varmaz.`,
-      'Her servo komutundan sonra "bekle 1 sn" bloğu ekle.', oZ.bid);
+    ekle('hata', 'BEKLEME_YOK', 'Bekleme bloğu koymayı unutmuşsun',
+      'Robot kol bir yere gitmek için zamana ihtiyaç duyar. Sen ona "şuraya git" deyip hemen ardından "hayır, şuraya git" diyorsun. Kol yola çıkıyor ama varamadan yeni emir geliyor — sonuçta ara duraklara hiç uğramıyor.',
+      `Her servo bloğunun altına bir "bekle" bloğu koy. Bu görevde ${aBek.length} tane gerekiyor.`,
+      oZ.bid,
+      'Sen de yürürken "sağa git" desem, adım atmadan hemen "sola git" desem ne olurdu? Kola adım atacak zaman nasıl verirsin?',
+      `⏱ Zaman kategorisinden "bekle" bloğunu al. Her servo bloğunun ALTINA bir tane koy ve içine ${Math.round((aBekMs / Math.max(1, aBek.length)))} yaz (milisaniye).`);
   } else if (oZ.en >= 3 && oZ.en > aZ.en + 1) {
     ekle('uyari', 'BEKLEME_AZ', 'Servo komutları arasında bekleme eksik',
       `${oZ.en} servo komutu peş peşe, aralarında bekleme olmadan çalışıyor (cevap anahtarında en fazla ${aZ.en} tane). Kol bu hareketleri tek sıçramada birleştirir.`,

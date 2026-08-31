@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Blockly from 'blockly';
 import 'blockly/blocks';
 import { SimpleMultiselect } from '../blockly/multiselect';
-import { toolboxXml } from '../blockly/toolbox';
+import { toolboxXml, toolboxForTarget } from '../blockly/toolbox';
 import '../blockly/blocks';
 import '../blockly/berrybot-blocks';
 import { generateForTarget, type CodeTarget } from '../blockly/codegen';
@@ -37,6 +37,8 @@ interface Props {
 }
 
 export interface BlocklyWorkspaceHandle {
+  /** Blok işaretleme (hata çerçevesi) için ham workspace. */
+  getWorkspace: () => Blockly.WorkspaceSvg | null;
   saveState: () => object | null;
   loadState: (state: object) => void;
   /**
@@ -90,7 +92,7 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
       if (!divRef.current) return;
 
       const parser = new DOMParser();
-      const toolboxDoc = parser.parseFromString(toolboxXml, 'text/xml');
+      const toolboxDoc = parser.parseFromString(toolboxForTarget(targetRef.current), 'text/xml');
       const toolbox = toolboxDoc.documentElement;
 
       const ws = Blockly.inject(divRef.current, {
@@ -357,7 +359,24 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
       }
     }, [theme]);
 
+    /**
+     * Hedef kart değişince blok kutusunu yenile.
+     * MicroPython'a geçen öğrenci RoboPANZER/RoboCYTRON bloklarını
+     * görmemeli; RoboPANZER'deki öğrenci RoboCYTRON'u görmemeli.
+     */
+    useEffect(() => {
+      const ws = wsRef.current;
+      if (!ws) return;
+      try {
+        const doc = new DOMParser().parseFromString(toolboxForTarget(target), 'text/xml');
+        ws.updateToolbox(doc.documentElement);
+      } catch (e) {
+        console.warn('Toolbox hedefe göre yenilenemedi:', e);
+      }
+    }, [target]);
+
     useImperativeHandle(ref, () => ({
+      getWorkspace: () => wsRef.current,
       saveState: () => {
         const ws = wsRef.current;
         if (!ws) return null;
@@ -528,7 +547,7 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         try {
           if (enabled) {
             const parser = new DOMParser();
-            const doc = parser.parseFromString(toolboxXml, 'text/xml');
+            const doc = parser.parseFromString(toolboxForTarget(targetRef.current), 'text/xml');
             ws.updateToolbox(doc.documentElement);
           } else {
             ws.updateToolbox('<xml id="empty"></xml>');

@@ -1,6 +1,11 @@
 /**
  * 🦾 ROBOARM — 20 GÖREVLİK EĞİTİM SETİ
  *
+ * NOT: Bütün görevler NORMAL SERVO BLOKLARIYLA yazılmıştır
+ * (servo pin D4/D5/D6/D7 + bekle). Öğrencinin kendi görevlerinde
+ * kullandığı bloklarla birebir aynı — kütüphaneden açtığı örnek ile
+ * kendi yazacağı kod arasında fark yok.
+ *
  * Kiti satın alan kişinin sırayla çalışabileceği, kolaydan zora 20 görev.
  * Her görev "Ekrana Yükle" ile hazır blok programı olarak açılır; Robot Kol
  * panelindeki ▶ "Simülasyonda çalıştır" ile KART OLMADAN denenir, kart
@@ -26,8 +31,14 @@ type BlockNode = {
 const num = (n: number) => ({ shadow: { type: 'math_number', fields: { NUM: n } } });
 
 function chain(list: BlockNode[]): BlockNode {
+  // Kurucular çok bloklu zincir döndürebildiği için her öğenin SONUNA
+  // bağlanır; yoksa çok bloklu bir öğenin kuyruğu düşer.
   const copy = list.map((b) => ({ ...b }));
-  for (let i = copy.length - 2; i >= 0; i--) copy[i].next = { block: copy[i + 1] };
+  for (let i = 0; i < copy.length - 1; i++) {
+    let kuyruk = copy[i];
+    while (kuyruk.next) kuyruk = kuyruk.next.block;
+    kuyruk.next = { block: copy[i + 1] };
+  }
   return copy[0];
 }
 
@@ -71,33 +82,88 @@ const changeVar = (name: string, by: number): BlockNode => ({
   type: 'math_change', fields: { VAR: { id: varId(name) } }, inputs: { DELTA: num(by) },
 });
 
-// 🦾 kol blokları
+// ── 🦾 KOL HAREKETLERİ — normal servo bloklarıyla ────────────────────
+//
+// Eskiden bu görevler `rx_arm_*` (armGit / armEksen / armTut) bloklarını
+// kullanıyordu. Ama müfredatın 71 görevi ve gerçek Arduino kurulumu
+// DOĞRUDAN servo bloklarıyla çalışıyor:
+//
+//   D4 taban · D5 omuz · D6 dirsek · D7 tutucu
+//
+// Öğrenci kütüphaneden görevi açıp sonra kendi görevini yazınca iki
+// farklı blok setiyle karşılaşmasın diye bütün görevler normal servo
+// bloklarına çevrildi. Cevap anahtarı artık öğrencinin yazacağı kodun
+// aynısı.
 type Curve = 'ease' | 'linear' | 'easein' | 'easeout';
-const armHome = (ms: number): BlockNode => ({ type: 'rx_arm_home', inputs: { MS: num(ms) } });
-const armAxis = (axis: 0 | 1 | 2 | 3, angle: number, ms: number, curve: Curve = 'ease'): BlockNode => ({
-  type: 'rx_arm_axis', fields: { AXIS: String(axis), CURVE: curve },
-  inputs: { ANGLE: num(angle), MS: num(ms) },
-});
-/** Açısı değişkenden gelen eksen hareketi. */
-const armAxisV = (axis: 0 | 1 | 2 | 3, angleV: object, ms: number, curve: Curve = 'ease'): BlockNode => ({
-  type: 'rx_arm_axis', fields: { AXIS: String(axis), CURVE: curve },
-  inputs: { ANGLE: angleV, MS: num(ms) },
-});
-const armPose = (t: number, o: number, d: number, g: number, ms: number, curve: Curve = 'ease'): BlockNode => ({
-  type: 'rx_arm_pose', fields: { CURVE: curve },
-  inputs: { T: num(t), O: num(o), D: num(d), G: num(g), MS: num(ms) },
-});
-const armGrip = (act: 'open' | 'close', ms: number): BlockNode => ({
-  type: 'rx_arm_gripper', fields: { ACT: act }, inputs: { MS: num(ms) },
-});
-const armWave = (times: number): BlockNode => ({ type: 'rx_arm_wave', inputs: { TIMES: num(times) } });
-const armPick = (base: number, low: number): BlockNode => ({
-  type: 'rx_arm_cube_pick', inputs: { BASE: num(base), LOW: num(low) },
-});
-const armPlace = (base: number, low: number): BlockNode => ({
-  type: 'rx_arm_cube_place', inputs: { BASE: num(base), LOW: num(low) },
-});
 
+/** Eklem sırası → Arduino pini. */
+const EKSEN_PIN = [4, 5, 6, 7] as const;
+
+/** Tek servo komutu: "servo pin D5 açı 120". */
+const servo = (axis: 0 | 1 | 2 | 3, angle: number): BlockNode => ({
+  type: 'rx_servo_angle', fields: { PIN: EKSEN_PIN[axis] }, inputs: { ANGLE: num(angle) },
+});
+/** Açısı değişkenden/ifadeden gelen servo komutu. */
+const servoV = (axis: 0 | 1 | 2 | 3, angleV: object): BlockNode => ({
+  type: 'rx_servo_angle', fields: { PIN: EKSEN_PIN[axis] }, inputs: { ANGLE: angleV },
+});
+/** "bekle N ms" — servonun hedefe varması için gereken süre. */
+const wait = (ms: number): BlockNode => ({ type: 'rx_delay_ms', inputs: { MS: num(ms) } });
+
+const armHome = (ms: number): BlockNode => chain([
+  servo(0, 90), servo(1, 90), servo(2, 90), servo(3, 40), wait(ms),
+]);
+
+const armAxis = (axis: 0 | 1 | 2 | 3, angle: number, ms: number, _curve: Curve = 'ease'): BlockNode =>
+  chain([servo(axis, angle), wait(ms)]);
+
+/** Açısı değişkenden gelen eksen hareketi. */
+const armAxisV = (axis: 0 | 1 | 2 | 3, angleV: object, ms: number, _curve: Curve = 'ease'): BlockNode =>
+  chain([servoV(axis, angleV), wait(ms)]);
+
+/** Dört ekseni birlikte sür. -1 = "bu ekseni değiştirme". */
+const armPose = (t: number, o: number, d: number, g: number, ms: number, _curve: Curve = 'ease'): BlockNode => {
+  const adimlar: BlockNode[] = [];
+  ([t, o, d, g] as const).forEach((v, i) => {
+    if (v >= 0) adimlar.push(servo(i as 0 | 1 | 2 | 3, v));
+  });
+  adimlar.push(wait(ms));
+  return chain(adimlar);
+};
+
+const armGrip = (act: 'open' | 'close', ms: number): BlockNode =>
+  chain([servo(3, act === 'open' ? 40 : 100), wait(ms)]);
+
+/** El sallama: omuzu kaldır, dirseği ileri-geri oynat, indir. */
+const armWave = (times: number): BlockNode => {
+  const sallanma: BlockNode[] = [];
+  for (let i = 0; i < Math.max(1, times); i++) {
+    sallanma.push(servo(2, 130), wait(300), servo(2, 60), wait(300));
+  }
+  return chain([
+    servo(1, 140), wait(600),
+    ...sallanma,
+    servo(2, 90), wait(250),
+    servo(1, 90), wait(500),
+  ]);
+};
+
+/** Küp alma sekansı: aç → yaklaş → in → kapat → kaldır. */
+const armPick = (base: number, low: number): BlockNode => chain([
+  servo(3, 40), wait(300),
+  servo(0, base), servo(1, 120), servo(2, 80), wait(700),
+  servo(1, low), servo(2, 70), wait(600),
+  servo(3, 100), wait(400),
+  servo(1, 120), servo(2, 90), wait(600),
+]);
+
+/** Küp bırakma sekansı: taşı → in → aç → kalk. */
+const armPlace = (base: number, low: number): BlockNode => chain([
+  servo(0, base), servo(1, 120), servo(2, 85), wait(800),
+  servo(1, low), servo(2, 75), wait(600),
+  servo(3, 40), wait(350),
+  servo(1, 120), servo(2, 90), wait(550),
+]);
 // ── görev kurucusu ───────────────────────────────────────────────────
 
 function task(

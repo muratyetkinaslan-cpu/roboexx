@@ -10,6 +10,10 @@ import { SerialMonitor, type SerialLine, type LineKind } from './components/Seri
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
 import { RobotArmPanel, type RobotArmHandle, type ArmMode } from './components/RobotArmPanel';
+import { ArmTaskBar } from './components/ArmTaskBar';
+import { blogaGit, isaretleriTemizle } from './robotarm/block-marks';
+import type { Gorev } from './robotarm/tasks';
+import type { KontrolSonucu } from './robotarm/checker';
 import { RoboBotPanel } from './components/RoboBotPanel';
 import { AssemblyGuide } from './components/AssemblyGuide';
 import { parseTelemetry } from './robotarm/config';
@@ -214,6 +218,13 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('roboexx.roboarm.mod', armMode); } catch { /* yoksay */ }
   }, [armMode]);
+
+  // Kodlu simülasyonun görevi ve kontrol sonucu App'te tutulur: rapor
+  // blok sütununda gösterilecek, çalıştırma ise kol panelinde olacak.
+  const [armGorev, setArmGorev] = useState<Gorev | null>(null);
+  const [armKontrol, setArmKontrol] = useState<KontrolSonucu | null>(null);
+  const [armKontrolEdiliyor, setArmKontrolEdiliyor] = useState(false);
+  const [armCalisiyor, setArmCalisiyor] = useState(false);
 
   const robotArmRef = useRef<RobotArmHandle>(null);
   // ====== Montaj rehberi (doc) ======
@@ -1997,6 +2008,26 @@ export default function App() {
           {/* Blok alanı her zaman mounted kalır; tam ekranda CSS ile gizlenir
               (unmount edilirse Blockly dispose olur ve bloklar/kod silinir). */}
           <div className="workspace-main-col">
+          {/* 🦾 Kodlu simülasyondayken görev metni, Çalıştır düğmesi ve
+              hata raporu BLOKLARIN yanında durur — çocuk hatayı okurken
+              gözünü bloklardan ayırmasın diye. */}
+          {robotArmOpen && armMode === 'kodlu' && mode === 'blocks' && (
+            <ArmTaskBar
+              seciliId={armGorev?.id ?? 0}
+              onGorevSec={(g) => {
+                setArmGorev(g);
+                setArmKontrol(null);
+                isaretleriTemizle(blocklyRef.current?.getWorkspace?.() ?? null);
+              }}
+              calisiyor={armCalisiyor}
+              onCalistir={() => robotArmRef.current?.runBlocks()}
+              onDurdur={() => robotArmRef.current?.stopBlocks()}
+              sonuc={armKontrol}
+              kontrolEdiliyor={armKontrolEdiliyor}
+              onBlogaGit={(bid) => blogaGit(blocklyRef.current?.getWorkspace?.() ?? null, bid)}
+              hazirMi
+            />
+          )}
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
               <div className="workspace-blocks">
@@ -2055,6 +2086,10 @@ export default function App() {
               connected={bridgeState === 'connected'}
               mode={armMode}
               onModeChange={setArmMode}
+              gorev={armGorev}
+              onKontrolSonucu={(r) => { setArmKontrol(r); setArmKontrolEdiliyor(false); }}
+              onKontrolBasladi={() => setArmKontrolEdiliyor(true)}
+              onCalisiyorDegisti={setArmCalisiyor}
               onSendCode={sendArmCode}
               fullscreen={robotArmFullscreen}
               onToggleFullscreen={() => setRobotArmFullscreen((f) => !f)}

@@ -114,7 +114,7 @@ function degiskenAdi(alan: unknown, harita: Record<string, string>): string {
 /* ── Çalıştırıcı ────────────────────────────────────────────────── */
 
 export async function calistir(
-  alan: CalismaAlani,
+  alan: CalismaAlani | null | undefined,
   sec: CalistirSecenek = {},
 ): Promise<CalismaSonucu> {
   const live = !!sec.live;
@@ -148,11 +148,11 @@ export async function calistir(
 
   /* değişken + fonksiyon tabloları */
   const varAd: Record<string, string> = Object.create(null);
-  for (const v of alan.variables || []) varAd[v.id] = v.name;
+  for (const v of alan?.variables || []) varAd[v.id] = v.name;
   const genel: Record<string, unknown> = Object.create(null);
   const fnler: Record<string, { par: string[]; govde: BlokNode | null; don: BlokNode | null; donerMi: boolean }> = Object.create(null);
 
-  const ustler = alan.blocks?.blocks || [];
+  const ustler = alan?.blocks?.blocks || [];
   for (const b of ustler) {
     if (b.type === 'procedures_defnoreturn' || b.type === 'procedures_defreturn') {
       const ad = String(b.fields?.NAME ?? 'fonksiyon');
@@ -179,10 +179,15 @@ export async function calistir(
     yay({ k: 'wait', ms: d, bid });
     if (live) {
       const son = performance.now() + d;
+      let onceki = performance.now();
       while (performance.now() < son) {
         if (durdur()) throw DUR;
         await new Promise((r) => setTimeout(r, Math.min(16, Math.max(1, son - performance.now()))));
+        const simdiT = performance.now();
+        ilerlet(simdiT - onceki);      // servolar bekleme boyunca yol alır
+        onceki = simdiT;
       }
+      ilerlet(16);
     } else {
       sanal += d;
     }
@@ -193,6 +198,7 @@ export async function calistir(
     if (live) {
       if (durdur()) throw DUR;
       await new Promise((r) => setTimeout(r, 16));
+      ilerlet(16);
       if (durdur()) throw DUR;
     } else {
       sanal += 16;
@@ -200,20 +206,36 @@ export async function calistir(
     }
   }
 
-  /** Gerçek servo hızını taklit et (300°/sn): beklemesiz kod hedefe varamaz. */
-  async function servoSur(eklem: number, hedef: number): Promise<void> {
-    const bas = eklemAci[eklem];
-    eklemAci[eklem] = hedef;
-    if (!live) { eklemYaz(eklem, hedef); return; }
-    const sure = Math.max(30, Math.abs(hedef - bas) / 0.3);
-    const b0 = performance.now();
-    for (;;) {
-      if (durdur()) throw DUR;
-      const f = Math.min(1, (performance.now() - b0) / sure);
-      eklemYaz(eklem, bas + (hedef - bas) * f);
-      if (f >= 1) break;
-      await new Promise((r) => setTimeout(r, 20));
+  /* ── SERVO FİZİĞİ ────────────────────────────────────────────────
+     Gerçek kartta `servo.write(pin, aci)` ANINDA döner; servo kendi
+     hızıyla (yaklaşık 300°/sn) yola çıkar. Bu yüzden:
+
+       servo(4, 30); servo(5, 60); servo(6, 90); bekle(1000);
+
+     üç eklemi AYNI ANDA hareket ettirir — sırayla değil. Komut sadece
+     hedefi yazar; yolu bekleme blokları sırasında alınır.
+
+     Beklemesiz yazılan kod da bu yüzden bozulur: servo yola çıkar,
+     varamadan yeni hedef gelir, ara pozisyonlar hiç oluşmaz. Öğrenci
+     bunu simülasyonda kartsız görür. */
+  const hedefAci = [90, 90, 90, 90];
+  const SERVO_HIZ = 0.3;   // °/ms
+
+  /** Eklemleri hedeflerine dt kadar yaklaştırır. */
+  function ilerlet(dt: number): void {
+    for (let j = 0; j < 4; j++) {
+      const fark = hedefAci[j] - eklemAci[j];
+      if (Math.abs(fark) < 0.05) { eklemAci[j] = hedefAci[j]; continue; }
+      const adimBoyu = Math.min(Math.abs(fark), SERVO_HIZ * dt) * Math.sign(fark);
+      eklemAci[j] += adimBoyu;
+      eklemYaz(j, eklemAci[j]);
     }
+  }
+
+  /** servo.write() karşılığı: hedefi yaz, dönme. */
+  function servoHedefle(eklem: number, aci: number): void {
+    hedefAci[eklem] = aci;
+    if (!live) { eklemAci[eklem] = aci; eklemYaz(eklem, aci); }
   }
 
   /** Aynı anda birden çok eklemi hedefe götür (rx_arm_* blokları). */
@@ -225,7 +247,7 @@ export async function calistir(
         : egri === 'easein' ? t * t
         : egri === 'easeout' ? t * (2 - t) : t;
     if (!live) {
-      for (let j = 0; j < 4; j++) if (hedefler[j] != null) { eklemAci[j] = hedefler[j]!; eklemYaz(j, hedefler[j]!); }
+      for (let j = 0; j < 4; j++) if (hedefler[j] != null) { eklemAci[j] = hedefler[j]!; hedefAci[j] = hedefler[j]!; eklemYaz(j, hedefler[j]!); }
       sanal += sure;
       return;
     }
@@ -243,7 +265,7 @@ export async function calistir(
       if (f >= 1) break;
       await new Promise((r) => setTimeout(r, 20));
     }
-    for (let j = 0; j < 4; j++) if (hedefler[j] != null) eklemAci[j] = hedefler[j]!;
+    for (let j = 0; j < 4; j++) if (hedefler[j] != null) { eklemAci[j] = hedefler[j]!; hedefAci[j] = hedefler[j]!; }
   }
 
   const sensorOku = (ad: 'mesafe' | 'pot' | 'ldr' | 'sicaklik'): number =>
@@ -437,7 +459,8 @@ export async function calistir(
         } else {
           bench.aciUyar(eklem, ham);
           yay({ k: 'servo', pin, joint: eklem, val: aci, ham, bid: b.id });
-          await servoSur(eklem, aci);
+          servoHedefle(eklem, aci);
+          if (live) { await new Promise((r) => setTimeout(r, 16)); ilerlet(16); }
         }
         break;
       }
@@ -446,7 +469,8 @@ export async function calistir(
         const aci = kis(Math.round(await S('ANGLE')), 0, 180);
         const eklem = kis(b.type === 'rx_servo_v2' ? id - 1 : id, 0, 3);
         yay({ k: 'servo', pin: -1, joint: eklem, val: aci, ham: aci, bid: b.id });
-        await servoSur(eklem, aci);
+        servoHedefle(eklem, aci);
+        if (live) { await new Promise((r) => setTimeout(r, 16)); ilerlet(16); }
         break;
       }
 

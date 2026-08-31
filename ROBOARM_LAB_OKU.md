@@ -1,18 +1,140 @@
 # RoboExx — Kodlu / Kodsuz Simülasyon + Görev Kontrolü
 
-Bu, değişiklikler uygulanmış **tam RoboExx projesidir**. Eski klasörün
-yerine koyup çalıştırabilirsiniz.
+Değişiklikler uygulanmış **tam RoboExx projesi**. Eski klasörün yerine koyun.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Yeni paket eklenmedi; `package.json` değişmedi.
+Yeni paket eklenmedi, `package.json` değişmedi.
+`npx tsc --noEmit` ve `npx vite build` çalıştırıldı — build başarılı,
+TS hata sayısı değişiklikten önceki halle birebir aynı (23, hepsi Blockly 11'in
+kendi tip uyumsuzlukları).
 
-**Doğrulandı:** `npx tsc --noEmit` ve `npx vite build` çalıştırıldı.
-Build başarılı; TS hata sayısı değişikliklerden önceki halle birebir aynı
-(23 — hepsi Blockly 11'in kendi tip uyumsuzlukları, bu işle ilgisiz).
+---
+
+## Bu turda istediğiniz 6 şey
+
+### 1. Kodlu kısım sadeleştirildi
+
+Sağ yarıda artık **sadece simülasyon** var. Görev metni, Çalıştır düğmesi ve
+hata raporu oradan kaldırıldı. Sağ taraf: 3D kol + hata satırı + seri günlük.
+Başka hiçbir şey yok.
+
+### 2. Hatalar blok tarafında gösteriliyor
+
+Görev seçici, ▶ Çalıştır ve hata raporu artık **blokların üstünde**
+(`ArmTaskBar`). Çocuk hatayı okurken gözünü bloklardan ayırmıyor,
+"şu bloğu düzelt" denince bloğa uzanabiliyor.
+
+Hatalı bloklar ayrıca kırmızı (hata) / sarı (uyarı) çerçeveleniyor,
+üstlerinde Blockly uyarı balonu çıkıyor, ekran ilk hataya kayıyor.
+
+### 3. Kodsuz simülasyon: sadece kol ve parçalar
+
+Kalibrasyon, pin eşlemesi, nokta tekrarı, küp yerleşimi, Tıkla-Git,
+gripper ayarı, Arduino yükleyici — **hepsi kaldırıldı**. Kalan:
+
+- **Robot kol** — dört eklem kaydırıcısı, her birinde pin numarası,
+  ne işe yaradığı ve güvenli aralık yazıyor
+- **RGB LED** — 6 hazır renk düğmesi + üç bacağı tek tek aç/kapat
+- **Buzzer** — Do–Si nota düğmeleri, gerçekten ses çıkarıyor
+- **Röle** — aç/kapat
+
+Çocuk parçaları eliyle tanıyor, sonra kodlu moda geçince "servo pin D5"
+bloğunun neyi oynattığını zaten biliyor.
+
+### 4. Çocuk diline çevrildi + kademeli ipucu
+
+Bir seferde **tek sorun** gösteriliyor — en önemlisi. Diğerleri katlı duruyor.
+Yardım üç kademeli, çocuk istedikçe açılıyor:
+
+| Kademe | Ne verir |
+|---|---|
+| 💡 **İpucu** | Düşündüren soru, cevabı vermez |
+| 🔎 **Ne yapmalıyım** | Somut adım |
+| ✅ **Cevabı göster** | Hangi blok, hangi sayı |
+
+Gerçek örnek — bekleme bloğunu unutan çocuk:
+
+> **📛 Bekleme bloğu koymayı unutmuşsun**
+> Robot kol bir yere gitmek için zamana ihtiyaç duyar. Sen ona "şuraya git"
+> deyip hemen ardından "hayır, şuraya git" diyorsun. Kol yola çıkıyor ama
+> varamadan yeni emir geliyor — sonuçta ara duraklara hiç uğramıyor.
+>
+> 💡 *Sen de yürürken "sağa git" desem, adım atmadan hemen "sola git" desem
+> ne olurdu? Kola adım atacak zaman nasıl verirsin?*
+>
+> 🔎 *Her servo bloğunun altına bir "bekle" bloğu koy. Bu görevde 2 tane
+> gerekiyor.*
+>
+> ✅ *⏱ Zaman kategorisinden "bekle" bloğunu al. Her servo bloğunun ALTINA
+> bir tane koy ve içine 1000 yaz (milisaniye).*
+
+Başlıklar da değişti: "Servo güvenli açı aralığının dışında" yerine
+**"Bu açı kolu kırabilir"**; "Yanlış servo pini" yerine
+**"Yanlış parçayı oynatıyorsun"**.
+
+### 5. Eğitmen kütüphanesi normal servo bloklarına çevrildi
+
+`src/library/roboarm-tasks.ts` içindeki 20 görev `rx_arm_*` bloklarını
+kullanıyordu. Hepsi **normal servo bloklarıyla** yeniden yazıldı:
+
+```
+servo pin D4 açı 30
+bekle 1000 ms
+servo pin D5 açı 120
+...
+```
+
+Artık çocuğun kütüphaneden açtığı örnek ile kendi yazacağı kod aynı
+bloklardan oluşuyor. **20/20 görev test edildi, hepsi çalışıyor.**
+
+### 6. Blok kutusu hedefe göre filtreleniyor
+
+| Seçim | Görünen kit kategorileri |
+|---|---|
+| MicroPython | *(hiçbiri)* |
+| Arduino | *(hiçbiri)* |
+| 🪖 RoboPANZER | yalnız RoboPANZER |
+| 🤖 RoboCYTRON | yalnız RoboCYTRON |
+
+Genel kategoriler (Servo, Buzzer, RGB, Mesafe…) her hedefte duruyor.
+Hedef değişince kutu anında yenileniyor.
+
+---
+
+## Ayrıca: servo davranışı düzeltildi
+
+Önemli bir doğruluk hatası buldum. Gerçek kartta `servo.write()` **anında
+döner**, servo kendi hızıyla yol alır. Yani:
+
+```
+servo(D4, 30); servo(D5, 60); servo(D6, 90); bekle(1000);
+```
+
+üç eklemi **aynı anda** hareket ettirir. Simülasyon bunları sırayla
+oynatıyordu. Düzeltildi: komut sadece hedefi yazıyor, hareket bekleme
+blokları sırasında oluyor. Beklemesiz kod hâlâ hedefe varamıyor —
+çocuk sorunu kartsız görüyor.
+
+---
+
+## Test sonuçları
+
+```
+TOOLBOX FİLTRESİ
+ micropython  RoboPANZER:yok  RoboCYTRON:yok  genel Servo:var
+ arduino      RoboPANZER:yok  RoboCYTRON:yok  genel Servo:var
+ berrybot     RoboPANZER:VAR  RoboCYTRON:yok  genel Servo:var
+ robocytron   RoboPANZER:yok  RoboCYTRON:VAR  genel Servo:var
+
+EĞİTMEN KÜTÜPHANESİ   20/20 görev çalıştı, hepsi normal servo bloklarıyla
+MÜFREDAT              71/71 görev simülasyonda çalıştı
+YANLIŞ ALARM          71/71 cevap anahtarı kendini 100 aldı
+BLOK İŞARETLEME       test edilen 10 öğrenci hatasının hepsi doğru bloğa bağlandı
+```
 
 ---
 
@@ -21,165 +143,19 @@ Build başarılı; TS hata sayısı değişikliklerden önceki halle birebir ayn
 ```
 YENİ  public/cevap_anahtari/roboarm-gorevler.json   71 görev + cevap anahtarı
 YENİ  src/robotarm/vm.ts                            blok yorumlayıcı
-YENİ  src/robotarm/checker.ts                       görev kontrol motoru
+YENİ  src/robotarm/checker.ts                       görev kontrolü + kademeli ipucu
 YENİ  src/robotarm/tasks.ts                         görev yükleyici
-YENİ  src/robotarm/hw-bench.ts                      sanal donanım (RGB/buzzer/röle/sensör)
+YENİ  src/robotarm/hw-bench.ts                      sanal donanım
 YENİ  src/robotarm/block-marks.ts                   blok üstü hata işaretleme
-YENİ  src/components/TaskPanel.tsx                  görev seçici + kontrol raporu
-YENİ  src/components/HardwareStrip.tsx              donanım şeridi
+YENİ  src/components/ArmTaskBar.tsx                 görev + hata paneli (blok tarafı)
+YENİ  src/components/ManualBench.tsx                kodsuz tezgâh
 
-DEĞİŞTİ  src/components/RobotArmPanel.tsx           kodlu/kodsuz mod (848 → 987 satır)
-DEĞİŞTİ  src/App.tsx                                mod durumu + düzen (2132 → 2144 satır)
-DEĞİŞTİ  src/styles.css                             yeni stiller sona eklendi (6977 → 7400 satır)
+DEĞİŞTİ  src/components/RobotArmPanel.tsx           kodlu/kodsuz mod
+DEĞİŞTİ  src/components/BlocklyWorkspace.tsx        hedefe göre toolbox
+DEĞİŞTİ  src/blockly/toolbox.ts                     toolboxForTarget()
+DEĞİŞTİ  src/library/roboarm-tasks.ts               normal servo bloklarına çevrildi
+DEĞİŞTİ  src/App.tsx                                mod + görev durumu
+DEĞİŞTİ  src/styles.css                             yeni stiller sona eklendi
 ```
 
 Başka hiçbir dosyaya dokunulmadı.
-
----
-
-## Simülasyon artık ikiye ayrıldı
-
-Robot Kol panelinin başlığında iki düğme var: **Kodlu · Kodsuz**.
-Seçim hatırlanır.
-
-### 🕹 Kodsuz
-
-Eskisinin aynısı. Kaydırıcılar, Tıkla-Git (IK), nokta tekrarı, küp alma,
-eklem–servo eşlemesi, gripper ayarı. Kod yazmadan kolu tanımak için.
-Kod okunmayacağı için simülasyona daha çok yer verilir (%62).
-
-### ⌨ Kodlu — istediğiniz ekran
-
-Ekran tam ortadan ikiye bölünür:
-
-```
-┌───────────────────────┬────────────────────────────────┐
-│                       │ [Görev 12 ▾]  ▶ Çalıştır       │
-│                       ├────────────────────────────────┤
-│      BLOKLAR          │ 🚦 Durum Işığı      ★★  15 dk  │
-│      (Blockly)        │ RGB modülü D9(R), D10(G)...    │
-│                       ├────────────────────────────────┤
-│   hatalı bloklar      │                                │
-│   kırmızı/sarı        │      RoboArm 3D simülasyon     │
-│   çerçeveli           │                                │
-│                       ├────────────────────────────────┤
-│                       │ 🔴 RGB  🔊 1000Hz  ⚡ röle     │
-│                       ├────────────────────────────────┤
-│                       │ 78  Küçük düzeltme gerek       │
-│                       │ [HATA] Hiç bekleme bloğu yok   │
-└───────────────────────┴────────────────────────────────┘
-```
-
----
-
-## ▶ Çalıştır'a basınca üç şey aynı anda olur
-
-1. **Program cevap anahtarıyla karşılaştırılır** — anında, sanal saatle.
-2. **Hatalı bloklar işaretlenir** — kırmızı (hata) veya sarı (uyarı) çerçeve,
-   üstlerinde Blockly uyarı balonu. Tıklayınca açıklama çıkar. Ekran ilk
-   hatalı bloğa kayar.
-3. **Simülasyon canlı oynar** — kol hareket eder, RGB yanar, buzzer gerçekten
-   ses çıkarır, çalışan blok vurgulanır.
-
-Sağ alttaki rapor her hatayı yazıyla da anlatır: ne yanlış, neden önemli,
-ne yapması gerek. Yanındaki **"bloğu göster"** düğmesi o bloğa götürür.
-
-Örnek çıktı:
-
-> **[HATA] Yanlış servo pini — D5 yazılmış, D4 olmalı**
-> Taban eklemi D4 pininde. Senin bloğunda D5 yazıyor, yani Omuz eklemini
-> sürüyorsun. Kol görevdeki hareketi yapmıyor.
-> Pin haritası: D4 taban · D5 omuz · D6 dirsek · D7 tutucu
-> **Ne yapmalısın:** İşaretli bloğun pin alanını 4 yap.
-
----
-
-## Görev seçimi
-
-Sağ üstteki açılır listede **71 görevin tamamı** var, bölümlere ayrılmış
-(Servo Temelleri, Buzzer, RGB LED, Döngü ve Değişken, Buton,
-Potansiyometre, Mesafe Sensörü, Gamepad, Işık Sensörü, Seri Monitör,
-Sıcaklık ve Röle, Parkur, Otomasyon, Final).
-
-Seçince görev metni, zorluk yıldızı, süresi ve kazanımları altında çıkar.
-Öğrencinin seçimi hatırlanır.
-
-Veri `public/cevap_anahtari/roboarm-gorevler.json` içinde: LMS'teki
-müfredat v3 metinleri + 71 cevap anahtarı, tek dosyada (397 KB, gzip 36 KB).
-Bir kez indirilir, JS paketini büyütmez.
-
----
-
-## Neden görevler simülasyonda çalışmıyordu
-
-`RobotArmPanel.tsx`'te `servo`, `tone`, `rgbAll`, `digitalWrite` hepsi
-`noopAsync` idi. Kol simülasyonu yalnızca `rx_arm_*` bloklarını tanıyordu.
-71 cevap anahtarını taradım — müfredat bambaşka bloklar kullanıyor:
-
-| Blok | Kullanım |
-|---|---|
-| `rx_servo_angle` (D4-D7) | **478 kez** |
-| `rx_digital_write` (RGB D9/D10/D11) | 108 |
-| `rx_buzzer_tone` / `note` / `off` | 68 |
-| ultrasonik, buton, pot, LDR, röle | 60+ |
-| **`rx_arm_*`** | **0 kez** |
-
-Öğrenci görevi doğru yazıyor, kol kıpırdamıyordu.
-
-Artık blok programı `vm.ts` ile doğrudan yorumlanıyor: her blok tipi
-sanal donanıma bağlı, her olay onu üreten bloğun id'sini taşıyor.
-Eski `rx_arm_*` blokları da destekleniyor — Eğitmen Kütüphanesi'ndeki
-20 görevlik set aynen çalışmaya devam ediyor.
-
-Servolar gerçek hızıyla (300°/sn) hareket eder. Beklemesiz yazılmış kod
-simülasyonda da hedefe varamaz — öğrenci sorunu kart olmadan görür.
-
----
-
-## Kontrol motoru
-
-Üç katman:
-
-1. **Davranış** — öğrencinin ve anahtarın programı sanal donanımda ayrı ayrı
-   koşturulur, olay dizileri hizalanır. *Farklı yazılmış ama aynı işi yapan
-   kod tam puan alır.*
-2. **Yapı** — döngü/fonksiyon/değişken/sınırla atlanmış mı, pinler doğru mu,
-   tekrar sayısı tutuyor mu.
-3. **Güvenlik** — güvenli açı dışına çıkan komut (taban/omuz/dirsek 30-150°,
-   tutucu 40-140°), beklemesiz servo zinciri, beklemesiz sonsuz döngü.
-
-Sensörlü görevler tek değerde ayırt edilemediği için üç senaryoda
-(yakın/orta/uzak) ayrı ayrı çalıştırılır — eşik hataları böyle yakalanır.
-
-### Test sonuçları
-
-**Yanlış alarm testi: 71/71 cevap anahtarı kendi kendine 100 puan alıyor.**
-(Bu test iki gerçek hata yakaladı ve düzeltildi: Blockly `controls_if`'in
-else dalını `elseCount` ile serileştiriyor — Görev 10 hiç ses üretmiyordu;
-ve rastgele blok içeren Görev 19 tohumlanmadığı için kendini tutturamıyordu.)
-
-**Tipik öğrenci hataları** — her biri bir bloğa bağlanıyor:
-
-| Hata | Puan | Teşhis | Blok |
-|---|---|---|---|
-| Beklemeleri koymadı | 78 | Hiç bekleme bloğu yok | ✓ |
-| D4 yerine D5 yazdı | 3 | Yanlış servo pini — D5 yazılmış, D4 olmalı | ✓ |
-| Son adımı unuttu | 71 | 1 adım eksik — işaretli bloğun ardına ekle | ✓ |
-| Açıyı 175 yaptı | 49 | Güvenli açı aralığı dışında (30-150°) | ✓ |
-| Döngü yerine kopyaladı | 78 | Tekrar bloğu kullanılmamış | ✓ |
-| Tekrar sayısını 3 yazdı | 45 | Tekrar sayısı farklı | ✓ |
-| Tutucu kapanmıyor | 86 | 1 adım eksik | ✓ |
-| Buzzer koymadı | 76 | 3 adım eksik | ✓ |
-| Eşiği 25 yazdı | 48 | Sensör eşiği yanlış — "orta" durumda bozuluyor | ✓ |
-| RGB pinini karıştırdı | 89 | Yanlış renk yanıyor: yeşil yerine mavi | ✓ |
-
----
-
-## LMS tarafı
-
-Bu paket sadece RoboExx. Cevap anahtarları LMS'ten çıkarılıp buraya kondu —
-öğretmenin ayrıca bir şey yapmasına gerek yok, kontrol öğrencinin ekranında
-çalışıyor.
-
-LMS'e "öğretmen onaydan önce görsün" özelliğini de bağlamak isterseniz aynı
-`checker.ts` sunucusuz çalışıyor; söyleyin, onay kuyruğuna takayım.

@@ -122,11 +122,15 @@ export const toolboxXml = `
 
   <sep></sep>
 
+<!--KIT:berrybot-->
 ${berrybotToolboxCategory}
+<!--/KIT-->
 
   <sep></sep>
 
+<!--KIT:robocytron-->
 ${robocytronToolboxCategory}
+<!--/KIT-->
 
   <sep></sep>
 
@@ -324,3 +328,27 @@ ${robocytronToolboxCategory}
 
 </xml>
 `;
+
+/**
+ * 🎯 HEDEFE GÖRE TOOLBOX
+ *
+ * Öğrenci "MicroPython" seçtiyse RoboPANZER ve RoboCYTRON kategorileri
+ * anlamsızdır — o bloklar yalnız ilgili kartta çalışır ve çocuk yanlış
+ * bloğu alıp saatlerce neden çalışmadığını arar. Bu yüzden kutu hedefe
+ * göre filtrelenir:
+ *
+ *   micropython → ikisi de gizli (yalnız genel bloklar)
+ *   arduino     → ikisi de gizli
+ *   berrybot    → yalnız 🪖 RoboPANZER görünür
+ *   robocytron  → yalnız 🤖 RoboCYTRON görünür
+ */
+export function toolboxForTarget(target: string): string {
+  const goster = target === 'berrybot' ? 'berrybot'
+    : target === 'robocytron' ? 'robocytron'
+    : null;
+
+  return toolboxXml.replace(
+    /<!--KIT:(berrybot|robocytron)-->[\s\S]*?<!--\/KIT-->/g,
+    (blok, kit: string) => (kit === goster ? blok : ''),
+  );
+}
