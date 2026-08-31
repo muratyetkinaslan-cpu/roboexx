@@ -53,15 +53,15 @@ const PIN_OF = [4, 5, 6, 7];
 
 /** Sensör kullanan görevler tek değerde ayırt edilemez → üç senaryo. */
 const SENARYOLAR = [
-  { ad: 'yakın', sensor: { mesafe: 3, pot: 5, ldr: 10, sicaklik: 20, buton: true } },
-  { ad: 'orta', sensor: { mesafe: 20, pot: 50, ldr: 50, sicaklik: 24, buton: false } },
-  { ad: 'uzak', sensor: { mesafe: 70, pot: 95, ldr: 90, sicaklik: 40, buton: false } },
+  { ad: 'yakın', sensor: { mesafe: 3, pot: 5, ldr: 10, sicaklik: 20, buton: true, irKod: 70 } },
+  { ad: 'orta', sensor: { mesafe: 20, pot: 50, ldr: 50, sicaklik: 24, buton: false, irKod: 0 } },
+  { ad: 'uzak', sensor: { mesafe: 70, pot: 95, ldr: 90, sicaklik: 40, buton: false, irKod: 64 } },
 ];
 
 const SENSOR_BLOKLARI = [
   'rx_ultrasonic_distance', 'rx_potentiometer', 'rx_ldr_read', 'rx_analog_read',
   'rx_digital_read', 'rx_button_pressed', 'rx_key_pressed',
-  'rx_gamepad_pressed', 'rx_gamepad_just_pressed',
+  'rx_gamepad_pressed', 'rx_gamepad_just_pressed', 'rx_ir_read_code',
 ];
 
 const CIKTI = ['servo', 'tone', 'rgb', 'relay', 'print', 'digital', 'pwm'];
@@ -141,7 +141,14 @@ export function olayMetni(e: Olay): string {
 export async function gorevKontrol(
   ogrenci: CalismaAlani,
   anahtar: CalismaAlani,
+  /** Öğrencinin kurulumundan gelen servo pini → eklem haritası.
+   *  Verilmezse müfredat varsayılanı (D4-D7) kullanılır. Pin uyarıları
+   *  bu haritaya göre yapılır; yoksa D10'a takan çocuk haksız yere
+   *  "D10 pininde servo yok" uyarısı alırdı. */
+  pinEklem?: Record<number, number>,
 ): Promise<KontrolSonucu> {
+  const HARITA = pinEklem && Object.keys(pinEklem).length ? pinEklem : MUFREDAT_PIN_EKLEM;
+  const PIN_ADI = (p: number) => EKLEM_AD[HARITA[p] ?? 0];
   const bulgular: Bulgu[] = [];
   const ekle = (
     onem: Onem, kod: string, baslik: string, aciklama: string,
@@ -186,8 +193,8 @@ export async function gorevKontrol(
   const kosular = [];
   for (const s of senaryolar) {
     const [ak, ok] = await Promise.all([
-      calistir(anahtar, { live: false, tohum: 20260831, sensor: s.sensor }),
-      calistir(ogrenci, { live: false, tohum: 20260831, sensor: s.sensor }),
+      calistir(anahtar, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA }),
+      calistir(ogrenci, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA }),
     ]);
     const ac = ciktiOlaylari(ak.iz), oc = ciktiOlaylari(ok.iz);
     const ad = hizala(ac, oc);
@@ -354,16 +361,24 @@ export async function gorevKontrol(
   }
 
   /* ── 4. PİN ── */
-  const servoBlok = (l: BlokNode[]) => l.filter((b) => b.type === 'rx_servo_angle');
-  const oPin = new Set(servoBlok(oBlok).map((b) => Number(b.fields?.PIN)));
-  const aPin = new Set(servoBlok(aBlok).map((b) => Number(b.fields?.PIN)));
+  // PicoBricks'te servolar rx_servo_v2 ile sürülür; pin yerine kanal
+  // numarası (SERVO_NUM) taşır. İki blok tipi de aynı şekilde denetlenir.
+  const servoBlok = (l: BlokNode[]) => l.filter((b) => b.type === 'rx_servo_angle' || b.type === 'rx_servo_v2');
+  const servoPin = (b: BlokNode) =>
+    Number((b.fields as Record<string, unknown>)?.PIN ?? (b.fields as Record<string, unknown>)?.SERVO_NUM);
+  const oPin = new Set(servoBlok(oBlok).map(servoPin));
+  const aPin = new Set(servoBlok(aBlok).map(servoPin));
 
   for (const b of servoBlok(oBlok)) {
-    const p = Number(b.fields?.PIN);
-    if (!(p in MUFREDAT_PIN_EKLEM)) {
+    const p = servoPin(b);
+    if (!(p in HARITA)) {
+      const liste = Object.keys(HARITA)
+        .map((x) => `D${x} (${EKLEM_AD[HARITA[Number(x)]].toLowerCase()})`).join(', ');
       ekle('hata', 'PIN_YOK', `D${p} pininde servo yok`,
-        `Servo bloğunda D${p} yazıyor. Bu kurulumda servolar sadece D4 (taban), D5 (omuz), D6 (dirsek), D7 (tutucu) pinlerinde.`,
-        'Bloğun pin alanını 4-7 arasından doğru eklemle değiştir.', b.id);
+        `Servo bloğunda D${p} yazıyor. Senin kurulumunda servolar şu pinlerde: ${liste}.`,
+        'Bloğun pin numarasını kurulumundaki pinlerden biriyle değiştir.', b.id,
+        'Kurulum sekmesinden hangi pinleri seçtiğine bak.',
+        `Kullanılabilir pinler: ${liste}`);
     }
   }
   // Anahtarda olup öğrencide olmayan pinler
@@ -372,7 +387,7 @@ export async function gorevKontrol(
   const fazlaPin = [...oPin].filter((p) => !aPin.has(p));
 
   for (const p of eksikPin) {
-    const eklemAd = EKLEM_AD[MUFREDAT_PIN_EKLEM[p] ?? 0];
+    const eklemAd = PIN_ADI(p);
     // Öğrenci doğru pin yerine BAŞKA bir pin yazmışsa bu bir yazım hatasıdır;
     // "eksik" demek yerine yanlış bloğu gösterip doğru pini söylemek gerekir.
     const karisan = fazlaPin.length === eksikPin.length ? fazlaPin[eksikPin.indexOf(p)] : undefined;
@@ -393,9 +408,9 @@ export async function gorevKontrol(
     }
   }
   for (const b of servoBlok(oBlok)) {
-    const p = Number(b.fields?.PIN);
-    if (aPin.size && !aPin.has(p) && p in MUFREDAT_PIN_EKLEM) {
-      ekle('ipucu', 'PIN_FAZLA', `${EKLEM_AD[MUFREDAT_PIN_EKLEM[p]]} (D${p}) bu görevde gerekli değil`,
+    const p = servoPin(b);
+    if (aPin.size && !aPin.has(p) && p in HARITA) {
+      ekle('ipucu', 'PIN_FAZLA', `${PIN_ADI(p)} (D${p}) bu görevde gerekli değil`,
         'Cevap anahtarı bu eklemi hiç oynatmıyor — yanlış eklemi sürüyor olabilirsin.',
         'Gerekli değilse bu bloğu kaldır.', b.id);
     }

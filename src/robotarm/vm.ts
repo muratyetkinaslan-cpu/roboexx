@@ -76,7 +76,7 @@ export interface CalistirSecenek {
   onOlay?: (o: Olay) => void;
   durdur?: () => boolean;
   /** Kontrol modunda sensör değerleri sabitlenir. */
-  sensor?: { mesafe: number; pot: number; ldr: number; sicaklik: number; buton: boolean };
+  sensor?: { mesafe: number; pot: number; ldr: number; sicaklik: number; buton: boolean; irKod?: number };
   /** Rastgele bloklar için tohum — kontrolde iki koşu aynı sonucu vermeli. */
   tohum?: number;
   maxAdim?: number;
@@ -412,6 +412,13 @@ export async function calistir(
         if (sec.tuslarBir?.has(t)) { sec.tuslarBir.delete(t); return true; }
         return false;
       }
+      /* IR kumanda — panelden basılan tuşun kodu okunur. */
+      case 'rx_ir_read_code': {
+        await nefes();
+        const k = sec.sensor ? (sec.sensor.irKod ?? 0) : bench.durum().girisler.irKod;
+        if (k) yay({ k: 'read', dev: 'ir', val: k, bid: b.id });
+        return k;
+      }
       case 'rx_millis': return Math.round(simdi());
       case 'rx_map': {
         const v = await S('VALUE'), fl = await S('FROM_LOW'), fh = await S('FROM_HIGH');
@@ -465,9 +472,13 @@ export async function calistir(
         break;
       }
       case 'rx_servo_v2': case 'rx_servo_v3': {
-        const id = say(f.NUM ?? f.CH ?? 1);
+        // PicoBricks sürücü kanalı. Kurulumdaki harita önce denenir
+        // (öğrenci kanal 1-4'ü istediği ekleme atayabilir).
+        const id = say(f.SERVO_NUM ?? f.NUM ?? f.CH ?? 1);
         const aci = kis(Math.round(await S('ANGLE')), 0, 180);
-        const eklem = kis(b.type === 'rx_servo_v2' ? id - 1 : id, 0, 3);
+        const eklem = pinEklem[id] !== undefined
+          ? pinEklem[id]
+          : kis(b.type === 'rx_servo_v2' ? id - 1 : id, 0, 3);
         yay({ k: 'servo', pin: -1, joint: eklem, val: aci, ham: aci, bid: b.id });
         servoHedefle(eklem, aci);
         if (live) { await new Promise((r) => setTimeout(r, 16)); ilerlet(16); }
@@ -585,7 +596,7 @@ export async function calistir(
         yay({ k: 'pwm', pin, val: d2, bid: b.id });
         break;
       }
-      case 'rx_pin_mode': break;
+      case 'rx_pin_mode': case 'rx_ir_init': break;
 
       /* ── WS2812 RGB ── */
       case 'rx_rgb_set_all': case 'rx_rgb_set_one': case 'rx_neopixel_set': {

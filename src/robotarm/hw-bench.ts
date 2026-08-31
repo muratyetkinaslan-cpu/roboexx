@@ -45,7 +45,7 @@ export interface BenchState {
   /** Diğer pinlerin son yazılan değeri (LED, PWM vb.) */
   pinler: Record<number, number>;
   /** Kullanıcının panelden ayarladığı giriş değerleri */
-  girisler: { mesafe: number; pot: number; ldr: number; sicaklik: number; buton: boolean };
+  girisler: { mesafe: number; pot: number; ldr: number; sicaklik: number; buton: boolean; irKod: number };
   /** Güvenli aralık dışına çıkan komutlar — panelde uyarı olarak gösterilir */
   uyarilar: string[];
 }
@@ -57,7 +57,7 @@ function bosDurum(): BenchState {
     role: 0,
     buzzer: null,
     pinler: {},
-    girisler: { mesafe: 20, pot: 50, ldr: 50, sicaklik: 24, buton: false },
+    girisler: { mesafe: 20, pot: 50, ldr: 50, sicaklik: 24, buton: false, irKod: 0 },
     uyarilar: [],
   };
 }

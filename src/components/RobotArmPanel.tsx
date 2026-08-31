@@ -20,6 +20,10 @@ import { gorevKontrol, type KontrolSonucu } from '../robotarm/checker';
 import { bulgulariIsaretle, isaretleriTemizle, blogaGit, calisanBlok } from '../robotarm/block-marks';
 import { type Gorev } from '../robotarm/tasks';
 import { ManualBench } from './ManualBench';
+import { SetupBar, HardwarePanel } from './SetupBar';
+import {
+  kurulumOku, kurulumYaz, pinEklemHaritasi, anahtariUyarla, type Kurulum,
+} from '../robotarm/setup';
 import { ArmTaskBar } from './ArmTaskBar';
 
 
@@ -103,6 +107,26 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   // ── BLOK PROGRAMINI SİMÜLASYONDA ÇALIŞTIRMA ──────────────────────
   const [simRunning, setSimRunning] = useState(false);
   const [simRunErr, setSimRunErr] = useState<string | null>(null);
+
+  /** Kodlu modun alt bölümü: görev/hata · donanım · kurulum. */
+  const [altSekme, setAltSekme] = useState<'gorev' | 'donanim' | 'kurulum'>('gorev');
+
+  /** Kart + pin seçimi. Cevap anahtarları buna göre çevrilir. */
+  const [kurulum, setKurulum] = useState<Kurulum>(() => kurulumOku());
+  const kurulumRef = useRef(kurulum); kurulumRef.current = kurulum;
+  const kurulumDegis = (k: Kurulum) => { setKurulum(k); kurulumYaz(k); };
+
+  /** 🎯 Kalibrasyon: tüm servoları 90°'ye al — simülasyonda ve kartta. */
+  const kalibreEt = useCallback(() => {
+    [0, 1, 2, 3].forEach((j) => {
+      anglesRef.current[j] = 90;
+      postToSim({ type: 'rx:setJoint', joint: j, angle: 90 });
+      hwJointRef.current(j, 90);
+    });
+    setManualAngles([90, 90, 90, 90]);
+    bench.sifirla();
+    setSimLog((l) => [...l.slice(-150), '🎯 Kalibrasyon: tüm servolar 90° — kolu düz duruma getir.']);
+  }, []);
 
   /** Kodsuz modda kaydırıcıların gösterdiği açılar. */
   const [manualAngles, setManualAngles] = useState<number[]>([90, 90, 90, 40]);
@@ -400,7 +424,10 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     const hedefGorev = gorevRef.current;
     if (hedefGorev) {
       onKontrolBasladi();
-      gorevKontrol(alan, hedefGorev.anahtar)
+      // Cevap anahtarı öğrencinin kartına/pinlerine çevrilir, sonra
+      // karşılaştırılır — PicoBricks'te "Sürücü Servo" yazan çocuk
+      // "yanlış blok" uyarısı almaz.
+      gorevKontrol(alan, anahtariUyarla(hedefGorev.anahtar, kurulumRef.current), pinEklemHaritasi(kurulumRef.current))
         .then((sonuc) => {
           onKontrolSonucu(sonuc);
           const n = bulgulariIsaretle(ws, sonuc.bulgular);
@@ -417,7 +444,9 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     }
 
     // (3) Canlı simülasyon — servo pinleri panel ayarından da eşlenir.
-    const pinEklem: Record<number, number> = {};
+    // Pin haritası öğrencinin KURULUMUNDAN gelir (kart + seçtiği pinler),
+    // ayrıca panelin kendi eklem ayarı da eklenir.
+    const pinEklem: Record<number, number> = { ...pinEklemHaritasi(kurulumRef.current) };
     cfgRef.current.joints.forEach((j, i) => { if (j.kind === 'normal') pinEklem[j.id] = i; });
 
     vmCalistir(alan, {
@@ -700,6 +729,31 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           </div>
 
           <div className="ra-alt">
+            <div className="ra-sekme" role="tablist">
+              {(['gorev', 'donanim', 'kurulum'] as const).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={altSekme === t}
+                  className={altSekme === t ? 'is-on' : ''}
+                  onClick={() => setAltSekme(t)}
+                >
+                  {t === 'gorev' ? 'Görev & Hata' : t === 'donanim' ? '🔌 Donanım' : '⚙️ Kurulum'}
+                </button>
+              ))}
+            </div>
+
+            {altSekme === 'donanim' && <HardwarePanel />}
+            {altSekme === 'kurulum' && (
+              <SetupBar
+                kurulum={kurulum}
+                onDegis={kurulumDegis}
+                onKalibre={kalibreEt}
+                kartBagli={connected}
+              />
+            )}
+
+            <div className={altSekme === 'gorev' ? '' : 'is-gizli'}>
             <ArmTaskBar
               seciliId={gorev?.id ?? 0}
               onGorevSec={onGorevSec}
@@ -711,6 +765,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
               onBlogaGit={(bid) => blogaGit(Blockly.getMainWorkspace(), bid)}
               hazirMi={simReady}
             />
+            </div>
             {simRunErr && <p className="ra-warn ra-kodlu-err">{simRunErr}</p>}
           </div>
         </div>
@@ -732,6 +787,12 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
         <aside className="robotarm-config ra-kodsuz-yan">
           <div className="robotarm-config-scroll">
+            <SetupBar
+              kurulum={kurulum}
+              onDegis={kurulumDegis}
+              onKalibre={kalibreEt}
+              kartBagli={connected}
+            />
             <SimGorunum ayar={simUi} setAyar={setSimUi} satir />
             <ManualBench
               aciler={manualAngles}

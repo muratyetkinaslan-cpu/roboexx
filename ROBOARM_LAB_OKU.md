@@ -11,101 +11,109 @@ Yeni paket eklenmedi. `tsc` + `vite build` çalıştırıldı, build başarılı
 
 ---
 
-## Bu turda düzeltilenler
+## Bu turda eklenenler
 
-### 🔴 Kol görünmüyordu + Çalıştır çalışmıyordu — AYNI SEBEP
+### 🔌 Bütün çevre birimleri kodlu tarafta
 
-Bir önceki turda `arm-sim.html` içinden "Küp Koy / Öğret / Tekrarla /
-Hedefe Git / Demo / Küpü Tut" düğmelerini **DOM'dan sildim**. Ama sayfanın
-JavaScript'i o düğmelere hâlâ bağlanıyordu:
+Kodlu modun altında üç sekme var: **Görev & Hata · 🔌 Donanım · ⚙️ Kurulum**.
 
-```js
-document.getElementById('demo').addEventListener('click', ...)
+**Donanım sekmesi** kodun tamamını kartsız test etmenizi sağlar:
+
+| Çıkış | Kodda çalışınca |
+|---|---|
+| RGB LED | Ampul o rengi alır, D9/D10/D11 bacakları yanar |
+| Buzzer | **Gerçekten öter** (WebAudio) + frekans yazar |
+| Röle | Aç/kapa göstergesi |
+
+| Giriş | Nasıl değer verilir |
+|---|---|
+| 📏 Mesafe (HC-SR04) | Kaydırıcı 2-100 cm |
+| 🌗 Işık (LDR) | Kaydırıcı 0-100 |
+| 🎚 Potansiyometre | Kaydırıcı 0-100 |
+| 🌡 Sıcaklık | Kaydırıcı -10…60 °C |
+| 🔦 **IR kumanda** | ▲ ▼ ◀ ▶ OK 1 2 3 tuşları — koda kod gider |
+| 🔘 Buton | Basılı tut |
+
+IR kumanda için VM'e `rx_ir_read_code` desteği eklendi.
+**Test:** IR kod 0 → servo komutu yok · IR kod 70 → Taban 150° ✓
+
+### ⚙️ Kurulum: kart ve pin seçimi
+
+Öğrenci hangi kartı kullandığını seçiyor, **cevap anahtarları ona göre
+çevriliyor**:
+
+| Kart | Servo bloğu | Varsayılan |
+|---|---|---|
+| 🔵 Arduino Uno | `rx_servo_angle` | D4 D5 D6 D7 |
+| 🧱 RoboBricks | `rx_servo_angle` | D4 D5 D6 D7 (serbest) |
+| 🍓 Raspberry / Waveshare | `rx_servo_angle` | GPIO serbest |
+| 🟩 PicoBricks | **`rx_servo_v2`** (Sürücü Servo) | Kanal 1 2 3 4 |
+
+Pinler de tek tek değiştirilebiliyor. PicoBricks seçen çocuk "Sürücü Servo"
+bloğu yazınca **"yanlış blok" uyarısı almıyor**; D10'a takan çocuk
+**"D10 pininde servo yok" uyarısı almıyor** — kontrol onun kurulumuna göre
+yapılıyor.
+
+**Test — 4 kart × 71 anahtar:**
+```
+arduino     71/71 anahtar kendini 100 aldı
+robobricks  71/71   (pin 10-13)
+waveshare   71/71   (GPIO 16-19)
+picobricks  71/71   (rx_servo_v2'ye çevrildi)
 ```
 
-Eleman yok olunca `null.addEventListener` hatası fırladı ve **script komple
-durdu**. Üç sonucu birden oldu:
+### 🎯 Kalibre et
 
-- 3B sahne hiç çizilmedi → **kol görünmüyordu**
-- `rx:ready` gönderilemedi → panel "yükleniyor"da takıldı
-- `hazirMi={simReady}` false kaldığı için **▶ Çalıştır devre dışıydı**
+Kurulum sekmesindeki düğme **tüm servoları 90°'ye alır** — hem simülasyonda
+hem karta komut göndererek. Çocuk kolu düz duruma getirip monte ediyor,
+göreve oradan başlıyor. Kart bağlı değilse uyarı çıkıyor.
 
-**Düzeltme:** Düğmeler DOM'a geri kondu, `display:none` ile gizlendi.
-Görünmüyorlar, JS de patlamıyor.
+### ✨ Topbar teması
 
-**Doğrulama:** Script'in kullandığı 17 `getElementById` ve 4 `querySelector`
-hedefi tek tek tarandı — hepsi HTML'de mevcut, eksik yok.
+Hedef kart değişince topbarın zemini komple renk atıyordu. Artık:
 
-**Ayrıca sağlamlaştırıldı:**
-- ▶ Çalıştır artık simülasyonun hazır olmasına bağlı değil. Program sanal
-  donanımda koşuyor, simülasyon sadece gösterim. (three.js CDN'den geliyor —
-  internetsiz sınıfta çocuk hiç çalıştıramazdı.)
-- `rx:ready` riskli koddan **önce** de gönderiliyor.
-
-**Uçtan uca test — "görev seç → Çalıştır":**
-```
-1) SİMÜLASYON  → 3 eklem komutu · hata yok · son poz Taban 150°
-2) KONTROL     → 78/100 · 1 sorun
-   "Bekleme bloğu koymayı unutmuşsun" → blok b2 · ipucu ✓ · cevap ✓
-```
-
-### 🔌 USB/BLE seçim listesi oldu
-Topbar'daki iki düğmelik toggle tek açılır listeye indirildi
-(🔌 USB / 📶 BLE). Bağlıyken devre dışı kalıyor, yer kaplamıyor.
+- Zemin her temada **sakin** — vurgu rengi %4'ün altında
+- Renk değişimi **ince bir üst çizgide** görünüyor, koca yüzeyde değil
+- Gruplar arası kutu yerine **ince dikey çizgi**
+- Düğmeler dolgu yerine **kenar + yumuşak hover**, `:focus-visible` halkası
+- Hedef göstergesi dolu zemin yerine ince renkli kenar
+- `prefers-reduced-motion` desteği
 
 ---
 
-## Önceki turlarda yapılanlar
+## Önceki turlardan
 
-1. **Kütüphane 20 → 71 görev** — müfredatın tamamı cevap anahtarlarıyla,
-   hepsi normal servo bloklarıyla (`rx_arm_*` yok).
-2. **Kodlu modda donanım görünüyor** — RGB, buzzer, sensör kaydırıcıları.
-3. **Hata paneli simülasyonun altında** — sağ taraf yatayda ikiye bölük.
-4. **Üç alan da sürüklenebilir:**
-```
-┌──────────────┬╫┬──────────────────┐
-│   BLOKLAR    │║│   ROBOT KOL      │
-│              │║├══════════════════┤ ← sürükle
-│              │║│  GÖREV + HATA    │
-└──────────────┴╫┴──────────────────┘
-                 ↑ sürükle
-```
-5. **👁 Görünüm menüsü** — Servo Kontrolü panelinin tamamı ya da parçaları
-   (dört kaydırıcı, seri satırı, düğme, durum, koordinat) tek tek gizlenir.
-6. **Yardım metni kaldırıldı** — "Eklemler / Küp Koy / Küpü Tut / Öğret /
-   Tekrarla / Kol küçük…" kutusu ve ipucu satırı silindi.
-7. **Menü z-index düzeltildi** — simülasyon açıkken topbar menüleri açılıyor.
-8. **Hatalar tek tek, sırayla** — bir sorun düzeltilince sıradaki çıkar.
-   Yardım üç kademeli: 💡 İpucu → 🔎 Ne yapmalıyım → ✅ Cevap.
-9. **Blok kutusu hedefe göre filtreleniyor** — MicroPython/Arduino'da kit
-   kategorileri gizli; RoboPANZER'de sadece RoboPANZER, RoboCYTRON'da
-   sadece RoboCYTRON.
+1. **Kütüphane 71 görev** — müfredatın tamamı, normal servo bloklarıyla.
+2. **Kodlu ekran ikiye bölük** — solda bloklar, sağda üstte kol / altta panel.
+3. **Üç alan da sürüklenebilir**, tercih hatırlanıyor.
+4. **👁 Görünüm** — Servo Kontrolü paneli tamamen ya da parça parça gizlenir.
+5. **Hatalar tek tek, sırayla** — 💡 İpucu → 🔎 Ne yapmalıyım → ✅ Cevap.
+6. **Blok üstünde hata işareti** — kırmızı/sarı çerçeve + uyarı balonu.
+7. **Blok kutusu hedefe göre filtreleniyor.**
+8. **USB/BLE seçim listesi.**
+9. **Menü z-index'i düzeltildi.**
 
 ---
 
 ## Test sonuçları
 
 ```
-KÜTÜPHANE      71 görev · 71/71 çalışıyor · rx_arm kalıntısı yok
-YANLIŞ ALARM   71/71 cevap anahtarı kendini 100 aldı
-SİM ELEMANLARI 17 id + 4 querySelector · eksik yok
-TOOLBOX        micropython ok · berrybot ok · robocytron ok
-BUILD          ✓ vite build başarılı (zip'ten çıkarılıp tekrar denendi)
+KART UYARLAMASI  4 kart × 71 anahtar = 284/284 · hepsi 100
+IR KUMANDA       kod 0 → tepki yok · kod 70 → Taban 150° ✓
+KÜTÜPHANE        71 görev · 71/71 çalışıyor
+TOOLBOX          micropython ok · berrybot ok · robocytron ok
+BUILD            ✓ tsc temiz · vite build başarılı
 ```
 
-## Değişen ve eklenen dosyalar
+## Yeni ve değişen dosyalar
 
 ```
-YENİ  public/cevap_anahtari/roboarm-gorevler.json
-YENİ  src/robotarm/vm.ts · checker.ts · tasks.ts · hw-bench.ts · block-marks.ts
-YENİ  src/components/ArmTaskBar.tsx · ManualBench.tsx
+YENİ  src/robotarm/setup.ts          kart/pin seçimi + anahtar uyarlama
+YENİ  src/components/SetupBar.tsx    kurulum çubuğu + kalibrasyon + donanım paneli
 
-DEĞİŞTİ  src/components/RobotArmPanel.tsx    kodlu/kodsuz + görünüm + bölme
-DEĞİŞTİ  src/components/BlocklyWorkspace.tsx hedefe göre toolbox
-DEĞİŞTİ  src/components/Toolbar.tsx          USB/BLE seçim listesi
-DEĞİŞTİ  src/blockly/toolbox.ts              toolboxForTarget()
-DEĞİŞTİ  src/library/roboarm-tasks.ts        20 → 71 görev
-DEĞİŞTİ  src/App.tsx                         mod + dikey uzatma çubuğu
-DEĞİŞTİ  src/styles.css                      stiller + menü z-index
-DEĞİŞTİ  public/robot/arm-sim.html           yardım metni yok, rx:ui, düğmeler gizli
+DEĞİŞTİ  src/robotarm/vm.ts          IR kumanda, servo v2 haritalama
+DEĞİŞTİ  src/robotarm/checker.ts     kontrol kuruluma bağlandı
+DEĞİŞTİ  src/robotarm/hw-bench.ts    IR kod girişi
+DEĞİŞTİ  src/components/RobotArmPanel.tsx  alt sekmeler + kalibrasyon
+DEĞİŞTİ  src/styles.css              topbar teması + yeni paneller
 ```
