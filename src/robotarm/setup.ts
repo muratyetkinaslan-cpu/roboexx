@@ -108,12 +108,58 @@ export const KARTLAR: Kart[] = [
   },
 ];
 
+/**
+ * 🧊 KÜP VE TUTUCU
+ *
+ * Gerçekte kullanılan küp: ku_p.3mf ("küp v3") — 25 × 25 × 25 mm,
+ * her yüzünde ~15 mm çapında 5 mm derin oyuk. Simülasyondaki küp bu
+ * ölçülerle çizilir.
+ *
+ * "Tutmak", servo açısının çeneleri küpün genişliğine kadar kapatması
+ * demektir. Simülasyonun gerçekle AYNI açıda tutması için tutucunun iki
+ * noktası ölçülür:
+ *   • çeneler tam açıkken servo kaç derece, açıklık kaç mm
+ *   • çeneler tam kapalıyken servo kaç derece, açıklık kaç mm
+ * Aradaki değerler doğrusal kabul edilir. Buradan "25 mm küpü tutmak
+ * için gereken açı" hesaplanır — çocuk o sayıyı koduna yazar ve hem
+ * simülasyonda hem gerçekte tutar.
+ */
+export interface KupTutucu {
+  /** Küp kenarı (mm). */
+  kupMm: number;
+  /** Çeneler tam açıkken servo açısı ve açıklık. */
+  acikAci: number; acikMm: number;
+  /** Çeneler tam kapalıyken servo açısı ve açıklık. */
+  kapaliAci: number; kapaliMm: number;
+}
+
+export const VARSAYILAN_KUP: KupTutucu = {
+  kupMm: 25,
+  acikAci: 150, acikMm: 45,
+  kapaliAci: 82, kapaliMm: 0,
+};
+
+/** Küpü tutmak için gereken tutucu servo açısı. */
+export function kavramaAcisi(k: KupTutucu): number {
+  if (k.acikMm === k.kapaliMm) return k.kapaliAci;
+  const t = (k.kupMm - k.kapaliMm) / (k.acikMm - k.kapaliMm);
+  return Math.round(k.kapaliAci + t * (k.acikAci - k.kapaliAci));
+}
+
+/** Güvenli bırakma açısı — çeneler küpten 8 mm daha açık. */
+export function birakmaAcisi(k: KupTutucu): number {
+  const g = { ...k, kupMm: k.kupMm + 8 };
+  return Math.min(Math.max(k.acikAci, k.kapaliAci), kavramaAcisi(g));
+}
+
 export interface Kurulum {
   kart: KartId;
   /** Eklem sırası: taban, omuz, dirsek, tutucu. */
   pin: [number, number, number, number];
   /** Çevre birimi pinleri — öğrenci kendi devresine göre değiştirir. */
   cevre: CevrePin;
+  /** Küp ölçüsü ve tutucu kalibrasyonu. */
+  kup: KupTutucu;
 }
 
 const ANAHTAR = 'roboexx.roboarm.kurulum';
@@ -129,11 +175,15 @@ export function kurulumOku(): Kurulum {
       const k = JSON.parse(s) as Kurulum;
       if (k && k.kart && Array.isArray(k.pin) && k.pin.length === 4) {
         // Eski kayıtlarda çevre pinleri yoktu — karttan tamamla.
-        return { ...k, cevre: { ...kartBul(k.kart).cevre, ...(k.cevre || {}) } };
+        return {
+          ...k,
+          cevre: { ...kartBul(k.kart).cevre, ...(k.cevre || {}) },
+          kup: { ...VARSAYILAN_KUP, ...(k.kup || {}) },
+        };
       }
     }
   } catch { /* yoksay */ }
-  return { kart: 'arduino', pin: [4, 5, 6, 7], cevre: { ...KAYNAK_CEVRE } };
+  return { kart: 'arduino', pin: [4, 5, 6, 7], cevre: { ...KAYNAK_CEVRE }, kup: { ...VARSAYILAN_KUP } };
 }
 
 export function kurulumYaz(k: Kurulum): void {

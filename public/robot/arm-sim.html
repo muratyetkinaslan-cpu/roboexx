@@ -126,6 +126,25 @@ byGroup.grip.forEach((m)=>{
 let GAXlocal=GAX.clone();   // gear ekseni — gripper çevrilince güncellenir
 
 const angles=[90,90,90,82];
+
+/* ── ÇENE AÇIKLIĞI ────────────────────────────────────────────────
+   Gerçekte tutmak, servo açısının çeneleri küpün genişliğine kadar
+   kapatmasıdır. Bu yüzden simülasyon "yakınsa tut" demez; servo
+   açısını MİLİMETRE açıklığa çevirir ve küpün 25 mm'sine göre karar
+   verir. İki kalibrasyon noktası öğretmenden gelir (rx:gripCal):
+   hangi açıda çeneler tam açık, hangi açıda tam kapalı. */
+let GRIP_CAL={acikAci:150, acikMm:45, kapaliAci:82, kapaliMm:0};
+function cene_mm(aci){
+  const c=GRIP_CAL, t=(aci-c.kapaliAci)/((c.acikAci-c.kapaliAci)||1);
+  return c.kapaliMm + t*(c.acikMm-c.kapaliMm);
+}
+/** Küpü tutmak için gereken servo açısı (çene = küp genişliği). */
+function kavramaAcisi(){
+  const c=GRIP_CAL, mm=CUBE*10;
+  if(c.acikMm===c.kapaliMm) return c.kapaliAci;
+  const t=(mm-c.kapaliMm)/(c.acikMm-c.kapaliMm);
+  return Math.round(c.kapaliAci + t*(c.acikAci-c.kapaliAci));
+}
 const axis=['y','z','z'];
 function deg(x){return x*Math.PI/180;}
 function apply(){
@@ -189,18 +208,53 @@ function getGripState(){ return {parts:gripPartNames.slice(), rot:gripRot.slice(
 applyGrip(gripPartNames,gripRot);            // varsayılanı kur
 
 // cube sits on a small stand at a graspable height (click "Küp Koy" to position it)
-let CUBE=3.0; const GRABY=6.0;            // CUBE = küp kenarı (cm, ayarlanır), GRABY = tutma yüksekliği
+// GERÇEK KÜP — ku_p.3mf ("küp v3") ölçüleri:
+//   dış ölçü 25.0 × 25.0 × 25.0 mm
+//   her yüzde ~15 mm çapında, ~5 mm derinliğinde dairesel oyuk
+// Sahne cm biriminde olduğu için 2.5 cm.
+let CUBE=2.5; const GRABY=6.0;            // CUBE = küp kenarı (cm), GRABY = tutma yüksekliği
+const KUP_OYUK={cap:1.5, derinlik:0.5};   // cm
 let TGTY=GRABY;                            // tıkla-git hedef yüksekliği (hava) — ayarlanır
 let _stance=false;                         // robot tüm duruşu 180° döndürülsün mü
-const cube=new THREE.Mesh(new THREE.BoxGeometry(CUBE,CUBE,CUBE),new THREE.MeshStandardMaterial({color:0x2fd0e6,metalness:.2,roughness:.4,emissive:0x0b3b44,emissiveIntensity:.55}));
-cube.castShadow=true;scene.add(cube);
+const kupMat=new THREE.MeshStandardMaterial({color:0x2fd0e6,metalness:.2,roughness:.42,emissive:0x0b3b44,emissiveIntensity:.5});
+const oyukMat=new THREE.MeshStandardMaterial({color:0x1b8d9e,metalness:.25,roughness:.7});
+/** Gerçek küpü kurar: gövde + altı yüzdeki dairesel oyuklar. */
+function kupYap(k){
+  const g=new THREE.Group();
+  const govde=new THREE.Mesh(new THREE.BoxGeometry(k,k,k),kupMat);
+  govde.castShadow=true; g.add(govde);
+  const r=KUP_OYUK.cap/2*(k/2.5), d=KUP_OYUK.derinlik*(k/2.5);
+  // Oyuk: yüzeyden içeri daralan koni (üst çap 15 mm → dip 12 mm)
+  const oyukGeo=new THREE.CylinderGeometry(r,r*0.79,d,28,1,true);
+  const dipGeo=new THREE.CircleGeometry(r*0.79,28);
+  const yuzler=[
+    [ k/2,0,0,  0,0,-Math.PI/2], [-k/2,0,0, 0,0, Math.PI/2],
+    [0, k/2,0,  0,0,0],          [0,-k/2,0, Math.PI,0,0],
+    [0,0, k/2,  Math.PI/2,0,0],  [0,0,-k/2, -Math.PI/2,0,0],
+  ];
+  yuzler.forEach(f=>{
+    const o=new THREE.Group();
+    o.position.set(f[0],f[1],f[2]); o.rotation.set(f[3],f[4],f[5]);
+    const duvar=new THREE.Mesh(oyukGeo,oyukMat); duvar.position.y=-d/2; o.add(duvar);
+    const dip=new THREE.Mesh(dipGeo,oyukMat); dip.position.y=-d; dip.rotation.x=-Math.PI/2; o.add(dip);
+    g.add(o);
+  });
+  return g;
+}
+const cube=kupYap(CUBE);
+scene.add(cube);
 const stand=new THREE.Mesh(new THREE.BoxGeometry(CUBE*1.5,1,CUBE*1.5),new THREE.MeshStandardMaterial({color:0x161d27,roughness:.95}));
 stand.receiveShadow=stand.castShadow=true;scene.add(stand);
 const cubeAt=new THREE.Vector3(0,0,9);     // current cube floor x,z
 const DROP=new THREE.Vector3(-8,0,6);      // where "Küpü Tut" sets it down
 function cubeOnStand(s){cube.position.set(s.x,GRABY,s.z);const h=GRABY-CUBE/2;stand.scale.y=h;stand.position.set(s.x,h/2,s.z);}
 cubeOnStand(cubeAt);
-function setCubeSize(cm){ CUBE=Math.max(0.5,Math.min(15,+cm||3)); cube.geometry.dispose(); cube.geometry=new THREE.BoxGeometry(CUBE,CUBE,CUBE); cubeOnStand(cubeAt); }
+function setCubeSize(cm){
+  CUBE=Math.max(0.5,Math.min(15,+cm||2.5));
+  while(cube.children.length) cube.remove(cube.children[0]);
+  kupYap(CUBE).children.slice().forEach(c=>cube.add(c));
+  cubeOnStand(cubeAt);
+}
 function setStance(on){ _stance=!!on; root.rotation.y=_stance?Math.PI:0; root.updateMatrixWorld(true); }
 const pPick=cubeAt;
 // ---- collision + manual grab (gripper vs cube) ----
@@ -213,8 +267,10 @@ function dropCube(){const p=cube.position.clone();const y=Math.max(p.y,CUBE/2),h
 function manualGrip(i,prev){
  if(demoOn||pickOn||repeatOn||anim)return;              // only when user drives the sliders
  const d=cubeDist();
- if(grabbed){ if(angles[3]>135){grabbed=false;dropCube();msg('bırakıldı');} return; }   // open -> release
- if(angles[3]<110 && d<1.5){ grabbed=true; msg('tutuldu — kolu oynat'); return; }       // close near cube -> hold
+ const mm=cene_mm(angles[3]), kupMm=CUBE*10;
+ if(grabbed){ if(mm>kupMm+6){grabbed=false;dropCube();msg('bırakıldı');} return; }      // çeneler açıldı → bırak
+ // Çeneler küpün genişliğine kapandıysa VE küp elin içindeyse tut.
+ if(mm<=kupMm+2 && d<1.5){ grabbed=true; msg('tutuldu ('+kupMm.toFixed(0)+' mm küp)'); return; }
  if(d<GR){ angles[i]=prev; sl[i].r.value=Math.round(prev); sl[i].v.textContent=Math.round(prev)+'°'; apply(); msg('küpe çarptı'); return; }  // solid -> stop at the cube
  msg('');
 }
@@ -628,6 +684,11 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
         break;
       case 'rx:assemblyOff':
         rxAssemblyOff();
+        break;
+      case 'rx:gripCal':
+        GRIP_CAL=Object.assign({},GRIP_CAL,d.cal||{});
+        if(d.kupMm) setCubeSize(d.kupMm/10);
+        post('rx:grip', { kavramaAcisi:kavramaAcisi(), kupMm:CUBE*10, cene:cene_mm(angles[3]) });
         break;
       case 'rx:ui': {
         // Servo Kontrolü panelinin parçalarını tek tek göster/gizle.

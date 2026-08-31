@@ -117,11 +117,26 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         trashcan: true,
         // wheel: true — touchpad ile her yöne (yukarı/aşağı/sağ/sol) kaydırma.
         move: { scrollbars: true, drag: true, wheel: true },
-        sounds: false,
+        // Blok sesleri (tık / bağlantı kopma / silme). Dosyalar
+        // public/blockly-media/ altında hazır duruyordu ama kapalıydı.
+        sounds: true,
       });
 
       wsRef.current = ws;
       multiselectRef.current = new SimpleMultiselect(ws);
+
+      /* ── SES KİLİDİ ──────────────────────────────────────────────
+         Tarayıcı, kullanıcı sayfayla etkileşime girmeden ses çalmaya
+         izin vermez. Blockly'nin `preload()` metodu sesleri kısık
+         seviyede bir kez oynatarak bu kapıyı açar — ama Blockly 11 bunu
+         kendiliğinden bir kullanıcı hareketine bağlamıyor. Biz bağlıyoruz:
+         ilk tıklama/tuşta sesler serbest kalır, blok birleşince "tık"
+         duyulur. */
+      const sesKilidiniAc = () => {
+        try { ws.getAudioManager()?.preload(); } catch { /* ses cihazı yoksa sessiz devam */ }
+      };
+      window.addEventListener('pointerdown', sesKilidiniAc, { once: true });
+      window.addEventListener('keydown', sesKilidiniAc, { once: true });
 
       // Daha önce loadState ile bir proje yüklenmişse (StrictMode 2x
       // mount, ya da loadState init'ten önce çağrıldıysa) onu geri yükle.

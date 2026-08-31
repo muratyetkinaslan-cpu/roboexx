@@ -117,6 +117,19 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const kurulumDegis = (k: Kurulum) => { setKurulum(k); kurulumYaz(k); };
   useEffect(() => { bench.pinAyarla(cevreHaritasi(kurulum)); }, [kurulum]);
 
+  /** Küp ölçüsü ve tutucu kalibrasyonunu 3B simülasyona bildir.
+   *  Böylece simülasyon, gerçek kolla AYNI servo açısında tutar. */
+  useEffect(() => {
+    postToSim({
+      type: 'rx:gripCal',
+      kupMm: kurulum.kup.kupMm,
+      cal: {
+        acikAci: kurulum.kup.acikAci, acikMm: kurulum.kup.acikMm,
+        kapaliAci: kurulum.kup.kapaliAci, kapaliMm: kurulum.kup.kapaliMm,
+      },
+    });
+  }, [kurulum, simReady]);
+
   /** 🎯 Kalibrasyon: tüm servoları 90°'ye al — simülasyonda ve kartta. */
   const kalibreEt = useCallback(() => {
     [0, 1, 2, 3].forEach((j) => {

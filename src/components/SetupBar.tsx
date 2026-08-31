@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { bench, rgbRengi, rgbAcikMi, type BenchState } from '../robotarm/hw-bench';
 import {
-  KARTLAR, kartBul, kurulumOzet, CEVRE_ALANLAR,
-  type Kurulum, type KartId, type CevrePin,
+  KARTLAR, kartBul, kurulumOzet, CEVRE_ALANLAR, kavramaAcisi, birakmaAcisi,
+  VARSAYILAN_KUP, type Kurulum, type KartId, type CevrePin, type KupTutucu,
 } from '../robotarm/setup';
 
 /**
@@ -26,13 +26,14 @@ export function SetupBar({
 }) {
   const [acik, setAcik] = useState(false);
   const [cevreAcik, setCevreAcik] = useState(false);
+  const [kupAcik, setKupAcik] = useState(false);
   const [kalibreEdildi, setKalibreEdildi] = useState(false);
   const kart = kartBul(kurulum.kart);
 
   const kartDegis = (id: KartId) => {
     // Kart değişince o kartın varsayılan pinlerine dönülür.
     const y = kartBul(id);
-    onDegis({ kart: id, pin: [...y.varsayilanPin], cevre: { ...y.cevre } });
+    onDegis({ ...kurulum, kart: id, pin: [...y.varsayilanPin], cevre: { ...y.cevre } });
   };
   const pinDegis = (eklem: number, p: number) => {
     const y = [...kurulum.pin] as Kurulum['pin'];
@@ -42,6 +43,10 @@ export function SetupBar({
   const cevreDegis = (alan: keyof CevrePin, p: number) =>
     onDegis({ ...kurulum, cevre: { ...kurulum.cevre, [alan]: p } });
   const cevreSifirla = () => onDegis({ ...kurulum, cevre: { ...kart.cevre } });
+  const kupDegis = (alan: keyof KupTutucu, v: number) =>
+    onDegis({ ...kurulum, kup: { ...kurulum.kup, [alan]: v } });
+  const tut = kavramaAcisi(kurulum.kup);
+  const birak = birakmaAcisi(kurulum.kup);
 
   const kalibre = () => {
     onKalibre();
@@ -79,6 +84,9 @@ export function SetupBar({
         </button>
         <button className="sb-pinbtn" onClick={() => setCevreAcik((a) => !a)} title="Sensör ve çıkış pinlerini değiştir">
           {cevreAcik ? '▾' : '▸'} Donanım pinleri
+        </button>
+        <button className="sb-pinbtn" onClick={() => setKupAcik((a) => !a)} title="Küp ölçüsü ve tutucu kalibrasyonu">
+          {kupAcik ? '▾' : '▸'} 🧊 Küp
         </button>
       </div>
 
@@ -130,6 +138,50 @@ export function SetupBar({
             Kendi devrende sensörü başka pine taktıysan burayı değiştir —
             cevap anahtarı da o pine göre çevrilir.
             <button className="sb-sifirla" onClick={cevreSifirla}>varsayılana dön</button>
+          </p>
+        </div>
+      )}
+
+      {kupAcik && (
+        <div className="sb-pinler sb-kup">
+          <label>
+            <span>🧊 Küp kenarı</span>
+            <select value={kurulum.kup.kupMm} onChange={(e) => kupDegis('kupMm', Number(e.target.value))}>
+              {[15, 20, 25, 30, 35, 40].map((m) => <option key={m} value={m}>{m} mm</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Çene AÇIK · açı</span>
+            <input type="number" min={0} max={180} value={kurulum.kup.acikAci}
+              onChange={(e) => kupDegis('acikAci', Number(e.target.value))} />
+          </label>
+          <label>
+            <span>Çene AÇIK · mm</span>
+            <input type="number" min={0} max={120} value={kurulum.kup.acikMm}
+              onChange={(e) => kupDegis('acikMm', Number(e.target.value))} />
+          </label>
+          <label>
+            <span>Çene KAPALI · açı</span>
+            <input type="number" min={0} max={180} value={kurulum.kup.kapaliAci}
+              onChange={(e) => kupDegis('kapaliAci', Number(e.target.value))} />
+          </label>
+          <label>
+            <span>Çene KAPALI · mm</span>
+            <input type="number" min={0} max={120} value={kurulum.kup.kapaliMm}
+              onChange={(e) => kupDegis('kapaliMm', Number(e.target.value))} />
+          </label>
+
+          <div className="sb-kavrama">
+            <b>🤏 {kurulum.kup.kupMm} mm küpü tutmak için: tutucu {tut}°</b>
+            <span>Bırakmak için: {birak}° · Bu açı hem simülasyonda hem gerçek kolda tutar.</span>
+          </div>
+          <p className="sb-not">
+            Gerçek kolda çeneleri tam açıp servo açısını, sonra tam kapatıp açısını
+            yaz — aradaki değerler hesaplanır. Küp <b>ku_p.3mf</b> ölçüleriyle
+            çizildi: 25 mm, her yüzünde 15 mm çapında 5 mm oyuk.
+            <button className="sb-sifirla" onClick={() => onDegis({ ...kurulum, kup: { ...VARSAYILAN_KUP } })}>
+              varsayılana dön
+            </button>
           </p>
         </div>
       )}
