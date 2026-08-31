@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { bench, rgbRengi, rgbAcikMi, type BenchState } from '../robotarm/hw-bench';
 import {
-  KARTLAR, kartBul, kurulumOzet, type Kurulum, type KartId,
+  KARTLAR, kartBul, kurulumOzet, CEVRE_ALANLAR,
+  type Kurulum, type KartId, type CevrePin,
 } from '../robotarm/setup';
 
 /**
@@ -24,18 +25,23 @@ export function SetupBar({
   kartBagli: boolean;
 }) {
   const [acik, setAcik] = useState(false);
+  const [cevreAcik, setCevreAcik] = useState(false);
   const [kalibreEdildi, setKalibreEdildi] = useState(false);
   const kart = kartBul(kurulum.kart);
 
   const kartDegis = (id: KartId) => {
+    // Kart değişince o kartın varsayılan pinlerine dönülür.
     const y = kartBul(id);
-    onDegis({ kart: id, pin: [...y.varsayilanPin] });
+    onDegis({ kart: id, pin: [...y.varsayilanPin], cevre: { ...y.cevre } });
   };
   const pinDegis = (eklem: number, p: number) => {
     const y = [...kurulum.pin] as Kurulum['pin'];
     y[eklem] = p;
     onDegis({ ...kurulum, pin: y });
   };
+  const cevreDegis = (alan: keyof CevrePin, p: number) =>
+    onDegis({ ...kurulum, cevre: { ...kurulum.cevre, [alan]: p } });
+  const cevreSifirla = () => onDegis({ ...kurulum, cevre: { ...kart.cevre } });
 
   const kalibre = () => {
     onKalibre();
@@ -68,8 +74,11 @@ export function SetupBar({
           {kalibreEdildi ? '✓ 90° verildi' : '🎯 Kalibre et'}
         </button>
 
-        <button className="sb-pinbtn" onClick={() => setAcik((a) => !a)} title="Pinleri değiştir">
-          {acik ? '▾' : '▸'} Pinler
+        <button className="sb-pinbtn" onClick={() => setAcik((a) => !a)} title="Servo pinlerini değiştir">
+          {acik ? '▾' : '▸'} Servo pinleri
+        </button>
+        <button className="sb-pinbtn" onClick={() => setCevreAcik((a) => !a)} title="Sensör ve çıkış pinlerini değiştir">
+          {cevreAcik ? '▾' : '▸'} Donanım pinleri
         </button>
       </div>
 
@@ -96,6 +105,31 @@ export function SetupBar({
           <p className="sb-not">
             Cevap anahtarları seçtiğin pinlere göre çevriliyor — doğru yazdığın
             kod "yanlış pin" uyarısı almaz.
+          </p>
+        </div>
+      )}
+
+      {cevreAcik && (
+        <div className="sb-pinler sb-cevre">
+          {CEVRE_ALANLAR.map((c) => (
+            <label key={c.anahtar}>
+              <span>{c.emoji} {c.ad}</span>
+              <select
+                value={kurulum.cevre[c.anahtar]}
+                onChange={(e) => cevreDegis(c.anahtar, Number(e.target.value))}
+              >
+                {(c.tur === 'analog' ? kart.analogSecenek : kart.pinSecenek).map((p) => (
+                  <option key={p} value={p}>
+                    {c.tur === 'analog' ? `A${p - 26} (${p})` : `D${p}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <p className="sb-not">
+            Kendi devrende sensörü başka pine taktıysan burayı değiştir —
+            cevap anahtarı da o pine göre çevrilir.
+            <button className="sb-sifirla" onClick={cevreSifirla}>varsayılana dön</button>
           </p>
         </div>
       )}
@@ -217,5 +251,50 @@ function Kaydirici(p: {
       <input type="range" min={p.min} max={p.max} value={p.deger}
         onChange={(e) => p.onChange(+e.target.value)} />
     </label>
+  );
+}
+
+/**
+ * 🔴 ÇIKIŞ ŞERİDİ — görev sekmesinin üstünde tek satır.
+ *
+ * Çocuk hatayı okurken RGB'nin yanıp yanmadığını, buzzerın ötüp ötmediğini
+ * görmek için sekme değiştirmek zorunda kalmasın diye burada da duruyor.
+ * Değer vermek (sensör kaydırıcıları) Donanım sekmesinde.
+ */
+export function OutputStrip() {
+  const [s, setS] = useState<BenchState>(() => bench.durum());
+  useEffect(() => bench.abone(setS), []);
+  const renk = rgbRengi(s);
+  const yanik = rgbAcikMi(s);
+
+  return (
+    <div className="os">
+      <span className="os-oge" title="RGB LED">
+        <span
+          className="os-bulb"
+          style={{
+            background: yanik ? renk : '#141417',
+            borderColor: yanik ? renk : '#2A2A30',
+            boxShadow: yanik ? `0 0 13px ${renk}` : 'none',
+          }}
+        />
+        <span className="os-legs">
+          {([9, 10, 11] as const).map((p) => (
+            <i key={p} className={`os-leg l${p} ${s.rgb[p] ? 'on' : ''}`} />
+          ))}
+        </span>
+      </span>
+
+      <span className={`os-oge ${s.buzzer ? 'is-on' : ''}`} title="Buzzer">
+        <span className={`os-spk ${s.buzzer ? 'on' : ''}`}>🔊</span>
+        <b>{s.buzzer ? s.buzzer.freq : '—'}</b>
+      </span>
+
+      <span className={`os-oge ${s.role ? 'is-on' : ''}`} title="Röle">⚡</span>
+
+      <span className="os-not">
+        📏 {s.girisler.mesafe} cm · 🌗 {s.girisler.ldr} · 🔦 {s.girisler.irKod || '—'}
+      </span>
+    </div>
   );
 }

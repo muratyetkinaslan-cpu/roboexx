@@ -83,6 +83,13 @@ export interface CalistirSecenek {
   maxSanalMs?: number;
   /** Servo pini → eklem. Panel ayarlarından üretilir. */
   pinEklem?: Record<number, number>;
+  /** Çevre birimi pinleri (RGB, buzzer, analog girişler, buton, IR).
+   *  Verilmezse müfredat varsayılanı kullanılır. */
+  cevre?: Partial<{
+    buzzer: number; rgbR: number; rgbG: number; rgbB: number; role: number;
+    trig: number; echo: number; pot: number; ldr: number; sicaklik: number;
+    ir: number; buton: number;
+  }>;
   /** Basılı tuşlar (gamepad/klavye blokları için) */
   tuslar?: Set<string>;
   tuslarBir?: Set<string>;
@@ -122,10 +129,21 @@ export async function calistir(
   const maxSanalMs = sec.maxSanalMs ?? 30000;
   const durdur = sec.durdur ?? (() => false);
   const pinEklem = { ...MUFREDAT_PIN_EKLEM, ...(sec.pinEklem || {}) };
+  const CEV = {
+    buzzer: 8, rgbR: 9, rgbG: 10, rgbB: 11, role: 3,
+    trig: 12, echo: 13, pot: 26, ldr: 27, sicaklik: 28, ir: 2, buton: 2,
+    ...(sec.cevre || {}),
+  };
+  /** Bu pin RGB'nin hangi bacağı? (yoksa null) */
+  const rgbBacak = (p: number): 'r' | 'g' | 'b' | null =>
+    p === CEV.rgbR ? 'r' : p === CEV.rgbG ? 'g' : p === CEV.rgbB ? 'b' : null;
 
   const iz: Olay[] = [];
   const ciktilar: string[] = [];
   const blokSayisi: Record<string, number> = Object.create(null);
+
+  /** RGB bacaklarının o anki durumu — renk buradan hesaplanır. */
+  const rgbDurum: { r: number; g: number; b: number } = { r: 0, g: 0, b: 0 };
 
   let sanal = 0;
   let adim = 0;
@@ -385,15 +403,16 @@ export async function calistir(
       }
       case 'rx_analog_read': {
         await nefes();
-        const pin = say(f.PIN ?? 26);
-        const v = pin === 27 ? sensorOku('ldr') : pin === 28 ? sensorOku('sicaklik') : sensorOku('pot');
+        const pin = say(f.PIN ?? CEV.pot);
+        const v = pin === CEV.ldr ? sensorOku('ldr')
+          : pin === CEV.sicaklik ? sensorOku('sicaklik') : sensorOku('pot');
         yay({ k: 'read', dev: 'analog' + pin, val: v, bid: b.id });
         return v;
       }
       case 'rx_digital_read': {
         await nefes();
-        const pin = say(f.PIN ?? 2);
-        return pin === 2 ? (butonOku() ? 1 : 0) : (bench.durum().pinler[pin] ?? 0);
+        const pin = say(f.PIN ?? CEV.buton);
+        return pin === CEV.buton ? (butonOku() ? 1 : 0) : (bench.durum().pinler[pin] ?? 0);
       }
       case 'rx_button_pressed': {
         await nefes();
@@ -568,8 +587,12 @@ export async function calistir(
         const pin = say(f.PIN);
         const v = (f.STATE === 'HIGH' || f.STATE === 1 || f.STATE === '1') ? 1 : 0;
         if (live) bench.dijitalYaz(pin, v);
-        if (pin === 9 || pin === 10 || pin === 11) {
-          yay({ k: 'rgb', pin, val: v, color: rgbHexPin(pin, v), bid: b.id });
+        const bacak = rgbBacak(pin);
+        if (bacak) {
+          rgbDurum[bacak] = v;
+          const hex = '#' + (['r', 'g', 'b'] as const)
+            .map((x) => (rgbDurum[x] ? 'ff' : '00')).join('');
+          yay({ k: 'rgb', pin, val: v, color: hex, bid: b.id });
         } else {
           yay({ k: 'digital', pin, val: v, bid: b.id });
         }
@@ -728,14 +751,6 @@ export async function calistir(
   return { iz, ciktilar, hata, hataBid, sanalMs: Math.round(sanal), adim, blokSayisi };
 }
 
-function rgbHexPin(pin: number, v: number): string {
-  const s = bench.durum();
-  const r = pin === 9 ? v : s.rgb[9];
-  const g = pin === 10 ? v : s.rgb[10];
-  const b = pin === 11 ? v : s.rgb[11];
-  return '#' + [r ? 255 : 0, g ? 255 : 0, b ? 255 : 0]
-    .map((c) => c.toString(16).padStart(2, '0')).join('');
-}
 
 /** Blok ağacını düz listeye açar — statik kontroller için. */
 export function bloklariAc(alan: CalismaAlani | null): BlokNode[] {

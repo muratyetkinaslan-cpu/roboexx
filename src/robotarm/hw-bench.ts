@@ -97,8 +97,29 @@ class HardwareBench {
 
   // ── Programın yazdıkları ────────────────────────────────────────
 
+  /** RGB bacaklarının pinleri — kurulumdan gelir. */
+  private rgbPin: [number, number, number] = [PIN.rgbR, PIN.rgbG, PIN.rgbB];
+  private rolePin: number = PIN.role;
+
+  /** Kurulum değişince çağrılır: hangi pin hangi bacak? */
+  pinAyarla(c: { rgbR: number; rgbG: number; rgbB: number; role: number }): void {
+    this.rgbPin = [c.rgbR, c.rgbG, c.rgbB];
+    this.rolePin = c.role;
+  }
+
   dijitalYaz(pin: number, deger: number): void {
     const v = deger ? 1 : 0;
+    const idx = this.rgbPin.indexOf(pin);
+    if (idx >= 0) {
+      // Panel her zaman 9/10/11 anahtarlarıyla gösterir; pin değişse bile
+      // kırmızı/yeşil/mavi sırası korunur.
+      const anahtar = [9, 10, 11][idx];
+      this.s.rgb = { ...this.s.rgb, [anahtar]: v } as BenchState['rgb'];
+      this.s.rgbHex = null;
+      this.yayinla();
+      return;
+    }
+    if (pin === this.rolePin) { this.s.role = v as 0 | 1; this.yayinla(); return; }
     if (pin === PIN.rgbR || pin === PIN.rgbG || pin === PIN.rgbB) {
       this.s.rgb = { ...this.s.rgb, [pin]: v } as BenchState['rgb'];
       this.s.rgbHex = null;

@@ -20,9 +20,9 @@ import { gorevKontrol, type KontrolSonucu } from '../robotarm/checker';
 import { bulgulariIsaretle, isaretleriTemizle, blogaGit, calisanBlok } from '../robotarm/block-marks';
 import { type Gorev } from '../robotarm/tasks';
 import { ManualBench } from './ManualBench';
-import { SetupBar, HardwarePanel } from './SetupBar';
+import { SetupBar, HardwarePanel, OutputStrip } from './SetupBar';
 import {
-  kurulumOku, kurulumYaz, pinEklemHaritasi, anahtariUyarla, type Kurulum,
+  kurulumOku, kurulumYaz, pinEklemHaritasi, anahtariUyarla, cevreHaritasi, type Kurulum,
 } from '../robotarm/setup';
 import { ArmTaskBar } from './ArmTaskBar';
 
@@ -115,6 +115,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   const [kurulum, setKurulum] = useState<Kurulum>(() => kurulumOku());
   const kurulumRef = useRef(kurulum); kurulumRef.current = kurulum;
   const kurulumDegis = (k: Kurulum) => { setKurulum(k); kurulumYaz(k); };
+  useEffect(() => { bench.pinAyarla(cevreHaritasi(kurulum)); }, [kurulum]);
 
   /** 🎯 Kalibrasyon: tüm servoları 90°'ye al — simülasyonda ve kartta. */
   const kalibreEt = useCallback(() => {
@@ -427,7 +428,12 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
       // Cevap anahtarı öğrencinin kartına/pinlerine çevrilir, sonra
       // karşılaştırılır — PicoBricks'te "Sürücü Servo" yazan çocuk
       // "yanlış blok" uyarısı almaz.
-      gorevKontrol(alan, anahtariUyarla(hedefGorev.anahtar, kurulumRef.current), pinEklemHaritasi(kurulumRef.current))
+      gorevKontrol(
+        alan,
+        anahtariUyarla(hedefGorev.anahtar, kurulumRef.current),
+        pinEklemHaritasi(kurulumRef.current),
+        cevreHaritasi(kurulumRef.current),
+      )
         .then((sonuc) => {
           onKontrolSonucu(sonuc);
           const n = bulgulariIsaretle(ws, sonuc.bulgular);
@@ -452,6 +458,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     vmCalistir(alan, {
       live: true,
       pinEklem,
+      cevre: cevreHaritasi(kurulumRef.current),
       durdur: () => runCtl.current.abort,
       tuslar: keysRef.current,
       tuslarBir: keysOnceRef.current,
@@ -754,6 +761,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
             )}
 
             <div className={altSekme === 'gorev' ? '' : 'is-gizli'}>
+            <OutputStrip />
             <ArmTaskBar
               seciliId={gorev?.id ?? 0}
               onGorevSec={onGorevSec}

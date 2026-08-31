@@ -7552,3 +7552,49 @@ button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
 }
 .ra-alt > div:not(.ra-sekme) { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .is-gizli { display: none !important; }
+
+/* ═══ ÇIKIŞ ŞERİDİ (görev sekmesi üstü) ════════════════════════════
+   Çocuk hatayı okurken RGB/buzzer durumunu görmek için sekme
+   değiştirmek zorunda kalmasın diye. */
+.os {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 11px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--rx-border-soft);
+  background: var(--rx-surface2);
+}
+.os-oge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 7px;
+  background: var(--rx-surface); border: 1px solid var(--rx-border-soft);
+  font-size: 11px; color: var(--rx-text-dim);
+}
+.os-oge b { font-family: var(--font-mono); color: var(--rx-text); font-size: 10.5px; }
+.os-oge.is-on { border-color: var(--rx-accent); background: var(--rx-accent-soft); }
+.os-bulb {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 2px solid #2A2A30; background: #141417;
+  transition: background .12s, box-shadow .12s, border-color .12s;
+}
+.os-legs { display: inline-flex; gap: 2px; }
+.os-leg {
+  width: 7px; height: 7px; border-radius: 2px;
+  background: var(--rx-surface2); border: 1px solid var(--rx-border);
+}
+.os-leg.l9.on { background: #EF4444; border-color: #EF4444; }
+.os-leg.l10.on { background: #22C55E; border-color: #22C55E; }
+.os-leg.l11.on { background: #3B82F6; border-color: #3B82F6; }
+.os-spk { font-size: 12px; filter: grayscale(1); opacity: .5; }
+.os-spk.on { filter: none; opacity: 1; animation: hws-pulse .35s infinite; }
+.os-not {
+  margin-left: auto; font-family: var(--font-mono);
+  font-size: 10px; color: var(--rx-text-muted);
+}
+
+/* Donanım pinleri ızgarası */
+.sb-cevre label { flex: 1 1 108px; }
+.sb-sifirla {
+  margin-left: 7px; padding: 2px 8px; border-radius: 6px;
+  background: var(--rx-surface); border: 1px solid var(--rx-border);
+  color: var(--rx-accent); font: inherit; font-size: 10.5px; cursor: pointer;
+}
+.sb-sifirla:hover { border-color: var(--rx-accent); background: var(--rx-accent-soft); }

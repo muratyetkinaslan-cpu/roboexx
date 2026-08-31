@@ -18,7 +18,7 @@
  * (yanlış alarm yok).
  */
 
-import { calistir, bloklariAc, EKLEM_AD, MUFREDAT_PIN_EKLEM, type CalismaAlani, type BlokNode, type Olay } from './vm';
+import { calistir, bloklariAc, EKLEM_AD, MUFREDAT_PIN_EKLEM, type CalismaAlani, type BlokNode, type Olay, type CalistirSecenek } from './vm';
 import { GUVENLI_ACI } from './hw-bench';
 
 export type Onem = 'hata' | 'uyari' | 'ipucu' | 'iyi';
@@ -146,6 +146,8 @@ export async function gorevKontrol(
    *  bu haritaya göre yapılır; yoksa D10'a takan çocuk haksız yere
    *  "D10 pininde servo yok" uyarısı alırdı. */
   pinEklem?: Record<number, number>,
+  /** Çevre birimi pinleri — RGB/buzzer/sensörler öğrencinin devresine göre. */
+  cevre?: CalistirSecenek['cevre'],
 ): Promise<KontrolSonucu> {
   const HARITA = pinEklem && Object.keys(pinEklem).length ? pinEklem : MUFREDAT_PIN_EKLEM;
   const PIN_ADI = (p: number) => EKLEM_AD[HARITA[p] ?? 0];
@@ -193,8 +195,8 @@ export async function gorevKontrol(
   const kosular = [];
   for (const s of senaryolar) {
     const [ak, ok] = await Promise.all([
-      calistir(anahtar, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA }),
-      calistir(ogrenci, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA }),
+      calistir(anahtar, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA, cevre }),
+      calistir(ogrenci, { live: false, tohum: 20260831, sensor: s.sensor, pinEklem: HARITA, cevre }),
     ]);
     const ac = ciktiOlaylari(ak.iz), oc = ciktiOlaylari(ok.iz);
     const ad = hizala(ac, oc);
