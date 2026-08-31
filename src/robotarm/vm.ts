@@ -736,16 +736,41 @@ export async function calistir(
     return fn.donerMi ? await deger(fn.don, yerel) : 0;
   }
 
+  /* ── PROGRAM BİTİNCE SERVOLAR YOLA DEVAM EDER ────────────────────
+     Gerçek kartta `servo.write()` komutu verildikten sonra servo, program
+     bitse bile hedefine gider — akım kesilene kadar orada durur.
+     Bu adım olmadan "servo 150" yazan ama bekleme koymayan çocuğun kolu
+     yalnızca birkaç derece oynuyordu. */
+  async function yerlesme(): Promise<void> {
+    if (!live) return;
+    const bitis = performance.now() + 4000;          // en fazla 4 sn
+    let onceki = performance.now();
+    for (;;) {
+      const kalan = hedefAci.reduce((m, h, j) => Math.max(m, Math.abs(h - eklemAci[j])), 0);
+      if (kalan < 0.1 || performance.now() > bitis || durdur()) break;
+      await new Promise((r) => setTimeout(r, 16));
+      const simdiT = performance.now();
+      ilerlet(simdiT - onceki);
+      onceki = simdiT;
+    }
+    // Kalan kırıntıyı da kapat: son poz tam olsun.
+    for (let j = 0; j < 4; j++) {
+      if (eklemAci[j] !== hedefAci[j]) { eklemAci[j] = hedefAci[j]; eklemYaz(j, hedefAci[j]); }
+    }
+  }
+
   /* ── BAŞLAT ── */
   const ana = ustler.find((b) => b.type === 'rx_on_start');
   try {
     if (!ana) hata = 'Programda "Başlangıçta" bloğu yok — kod hiç çalışmaz.';
-    else await zincir(girdi(ana, 'DO'), null);
+    else { await zincir(girdi(ana, 'DO'), null); await yerlesme(); }
   } catch (e) {
     const err = e as { __sinir?: string; __kir?: boolean; __devam?: boolean; message?: string };
     if (e === DUR || err?.__kir || err?.__devam) { /* normal duruş */ }
     else if (err?.__sinir) { /* sonsuz döngü/süre sınırı — normal bitiş sayılır */ }
     else { hata = err?.message || String(e); }
+    // Durdurulsa bile servolar son komutu tamamlar (gerçekte de öyle olur).
+    if (e !== DUR) { try { await yerlesme(); } catch { /* yoksay */ } }
   }
 
   return { iz, ciktilar, hata, hataBid, sanalMs: Math.round(sanal), adim, blokSayisi };
