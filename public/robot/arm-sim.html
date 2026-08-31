@@ -39,21 +39,16 @@ body.rxa .ui{display:none!important}
 </style></head><body><div id="app">
 <div class="ui" id="head"><div class="logo">Robo<span>GPT</span></div>
 <div class="tag">Robot Kol · rig v2 · ~19.0 cm</div></div>
-<div class="ui" id="hint">Sürükle: döndür · Tekerlek: yakınlaş/uzaklaş (200 cm)<br>Küp Koy / Öğret modunda zemine tıkla</div>
 <div class="ui" id="panel"><h2>Servo Kontrolü</h2>
 <div class="joint" data-j="0"><div class="row"><span class="name"><span class="dot" style="background:#3a3a3a"></span>Taban <span class="servo">· MG90S · yaw (Y)</span></span><span class="val">90°</span></div><input type="range" min="0" max="180" value="90"></div>
 <div class="joint" data-j="1"><div class="row"><span class="name"><span class="dot" style="background:#ff6a1a"></span>Omuz <span class="servo">· MG996R · pitch (Z)</span></span><span class="val">90°</span></div><input type="range" min="0" max="180" value="90"></div>
 <div class="joint" data-j="2"><div class="row"><span class="name"><span class="dot" style="background:#3a3a3a"></span>Dirsek <span class="servo">· Servo · pitch (Z)</span></span><span class="val">90°</span></div><input type="range" min="0" max="180" value="90"></div>
 <div class="joint" data-j="3"><div class="row"><span class="name"><span class="dot" style="background:#ff6a1a"></span>Gripper <span class="servo">· Servo(1) · 82 kapalı–150 açık</span></span><span class="val">82°</span></div><input type="range" min="82" max="150" value="82"></div>
 <div id="serial"><b>Pico &rarr;</b> <span id="ser">S1:90 S2:90 S3:90 S4:90</span></div>
-<div class="btns"><button id="demo">Demo</button><button id="pick">Küpü Tut</button><button id="reset">Sıfırla</button></div>
-<div class="btns"><button id="goto">Hedefe Git</button><button id="target">Küp Koy</button><button id="teach">Öğret</button><button id="repeat">Tekrarla</button></div>
+<div class="btns" id="btnrow"><button id="reset">Sıfırla</button></div>
 <div id="status">Mod: <b id="modet">Serbest</b> · Nokta: <b id="wpn">0</b> <span id="msg"></span></div>
 <div id="coords">Uç (IK): <b id="cx">0.0</b>, <b id="cy">0.0</b>, <b id="cz">0.0</b> cm · merkeze <b id="cr">0.0</b> cm</div></div>
-<div class="ui" id="info"><h3>Eklemler</h3>
-Taban (Y), omuz + dirsek (Z), <b>gripper</b> 4. servoyla açılıp kapanıyor.<br><br>
-<b>Küp Koy</b>: zemine tıkla, küp oraya gider (kol oynamaz). <b>Küpü Tut</b>: kol gidip küpü alır ve <b>tutar</b>; sonra bir noktaya tıkla → oraya bırakır.<br><br>
-<b>Öğret</b>: noktalara tıkla (kaydeder). <b>Tekrarla</b>: kol o noktaları gezer. Kol küçük — küpü tabana yakın koy.</div>
+
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -633,6 +628,24 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
       case 'rx:assemblyOff':
         rxAssemblyOff();
         break;
+      case 'rx:ui': {
+        // Servo Kontrolü panelinin parçalarını tek tek göster/gizle.
+        // React tarafındaki "Görünüm" onay kutuları buraya yazar.
+        const v = d.parts || {};
+        const set = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? '' : 'none'; };
+        const p0 = document.getElementById('panel');
+        if (p0) p0.style.display = d.panel === false ? 'none' : '';
+        document.querySelectorAll('#panel .joint').forEach((el, i) => {
+          el.style.display = (v['j' + i] === false) ? 'none' : '';
+        });
+        set('serial', v.serial !== false);
+        set('btnrow', v.buttons !== false);
+        set('status', v.status !== false);
+        set('coords', v.coords !== false);
+        const h2 = document.querySelector('#panel h2');
+        if (h2) h2.style.display = v.title === false ? 'none' : '';
+        break;
+      }
       case 'rx:ping':
         post('rx:ready', { angles: angles.slice() });
         break;

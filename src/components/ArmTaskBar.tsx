@@ -119,12 +119,14 @@ const BASLIK: Record<KontrolSonucu['karar'], { emoji: string; metin: string; sin
 };
 
 function Rapor({ sonuc, onBlogaGit }: { sonuc: KontrolSonucu; onBlogaGit: (b: string) => void }) {
-  const [hepsi, setHepsi] = useState(false);
   const b = BASLIK[sonuc.karar];
 
-  // "iyi" bulgusu tebrik satırıdır, sorun listesine girmez.
+  // SIRALI DÜZELTME: bir seferde tek sorun gösterilir. Çocuk onu düzeltip
+  // tekrar çalıştırınca sıradaki ortaya çıkar. Hepsini birden görmek
+  // (özellikle 4-5 madde) çocuğu bunaltıyor ve hiçbirine başlamıyor.
   const sorunlar = sonuc.bulgular.filter((f) => f.onem !== 'iyi');
-  const gosterilen = hepsi ? sorunlar : sorunlar.slice(0, 1);
+  const gosterilen = sorunlar.slice(0, 1);
+  const kalan = sorunlar.length - 1;
 
   return (
     <div className={`atb-sonuc atb-${b.sinif}`}>
@@ -133,7 +135,7 @@ function Rapor({ sonuc, onBlogaGit }: { sonuc: KontrolSonucu; onBlogaGit: (b: st
         <span className="atb-sonuc-t">
           <b>{b.metin}</b>
           {sorunlar.length > 0 && (
-            <span>{sorunlar.length === 1 ? '1 şeye bakalım' : `${sorunlar.length} şeye bakalım`}</span>
+            <span>Şimdi şuna bakalım</span>
           )}
         </span>
       </div>
@@ -148,10 +150,11 @@ function Rapor({ sonuc, onBlogaGit }: { sonuc: KontrolSonucu; onBlogaGit: (b: st
         <SorunKarti key={f.kod + i} bulgu={f} onBlogaGit={onBlogaGit} ilk={i === 0} />
       ))}
 
-      {sorunlar.length > 1 && (
-        <button className="atb-daha" onClick={() => setHepsi((h) => !h)}>
-          {hepsi ? '▴ Sadece en önemlisini göster' : `▾ Diğer ${sorunlar.length - 1} şeyi de göster`}
-        </button>
+      {kalan > 0 && (
+        <p className="atb-sira">
+          Önce bunu düzelt, sonra tekrar <b>▶ Çalıştır</b>'a bas.
+          {kalan === 1 ? ' Sonra bir şeye daha bakacağız.' : ` Sonra ${kalan} şeye daha bakacağız.`}
+        </p>
       )}
     </div>
   );

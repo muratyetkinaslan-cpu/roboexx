@@ -20,6 +20,8 @@ import { gorevKontrol, type KontrolSonucu } from '../robotarm/checker';
 import { bulgulariIsaretle, isaretleriTemizle, blogaGit, calisanBlok } from '../robotarm/block-marks';
 import { type Gorev } from '../robotarm/tasks';
 import { ManualBench } from './ManualBench';
+import { ArmTaskBar } from './ArmTaskBar';
+
 
 /** App'in serial telemetrisini panele iletmesi için imperative handle. */
 export interface RobotArmHandle {
@@ -45,6 +47,9 @@ interface Props {
   onKontrolSonucu: (s: KontrolSonucu | null) => void;
   onKontrolBasladi: () => void;
   onCalisiyorDegisti: (c: boolean) => void;
+  onGorevSec: (g: Gorev) => void;
+  kontrol: KontrolSonucu | null;
+  kontrolEdiliyor: boolean;
   /** Tek/çok satırlık MicroPython'u REPL'e gönder (App uygular). */
   onSendCode: (code: string) => void;
   /** Tam ekran mı? */
@@ -67,7 +72,8 @@ const SIM_URL = '/robot/arm-sim.html';
 
 export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArmPanel(
   { connected, mode, onModeChange, gorev, onKontrolSonucu, onKontrolBasladi,
-    onCalisiyorDegisti, onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
+    onCalisiyorDegisti, onGorevSec, kontrol, kontrolEdiliyor,
+    onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
 ) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [cfg, setCfg] = useState<ArmConfig>(() => loadArmConfig());
@@ -100,6 +106,47 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
   /** Kodsuz modda kaydırıcıların gösterdiği açılar. */
   const [manualAngles, setManualAngles] = useState<number[]>([90, 90, 90, 40]);
+
+  /** Simülasyon içindeki "Servo Kontrolü" panelinin görünürlüğü.
+   *  Tamamı kapatılabilir; parçalar (kaydırıcılar, seri satırı, düğmeler,
+   *  durum, koordinat) tek tek gizlenebilir. */
+  const [simUi, setSimUi] = useState(() => {
+    try {
+      const k = localStorage.getItem('roboexx.roboarm.simui');
+      if (k) return JSON.parse(k) as Record<string, boolean>;
+    } catch { /* yoksay */ }
+    return { panel: true, j0: true, j1: true, j2: true, j3: true, serial: true, buttons: true, status: true, coords: true };
+  });
+  useEffect(() => {
+    try { localStorage.setItem('roboexx.roboarm.simui', JSON.stringify(simUi)); } catch { /* yoksay */ }
+    postToSim({ type: 'rx:ui', panel: simUi.panel, parts: simUi });
+  }, [simUi, simReady]);
+
+  /** Kodlu modda simülasyon ile hata panelinin oranı (%). Sürüklenebilir. */
+  const [simYuzde, setSimYuzde] = useState<number>(() => {
+    const v = Number(localStorage.getItem('roboexx.roboarm.simyuzde'));
+    return Number.isFinite(v) && v >= 20 && v <= 85 ? v : 52;
+  });
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const surukle = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const kutu = bodyRef.current?.getBoundingClientRect();
+    if (!kutu) return;
+    const hedef = e.currentTarget as HTMLElement;
+    hedef.setPointerCapture(e.pointerId);
+    const hareket = (ev: PointerEvent) => {
+      const y = ((ev.clientY - kutu.top) / kutu.height) * 100;
+      setSimYuzde(Math.max(20, Math.min(85, y)));
+    };
+    const bitir = () => {
+      hedef.releasePointerCapture(e.pointerId);
+      window.removeEventListener('pointermove', hareket);
+      window.removeEventListener('pointerup', bitir);
+      setSimYuzde((v) => { try { localStorage.setItem('roboexx.roboarm.simyuzde', String(v)); } catch { /* yoksay */ } return v; });
+    };
+    window.addEventListener('pointermove', hareket);
+    window.addEventListener('pointerup', bitir);
+  };
 
   // Görev App'te tutulur (rapor blok sütununda gösteriliyor).
   const gorevRef = useRef<Gorev | null>(null); gorevRef.current = gorev;
@@ -634,24 +681,38 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           Üstte görev seçici + Çalıştır, ortada simülasyon, altta donanım. */}
       {mode === 'kodlu' ? (
         /* ══ KODLU MOD ═════════════════════════════════════════════
-           Bu yarı sadece SİMÜLASYON gösterir. Görev metni, Çalıştır
-           düğmesi ve hata raporu blok sütununda (ArmTaskBar) durur —
-           çocuk hatayı okurken gözünü bloklardan ayırmasın diye. */
-        <div className="robotarm-body ra-kodlu">
-          <div className="robotarm-stage ra-kodlu-stage">
+           Sağ yarı yatayda ikiye bölünür: üstte robot kol, altta görev
+           metni + Çalıştır + hata. Aradaki çubuk sürüklenerek oran
+           değiştirilir (tercih hatırlanır). */
+        <div className="robotarm-body ra-kodlu" ref={bodyRef}>
+          <div className="robotarm-stage ra-kodlu-stage" style={{ flex: `0 0 ${simYuzde}%` }}>
             <iframe
               ref={iframeRef}
               src={SIM_URL}
               title="Robot Kol Simülasyonu"
               className="robotarm-iframe"
             />
+            <SimGorunum ayar={simUi} setAyar={setSimUi} />
           </div>
 
-          {simRunErr && <p className="ra-warn ra-kodlu-err">{simRunErr}</p>}
+          <div className="ra-tutamac" onPointerDown={surukle} title="Sürükleyerek alanı büyüt/küçült">
+            <span />
+          </div>
 
-          {simLog.length > 0 && (
-            <pre ref={simLogRef} className="ra-simlog ra-kodlu-log">{simLog.join('\n')}</pre>
-          )}
+          <div className="ra-alt">
+            <ArmTaskBar
+              seciliId={gorev?.id ?? 0}
+              onGorevSec={onGorevSec}
+              calisiyor={simRunning}
+              onCalistir={runBlocks}
+              onDurdur={stopBlocks}
+              sonuc={kontrol}
+              kontrolEdiliyor={kontrolEdiliyor}
+              onBlogaGit={(bid) => blogaGit(Blockly.getMainWorkspace(), bid)}
+              hazirMi={simReady}
+            />
+            {simRunErr && <p className="ra-warn ra-kodlu-err">{simRunErr}</p>}
+          </div>
         </div>
       ) : (
 
@@ -671,6 +732,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
 
         <aside className="robotarm-config ra-kodsuz-yan">
           <div className="robotarm-config-scroll">
+            <SimGorunum ayar={simUi} setAyar={setSimUi} satir />
             <ManualBench
               aciler={manualAngles}
               onEklem={(eklem, aci) => {
@@ -697,3 +759,59 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     </div>
   );
 });
+
+/* ══════════════════════════════════════════════════════════════════
+   👁 GÖRÜNÜM — simülasyonun içindeki "Servo Kontrolü" panelini
+   tamamen ya da parça parça gizle. Kodlu modda ekran zaten dar;
+   öğretmen istemediği kutuyu kapatabilsin diye.
+   ══════════════════════════════════════════════════════════════════ */
+function SimGorunum({
+  ayar, setAyar, satir,
+}: {
+  ayar: Record<string, boolean>;
+  setAyar: (f: (a: Record<string, boolean>) => Record<string, boolean>) => void;
+  satir?: boolean;
+}) {
+  const [acik, setAcik] = useState(false);
+  const cevir = (k: string) => setAyar((a) => ({ ...a, [k]: !a[k] }));
+
+  const PARCALAR: Array<[string, string]> = [
+    ['j0', 'Taban kaydırıcısı'],
+    ['j1', 'Omuz kaydırıcısı'],
+    ['j2', 'Dirsek kaydırıcısı'],
+    ['j3', 'Tutucu kaydırıcısı'],
+    ['serial', 'Seri satırı'],
+    ['buttons', 'Sıfırla düğmesi'],
+    ['status', 'Durum satırı'],
+    ['coords', 'Koordinatlar'],
+  ];
+
+  return (
+    <div className={`ra-gor ${satir ? 'is-satir' : ''}`}>
+      <button className="ra-gor-btn" onClick={() => setAcik((a) => !a)} title="Panelde ne görünsün?">
+        👁 Görünüm {acik ? '▾' : '▸'}
+      </button>
+      {acik && (
+        <div className="ra-gor-menu">
+          <label className="ra-gor-ana">
+            <input type="checkbox" checked={ayar.panel !== false} onChange={() => cevir('panel')} />
+            <b>Servo Kontrolü paneli</b>
+          </label>
+          <div className="ra-gor-liste">
+            {PARCALAR.map(([k, ad]) => (
+              <label key={k} className={ayar.panel === false ? 'is-pasif' : ''}>
+                <input
+                  type="checkbox"
+                  checked={ayar[k] !== false}
+                  disabled={ayar.panel === false}
+                  onChange={() => cevir(k)}
+                />
+                {ad}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -226,6 +226,33 @@ export default function App() {
   const [armKontrolEdiliyor, setArmKontrolEdiliyor] = useState(false);
   const [armCalisiyor, setArmCalisiyor] = useState(false);
 
+  /** Blok alanı ile kol panelinin genişlik oranı (%). Aradaki çubuk
+   *  sürüklenerek değiştirilir; tercih hatırlanır. */
+  const [kodYuzde, setKodYuzde] = useState<number>(() => {
+    const v = Number(localStorage.getItem('roboexx.roboarm.kodyuzde'));
+    return Number.isFinite(v) && v >= 20 && v <= 80 ? v : 50;
+  });
+  const alanRef = useRef<HTMLDivElement | null>(null);
+  const dikeySurukle = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const kutu = alanRef.current?.getBoundingClientRect();
+    if (!kutu) return;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const hareket = (ev: PointerEvent) => {
+      const x = ((ev.clientX - kutu.left) / kutu.width) * 100;
+      setKodYuzde(Math.max(20, Math.min(80, x)));
+    };
+    const bitir = () => {
+      el.releasePointerCapture(e.pointerId);
+      window.removeEventListener('pointermove', hareket);
+      window.removeEventListener('pointerup', bitir);
+      setKodYuzde((v) => { try { localStorage.setItem('roboexx.roboarm.kodyuzde', String(v)); } catch { /* yoksay */ } return v; });
+    };
+    window.addEventListener('pointermove', hareket);
+    window.addEventListener('pointerup', bitir);
+  };
+
   const robotArmRef = useRef<RobotArmHandle>(null);
   // ====== Montaj rehberi (doc) ======
   const [guideOpen, setGuideOpen] = useState(false);
@@ -2004,30 +2031,14 @@ export default function App() {
           data-arm-open={(robotArmOpen || roboBotOpen) ? 'true' : 'false'}
           data-arm-full={((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) ? 'true' : 'false'}
           data-arm-mode={robotArmOpen ? armMode : undefined}
+          ref={alanRef}
         >
           {/* Blok alanı her zaman mounted kalır; tam ekranda CSS ile gizlenir
               (unmount edilirse Blockly dispose olur ve bloklar/kod silinir). */}
-          <div className="workspace-main-col">
-          {/* 🦾 Kodlu simülasyondayken görev metni, Çalıştır düğmesi ve
-              hata raporu BLOKLARIN yanında durur — çocuk hatayı okurken
-              gözünü bloklardan ayırmasın diye. */}
-          {robotArmOpen && armMode === 'kodlu' && mode === 'blocks' && (
-            <ArmTaskBar
-              seciliId={armGorev?.id ?? 0}
-              onGorevSec={(g) => {
-                setArmGorev(g);
-                setArmKontrol(null);
-                isaretleriTemizle(blocklyRef.current?.getWorkspace?.() ?? null);
-              }}
-              calisiyor={armCalisiyor}
-              onCalistir={() => robotArmRef.current?.runBlocks()}
-              onDurdur={() => robotArmRef.current?.stopBlocks()}
-              sonuc={armKontrol}
-              kontrolEdiliyor={armKontrolEdiliyor}
-              onBlogaGit={(bid) => blogaGit(blocklyRef.current?.getWorkspace?.() ?? null, bid)}
-              hazirMi
-            />
-          )}
+          <div
+            className="workspace-main-col"
+            style={robotArmOpen && !robotArmFullscreen ? { flex: `0 0 ${kodYuzde}%` } : undefined}
+          >
           {mode === 'blocks' ? (
             <div className={`workspace-split ${previewOpen ? '' : 'is-preview-collapsed'}`}>
               <div className="workspace-blocks">
@@ -2081,6 +2092,12 @@ export default function App() {
           </div>
 
           {robotArmOpen && (
+            <>
+            {!robotArmFullscreen && (
+              <div className="ra-tutamac-dikey" onPointerDown={dikeySurukle} title="Sürükleyerek kod/simülasyon alanını ayarla">
+                <span />
+              </div>
+            )}
             <RobotArmPanel
               ref={robotArmRef}
               connected={bridgeState === 'connected'}
@@ -2090,11 +2107,19 @@ export default function App() {
               onKontrolSonucu={(r) => { setArmKontrol(r); setArmKontrolEdiliyor(false); }}
               onKontrolBasladi={() => setArmKontrolEdiliyor(true)}
               onCalisiyorDegisti={setArmCalisiyor}
+              onGorevSec={(g) => {
+                setArmGorev(g);
+                setArmKontrol(null);
+                isaretleriTemizle(blocklyRef.current?.getWorkspace?.() ?? null);
+              }}
+              kontrol={armKontrol}
+              kontrolEdiliyor={armKontrolEdiliyor}
               onSendCode={sendArmCode}
               fullscreen={robotArmFullscreen}
               onToggleFullscreen={() => setRobotArmFullscreen((f) => !f)}
               onClose={() => { setRobotArmOpen(false); setRobotArmFullscreen(false); }}
             />
+            </>
           )}
 
           {roboBotOpen && (

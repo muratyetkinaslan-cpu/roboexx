@@ -160,6 +160,15 @@ input { font-family: inherit; }
   position: relative;
   min-height: 0;
   overflow: hidden;
+  /* Simülasyon iframe'i kendi yığın bağlamını kurduğu için üstteki
+     menüleri örtüyordu. Çalışma alanı geriye itilir, toolbar öne alınır. */
+  z-index: 0;
+}
+/* Topbar menüleri (hedef seçici, araçlar) her zaman simülasyonun üstünde
+   açılsın — kol paneli açıkken menü aşağı inmiyordu. */
+.toolbar {
+  position: relative;
+  z-index: 100;
 }
 
 /* ========================================
@@ -7014,7 +7023,7 @@ button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
 
 /* ═══ GÖREV + HATA ÇUBUĞU (blok sütununda) ═════════════════════════ */
 .atb {
-  flex: 0 0 auto; max-height: 47%; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   background: var(--rx-surface);
   border-bottom: 1px solid var(--rx-border);
 }
@@ -7225,3 +7234,74 @@ button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
   .blocklyBlockCanvas .rx-blok-hata > .blocklyPath,
   .blocklyBlockCanvas .rx-blok-uyari > .blocklyPath { filter: none; }
 }
+
+/* ═══ UZATMA ÇUBUKLARI ═════════════════════════════════════════════
+   Kod | Simülasyon | Hata alanlarının oranını kullanıcı belirler. */
+.ra-tutamac-dikey {
+  flex: 0 0 7px;
+  cursor: col-resize;
+  background: var(--rx-border);
+  display: grid; place-items: center;
+  touch-action: none;
+  transition: background .14s;
+}
+.ra-tutamac-dikey:hover, .ra-tutamac-dikey:active { background: var(--rx-accent); }
+.ra-tutamac-dikey span {
+  width: 2px; height: 34px; border-radius: 2px;
+  background: var(--rx-text-muted); pointer-events: none;
+}
+.ra-tutamac-dikey:hover span { background: var(--rx-accent-text); }
+
+.ra-tutamac {
+  flex: 0 0 7px;
+  cursor: row-resize;
+  background: var(--rx-border);
+  display: grid; place-items: center;
+  touch-action: none;
+  transition: background .14s;
+}
+.ra-tutamac:hover, .ra-tutamac:active { background: var(--rx-accent); }
+.ra-tutamac span {
+  width: 34px; height: 2px; border-radius: 2px;
+  background: var(--rx-text-muted); pointer-events: none;
+}
+.ra-tutamac:hover span { background: var(--rx-accent-text); }
+
+.ra-kodlu .ra-kodlu-stage { flex: 0 0 auto; min-height: 120px; position: relative; }
+.ra-alt { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ═══ GÖRÜNÜM MENÜSÜ ═══════════════════════════════════════════════ */
+.ra-gor { position: absolute; top: 8px; right: 8px; z-index: 5; }
+.ra-gor.is-satir { position: static; margin-bottom: 12px; }
+.ra-gor-btn {
+  padding: 4px 10px; border-radius: 8px;
+  background: rgba(10,13,17,.82); backdrop-filter: blur(6px);
+  border: 1px solid var(--rx-border);
+  color: var(--rx-text-dim); font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.ra-gor.is-satir .ra-gor-btn { width: 100%; background: var(--rx-surface2); }
+.ra-gor-btn:hover { color: var(--rx-text); border-color: var(--rx-accent); }
+.ra-gor-menu {
+  margin-top: 5px; padding: 9px 11px; border-radius: 10px;
+  background: var(--rx-surface); border: 1px solid var(--rx-border);
+  box-shadow: 0 10px 26px rgba(0,0,0,.4);
+  min-width: 186px;
+}
+.ra-gor-menu label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--rx-text-dim);
+  padding: 3px 0; cursor: pointer;
+}
+.ra-gor-menu label.is-pasif { opacity: .4; cursor: not-allowed; }
+.ra-gor-ana { border-bottom: 1px solid var(--rx-border-soft); padding-bottom: 6px !important; margin-bottom: 4px; }
+.ra-gor-ana b { color: var(--rx-text); }
+.ra-gor-liste { display: flex; flex-direction: column; }
+.ra-gor-menu input[type="checkbox"] { accent-color: var(--rx-accent); }
+
+/* ═══ SIRALI DÜZELTME NOTU ═════════════════════════════════════════ */
+.atb-sira {
+  margin: 8px 0 0; padding: 8px 11px; border-radius: 8px;
+  background: var(--rx-surface2); border: 1px solid var(--rx-border-soft);
+  font-size: 12px; line-height: 1.55; color: var(--rx-text-muted);
+}
+.atb-sira b { color: var(--rx-accent); }
