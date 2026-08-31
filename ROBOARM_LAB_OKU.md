@@ -9,114 +9,111 @@ npm run dev
 
 ---
 
-## 🧊 Bu turda: gerçek küp simülasyona girdi
+## 🧊 Bu turda
 
-`ku_p.3mf` dosyasını açıp ölçtüm ("küp v3", milimetre birimi, 8450 köşe /
-16896 üçgen):
+### 1. Küp artık .3mf'in KENDİSİ
 
-```
-dış ölçü   25.0 × 25.0 × 25.0 mm
-her yüzde  ~15 mm çapında, ~5 mm derinliğinde dairesel oyuk
-kavrama    yan yüzler düz → 25 mm açıklıkta tutulur
-```
-
-Simülasyondaki küp **3 cm düz kutuydu**. Artık gerçek ölçülerle çiziliyor:
-2.5 cm gövde + altı yüzdeki oyuklar (1 gövde + 6 oyuk parçası).
-Dosyanın kendisi `public/robot/ku_p.3mf` içinde saklandı.
-
-### Kavrama artık ölçüye bağlı
-
-Eskiden simülasyon "açı 110°'nin altındaysa ve yakınsa tut" diyordu —
-gerçekle ilgisi yoktu. Artık servo açısı **milimetre çene açıklığına**
-çevriliyor ve küpün 25 mm'sine göre karar veriliyor.
-
-Tutucunuzun iki noktasını **⚙️ Kurulum → 🧊 Küp** sekmesinde ölçüp
-giriyorsunuz:
-
-| Ölçüm | Varsayılan |
-|---|---|
-| Çeneler tam AÇIK · servo açısı / açıklık | 150° / 45 mm |
-| Çeneler tam KAPALI · servo açısı / açıklık | 82° / 0 mm |
-
-Aradaki değerler doğrusal hesaplanıyor ve panel size şunu yazıyor:
-
-> **🤏 25 mm küpü tutmak için: tutucu 120°**
-> Bırakmak için: 132°
-
-**Bu açıyı koda yazınca hem simülasyonda hem gerçek kolda tutar** — çünkü
-ikisi de aynı ölçüden hesaplanıyor.
-
-Küp boyutu da seçilebilir (15–40 mm); açı ona göre yeniden hesaplanır.
-
-### Test
+Geçen sefer ölçüleri doğru ama şekli yaklaşıktı (kutu + koni oyuklar).
+Şimdi `ku_p.3mf` dosyasının **gerçek mesh'i** kullanılıyor:
 
 ```
-KAVRAMA AÇISI (varsayılan tutucu 82°→150°)
-  15 mm → 105°    25 mm → 120°    35 mm → 135°
-  20 mm → 112°    30 mm → 127°    40 mm → 142°
+8450 köşe / 16896 üçgen
+ölçü      2.500 × 2.500 × 2.500 cm  →  25.0 mm ✓
+merkezde  ✓ (three.js y-yukarı düzenine çevrildi)
+oyuklar   +X yüzeyinde 78 köşe — detay korunmuş ✓
+```
 
-FARKLI TUTUCU (öğretmen ölçtü: 40°=2mm · 130°=38mm)
-  25 mm küp → tut 98°
-  doğrulama: 98°'de çene açıklığı 25.2 mm ✓
+Mesh `public/robot/kup-mesh.json` dosyasında (375 KB, gzip 83 KB),
+`arm-sim.html` açılışta `fetch` ile yüklüyor. Kaynak `.3mf` dosyası da
+`public/robot/ku_p.3mf` içinde duruyor.
 
-KÜP GEOMETRİSİ
-  1 gövde + 6 oyuk parçası ✓
+Başka küp boyutu seçilirse aynı mesh ölçekleniyor — şekil bozulmuyor.
+
+### 2. Sehpa kaldırıldı, küp sürükleniyor
+
+Küpün altındaki siyah kutu tamamen silindi. Küp **doğrudan zeminde**
+duruyor.
+
+**Küpe basıp çekince istediğin yere taşınıyor.** İmleç küpün üstüne
+gelince el işaretine dönüşüyor. Masa sınırı 28 cm. Kol küpü tutuyorsa
+sürüklenmiyor (önce bıraktırman gerekiyor).
+
+### 3. Kodsuz modda gerçek kol birlikte oynuyor
+
+Kodsuz tezgâhın en üstüne anahtar kondu:
+
+> 🔗 **Gerçek kol BİRLİKTE oynuyor** — kaydırıcıyı çektiğinde açı anında
+> karta gidiyor
+
+Kart bağlı değilse "⛓️‍💥 Kart bağlı değil — sadece simülasyon" yazıyor ve
+anahtar pasif kalıyor. Yeşil nokta bağlantı canlıyken yanıp sönüyor.
+Tercih hatırlanıyor. "Hazır duruş" düğmesi de aynı anahtara uyuyor.
+
+---
+
+## Kavrama: sim ile gerçek aynı açıda tutar
+
+Servo açısı **milimetre çene açıklığına** çevriliyor, küpün 25 mm'sine
+göre karar veriliyor. Tutucunuzun iki noktasını **⚙️ Kurulum → 🧊 Küp**
+sekmesinde ölçüp giriyorsunuz; panel size şunu yazıyor:
+
+> **🤏 25 mm küpü tutmak için: tutucu 120°** · Bırakmak için: 132°
+
+```
+Varsayılan tutucu (82°=0mm → 150°=45mm)
+  15 mm → 105°   25 mm → 120°   35 mm → 135°
+  20 mm → 112°   30 mm → 127°   40 mm → 142°
+
+Farklı tutucu (öğretmen ölçtü: 40°=2mm · 130°=38mm)
+  25 mm küp → 98°  ·  doğrulama: 98°'de çene 25.2 mm ✓
 ```
 
 ---
 
 ## Önceki turlardan
 
-**Kodlu mod** — solda bloklar, sağda üstte robot kol / altta üç sekme
+**Kodlu mod** — solda bloklar, sağda üstte kol / altta üç sekme
 (Görev & Hata · 🔌 Donanım · ⚙️ Kurulum). Çubuklar sürüklenebilir.
 
-**Çıkış şeridi** — Görev sekmesinin üstünde RGB, buzzer, röle ve anlık
-sensör değerleri.
+**Çıkış şeridi** — Görev sekmesinin üstünde RGB, buzzer, röle, sensörler.
 
-**Donanım sekmesi** — kodda RGB yanınca ampul o rengi alır, buzzer
-**gerçekten öter**. Mesafe/LDR/pot/sıcaklık kaydırıcıları, IR kumanda
-tuşları, buton.
+**Donanım sekmesi** — RGB yanar, buzzer **gerçekten öter**, röle çeker.
+Mesafe/LDR/pot/sıcaklık kaydırıcıları, IR kumanda tuşları, buton.
 
-**⚙️ Kurulum** — kart seçimi (Arduino · RoboBricks · Raspberry/Waveshare
-normal servo bloğu; PicoBricks "Sürücü Servo"), servo pinleri, donanım
-pinleri (mesafe trig/echo, LDR, pot, sıcaklık, IR, buton, buzzer, RGB üç
-bacağı, röle) ve küp/tutucu kalibrasyonu. Cevap anahtarları seçime göre
-çevrilir.
+**⚙️ Kurulum** — kart (Arduino · RoboBricks · Raspberry/Waveshare normal
+servo; PicoBricks "Sürücü Servo"), servo pinleri, donanım pinleri, küp ve
+tutucu kalibrasyonu. Cevap anahtarları seçime göre çevrilir.
 
-**🎯 Kalibre et** — tüm servoları 90°'ye alır, simülasyonda ve kartta.
-
-**Hatalar tek tek, sırayla** — 💡 İpucu → 🔎 Ne yapmalıyım → ✅ Cevap.
-Hatalı blok kırmızı/sarı çerçevelenir.
-
-**Blok sesleri** · **kodsuz mod** · **👁 Görünüm** · **71 görevlik
-kütüphane** · **hedefe göre blok kutusu** · **USB/BLE seçim listesi** ·
-**sakin topbar teması**.
+**🎯 Kalibre et** · **hatalar tek tek sırayla** (💡 İpucu → 🔎 Ne
+yapmalıyım → ✅ Cevap) · **blok üstünde hata işareti** · **blok sesleri** ·
+**👁 Görünüm** · **71 görevlik kütüphane** · **hedefe göre blok kutusu** ·
+**USB/BLE seçim listesi** · **sakin topbar teması**.
 
 ---
 
 ## Test sonuçları
 
 ```
-KÜP              25 mm, 6 oyuk · geometri doğru ✓
-KAVRAMA          6 küp boyutu + özel kalibrasyon · hesap doğrulandı ✓
-KURULUM          71 anahtar × 3 kurulum = 213/213 · hepsi 100
-ÖZEL DEVRE       hiçbir pin varsayılan değil → 71/71
-RGB / MESAFE     özel pinlerde doğru renk ve doğru tepki
-BUILD            ✓ tsc temiz · vite build başarılı
+KÜP MESH       8450 köşe · 25.0 mm · merkezde · oyuklar korunmuş ✓
+SEHPA          kalıntı yok ✓ · küp zeminde, sürüklenebilir
+SİM ELEMANLARI eksik id yok · tüm fonksiyonlar yerinde ✓
+KAVRAMA        6 boyut + özel kalibrasyon · hesap doğrulandı ✓
+KURULUM        71 anahtar × 3 kurulum = 213/213 · hepsi 100
+KÜTÜPHANE      71 görev · 71/71 çalışıyor
+BUILD          ✓ tsc temiz · vite build başarılı
 ```
 
 ## Yeni ve değişen dosyalar
 
 ```
-YENİ  public/robot/ku_p.3mf         gerçek küp modeli (kaynak)
+YENİ  public/robot/kup-mesh.json    .3mf'ten çıkarılmış gerçek mesh
+YENİ  public/robot/ku_p.3mf         kaynak dosya
 YENİ  src/robotarm/setup.ts         kart · pin · küp/tutucu kalibrasyonu
 YENİ  src/components/SetupBar.tsx   kurulum · kalibrasyon · donanım · çıkış şeridi
 
-DEĞİŞTİ  public/robot/arm-sim.html  gerçek küp + ölçüye bağlı kavrama
-DEĞİŞTİ  src/robotarm/vm.ts         çevre pin haritası, IR, servo v2
-DEĞİŞTİ  src/robotarm/checker.ts    kontrol kuruluma bağlı
-DEĞİŞTİ  src/robotarm/hw-bench.ts   RGB/röle pinleri ayarlanabilir
-DEĞİŞTİ  src/components/RobotArmPanel.tsx  sekmeler, kalibrasyon, küp bağlantısı
-DEĞİŞTİ  src/components/BlocklyWorkspace.tsx  blok sesleri
-DEĞİŞTİ  src/styles.css             topbar teması + paneller
+DEĞİŞTİ  public/robot/arm-sim.html  gerçek mesh · sehpasız · sürüklenebilir küp
+DEĞİŞTİ  src/components/ManualBench.tsx     gerçek kolla birlikte oynatma
+DEĞİŞTİ  src/robotarm/vm.ts · checker.ts · hw-bench.ts
+DEĞİŞTİ  src/components/RobotArmPanel.tsx · BlocklyWorkspace.tsx · Toolbar.tsx
+DEĞİŞTİ  src/styles.css
 ```

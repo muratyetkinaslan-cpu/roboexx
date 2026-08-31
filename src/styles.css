@@ -7617,3 +7617,31 @@ button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
 }
 .sb-kavrama b { color: var(--rx-accent); font-size: 13px; }
 .sb-kavrama span { font-size: 11px; color: var(--rx-text-dim); line-height: 1.5; }
+
+/* ═══ KODSUZ: GERÇEK KOLLA BİRLİKTE OYNATMA ═══════════════════════ */
+.mb-canli {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 9px 11px; border-radius: 9px;
+  background: var(--rx-surface2); border: 1px solid var(--rx-border);
+  color: var(--rx-text-dim); font: inherit; font-size: 12.5px;
+  cursor: pointer; transition: .15s;
+}
+.mb-canli.on {
+  background: rgba(34, 197, 94, .13);
+  border-color: var(--rx-success); color: #86EFAC; font-weight: 550;
+}
+.mb-canli.yok { opacity: .6; cursor: not-allowed; }
+.mb-nokta2 {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--rx-text-muted);
+}
+.mb-nokta2.on {
+  background: var(--rx-success);
+  box-shadow: 0 0 8px var(--rx-success);
+  animation: mb-nabiz 1.4s ease-in-out infinite;
+}
+@keyframes mb-nabiz { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+.mb-canli-not {
+  margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: var(--rx-text-muted);
+}
+@media (prefers-reduced-motion: reduce) { .mb-nokta2.on { animation: none; } }

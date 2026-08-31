@@ -16,6 +16,11 @@ interface Props {
   aciler: number[];
   onEklem: (eklem: number, aci: number) => void;
   onHome: () => void;
+  /** Kart bağlı mı — canlı sürüş ancak bağlıyken çalışır. */
+  kartBagli: boolean;
+  /** Kaydırıcı hareketleri gerçek kola da gitsin mi? */
+  canli: boolean;
+  onCanliChange: (v: boolean) => void;
 }
 
 const EKLEMLER = [
@@ -41,7 +46,7 @@ const NOTALAR = [
   { ad: 'Fa', hz: 349 }, { ad: 'Sol', hz: 392 }, { ad: 'La', hz: 440 }, { ad: 'Si', hz: 494 },
 ];
 
-export function ManualBench({ aciler, onEklem, onHome }: Props) {
+export function ManualBench({ aciler, onEklem, onHome, kartBagli, canli, onCanliChange }: Props) {
   const [s, setS] = useState<BenchState>(() => bench.durum());
   useEffect(() => bench.abone(setS), []);
 
@@ -62,6 +67,29 @@ export function ManualBench({ aciler, onEklem, onHome }: Props) {
 
   return (
     <div className="mb">
+      {/* ── Gerçek kolla birlikte oynatma ── */}
+      <section className="mb-grup">
+        <button
+          className={`mb-canli ${canli && kartBagli ? 'on' : ''} ${!kartBagli ? 'yok' : ''}`}
+          onClick={() => kartBagli && onCanliChange(!canli)}
+          disabled={!kartBagli}
+          title={kartBagli
+            ? 'Kaydırıcıyı oynattığında gerçek kol da aynı anda hareket eder'
+            : 'Önce kartı bağla (üstteki USB/BLE)'}
+        >
+          <span className={`mb-nokta2 ${canli && kartBagli ? 'on' : ''}`} />
+          {kartBagli
+            ? (canli ? '🔗 Gerçek kol BİRLİKTE oynuyor' : '⛓️‍💥 Sadece simülasyon')
+            : '⛓️‍💥 Kart bağlı değil — sadece simülasyon'}
+        </button>
+        {canli && kartBagli && (
+          <p className="mb-canli-not">
+            Kaydırıcıyı çektiğinde açı anında karta gidiyor. Kol takılırsa
+            kaydırıcıyı yavaş oynat.
+          </p>
+        )}
+      </section>
+
       {/* ── Robot kol ── */}
       <section className="mb-grup">
         <h4>🦾 Robot Kol <button className="mb-mini" onClick={onHome}>hazır duruş</button></h4>

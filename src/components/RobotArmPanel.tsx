@@ -145,6 +145,14 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   /** Kodsuz modda kaydırıcıların gösterdiği açılar. */
   const [manualAngles, setManualAngles] = useState<number[]>([90, 90, 90, 40]);
 
+  /** Kodsuz modda kaydırıcı gerçek kola da gitsin mi? Bağlıyken açık. */
+  const [manuelCanli, setManuelCanli] = useState<boolean>(() => {
+    try { return localStorage.getItem('roboexx.roboarm.manuelCanli') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('roboexx.roboarm.manuelCanli', manuelCanli ? '1' : '0'); } catch { /* yoksay */ }
+  }, [manuelCanli]);
+
   /** Simülasyon içindeki "Servo Kontrolü" panelinin görünürlüğü.
    *  Tamamı kapatılabilir; parçalar (kaydırıcılar, seri satırı, düğmeler,
    *  durum, koordinat) tek tek gizlenebilir. */
@@ -817,11 +825,15 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
             <SimGorunum ayar={simUi} setAyar={setSimUi} satir />
             <ManualBench
               aciler={manualAngles}
+              kartBagli={connected}
+              canli={manuelCanli}
+              onCanliChange={setManuelCanli}
               onEklem={(eklem, aci) => {
                 setManualAngles((a) => { const y = [...a]; y[eklem] = aci; return y; });
                 anglesRef.current[eklem] = aci;
                 postToSim({ type: 'rx:setJoint', joint: eklem, angle: Math.round(aci) });
-                hwJointRef.current(eklem, Math.round(aci));
+                // Anahtar açıksa ve kart bağlıysa GERÇEK kol da aynı anda döner.
+                if (manuelCanli && connected) hwJointRef.current(eklem, Math.round(aci));
               }}
               onHome={() => {
                 const ev = [90, 90, 90, 40];
@@ -829,7 +841,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
                 ev.forEach((v, j) => {
                   anglesRef.current[j] = v;
                   postToSim({ type: 'rx:setJoint', joint: j, angle: v });
-                  hwJointRef.current(j, v);
+                  if (manuelCanli && connected) hwJointRef.current(j, v);
                 });
                 bench.sifirla();
               }}
