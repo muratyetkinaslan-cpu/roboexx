@@ -46,6 +46,7 @@ body.rxa .ui{display:none!important}
 <div class="joint" data-j="3"><div class="row"><span class="name"><span class="dot" style="background:#ff6a1a"></span>Gripper <span class="servo">· Servo(1) · 82 kapalı–150 açık</span></span><span class="val">82°</span></div><input type="range" min="82" max="150" value="82"></div>
 <div id="serial"><b>Pico &rarr;</b> <span id="ser">S1:90 S2:90 S3:90 S4:90</span></div>
 <div class="btns" id="btnrow"><button id="reset">Sıfırla</button></div>
+<div class="btns" id="btnrow2" style="display:none"><button id="demo">Demo</button><button id="pick">Küpü Tut</button><button id="goto">Hedefe Git</button><button id="target">Küp Koy</button><button id="teach">Öğret</button><button id="repeat">Tekrarla</button></div>
 <div id="status">Mod: <b id="modet">Serbest</b> · Nokta: <b id="wpn">0</b> <span id="msg"></span></div>
 <div id="coords">Uç (IK): <b id="cx">0.0</b>, <b id="cy">0.0</b>, <b id="cz">0.0</b> cm · merkeze <b id="cr">0.0</b> cm</div></div>
 
@@ -652,6 +653,9 @@ addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);updateOr
     }
   });
 
+  // Hazır sinyalini erken de yolla: aşağıdaki bir satır hata verse bile
+  // panel "yükleniyor"da takılı kalmasın.
+  post('rx:ready', { angles: angles.slice() });
   window.__rxPostTip = function(t){ post('rx:tip', t); };
   window.__rxPostPick = function(d){ post('rx:pick', d); };
   window.__rxPostArm = function(){ post('rx:ik', { angles: angles.slice(), pick:true }); };

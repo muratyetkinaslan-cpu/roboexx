@@ -31,6 +31,7 @@ interface Props {
   sonuc: KontrolSonucu | null;
   kontrolEdiliyor: boolean;
   onBlogaGit: (bid: string) => void;
+  /** Simülasyon yüklendi mi — sadece uyarı göstermek için. */
   hazirMi: boolean;
 }
 
@@ -86,7 +87,7 @@ export function ArmTaskBar({
         {calisiyor ? (
           <button className="btn btn-danger atb-run" onClick={onDurdur}>■ Durdur</button>
         ) : (
-          <button className="btn btn-primary atb-run" onClick={onCalistir} disabled={!hazirMi}>
+          <button className="btn btn-primary atb-run" onClick={onCalistir}>
             ▶ Çalıştır
           </button>
         )}
@@ -98,6 +99,12 @@ export function ArmTaskBar({
             <span>{gorevAcik ? '▾' : '▸'} Ne yapmam gerekiyor?</span>
           </button>
           {gorevAcik && <p className="atb-metin">{gorev.aciklama}</p>}
+        </div>
+      )}
+
+      {!hazirMi && (
+        <div className="atb-bekle">
+          3B kol yükleniyor… Kod yine de çalışır ve kontrol edilir.
         </div>
       )}
 

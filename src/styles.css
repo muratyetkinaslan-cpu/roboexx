@@ -7305,3 +7305,21 @@ button.rb-pin-chip:hover { border-color: var(--rx-accent, #ff8b3d); }
   font-size: 12px; line-height: 1.55; color: var(--rx-text-muted);
 }
 .atb-sira b { color: var(--rx-accent); }
+
+/* ═══ BAĞLANTI MODU SEÇİM LİSTESİ ══════════════════════════════════
+   Eski iki düğmeli toggle topbar'da yer kaplıyordu. */
+.cm-select {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--rx-surface2);
+  color: var(--rx-text);
+  border: 1px solid var(--rx-border);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+.cm-select:hover:not(:disabled) { border-color: var(--rx-accent); }
+.cm-select:focus-visible { border-color: var(--rx-accent); }
+.cm-select:disabled { opacity: .55; cursor: not-allowed; }

@@ -190,31 +190,23 @@ export function Toolbar(props: Props) {
 
         {/* GRUP 1: Bağlantı — USB/BLE toggle + cihaz durumu + bağlan/kes */}
         <div className="toolbar-group toolbar-group-connection">
-          <div className="connection-mode-toggle" role="group" aria-label="Bağlantı modu">
-            <button
-              className={`cm-btn ${props.connectionMode === 'usb' ? 'is-active' : ''}`}
-              onClick={() => props.onConnectionModeChange('usb')}
-              disabled={isConnected || isConnecting}
-              title="USB üzerinden bağlan (Web Serial)"
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                <rect x="6" y="1" width="4" height="3" stroke="currentColor" strokeWidth="1.4" />
-                <path d="M8 4v11M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              USB
-            </button>
-            <button
-              className={`cm-btn ${props.connectionMode === 'ble' ? 'is-active' : ''}`}
-              onClick={() => props.onConnectionModeChange('ble')}
-              disabled={isConnected || isConnecting}
-              title="Bluetooth Low Energy üzerinden bağlan"
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                <path d="M5 4l6 8-3 2V2l3 2-6 8" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-              </svg>
-              BLE
-            </button>
-          </div>
+          {/* Bağlantı modu — iki düğme yerine tek seçim listesi.
+              Topbar'da yer kaplamasın diye daraltıldı. */}
+          <select
+            className="cm-select"
+            value={props.connectionMode}
+            onChange={(e) => props.onConnectionModeChange(e.target.value as 'usb' | 'ble')}
+            disabled={isConnected || isConnecting}
+            aria-label="Bağlantı modu"
+            title={
+              isConnected || isConnecting
+                ? 'Bağlıyken değiştirilemez — önce bağlantıyı kes'
+                : 'Bağlantı yöntemini seç'
+            }
+          >
+            <option value="usb">🔌 USB</option>
+            <option value="ble">📶 BLE</option>
+          </select>
 
           <div
             className="device-pill"
