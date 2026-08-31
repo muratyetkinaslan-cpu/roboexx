@@ -1,5 +1,5 @@
 import {
-  forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
 import * as Blockly from 'blockly';
 import {
@@ -14,6 +14,13 @@ import {
 } from '../robotarm/arduino-live';
 import { arduinoLiveLink } from '../arduino/livelink';
 import { ArduinoUploader } from './ArduinoUploader';
+import { bench } from '../robotarm/hw-bench';
+import { calistir as vmCalistir, bloklariAc, type CalismaAlani } from '../robotarm/vm';
+import { gorevKontrol, type KontrolSonucu } from '../robotarm/checker';
+import { bulgulariIsaretle, isaretleriTemizle, blogaGit, calisanBlok } from '../robotarm/block-marks';
+import { type Gorev } from '../robotarm/tasks';
+import { TaskPanel } from './TaskPanel';
+import { HardwareStrip } from './HardwareStrip';
 
 /** App'in serial telemetrisini panele iletmesi için imperative handle. */
 export interface RobotArmHandle {
@@ -21,9 +28,15 @@ export interface RobotArmHandle {
   applyServoTelemetry(code: number, id: number, angle: number): void;
 }
 
+/** Kodlu = ekran ikiye bölük, bloklar solda; Kodsuz = eski tam panel. */
+export type ArmMode = 'kodlu' | 'kodsuz';
+
 interface Props {
   /** Pico bağlı mı? */
   connected: boolean;
+  /** Çalışma modu — App yönetir (blok sütunu buna göre gösterilir). */
+  mode: ArmMode;
+  onModeChange: (m: ArmMode) => void;
   /** Tek/çok satırlık MicroPython'u REPL'e gönder (App uygular). */
   onSendCode: (code: string) => void;
   /** Tam ekran mı? */
@@ -45,7 +58,7 @@ const ID_MIN: Record<ServoKind, number> = { normal: 0, driver: 1, pca: 0 };
 const SIM_URL = '/robot/arm-sim.html';
 
 export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArmPanel(
-  { connected, onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
+  { connected, mode, onModeChange, onSendCode, fullscreen, onToggleFullscreen, onClose }, ref
 ) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [cfg, setCfg] = useState<ArmConfig>(() => loadArmConfig());
@@ -75,6 +88,12 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   // ── BLOK PROGRAMINI SİMÜLASYONDA ÇALIŞTIRMA ──────────────────────
   const [simRunning, setSimRunning] = useState(false);
   const [simRunErr, setSimRunErr] = useState<string | null>(null);
+
+  // ── GÖREV SEÇİMİ + OTOMATİK KONTROL (kodlu mod) ──────────────────
+  const [gorev, setGorev] = useState<Gorev | null>(null);
+  const [kontrol, setKontrol] = useState<KontrolSonucu | null>(null);
+  const [kontrolEdiliyor, setKontrolEdiliyor] = useState(false);
+  const gorevRef = useRef<Gorev | null>(null); gorevRef.current = gorev;
   const [simLog, setSimLog] = useState<string[]>([]);
   const simLogRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -287,45 +306,91 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
     };
   }
 
+  /**
+   * ▶ ÇALIŞTIR — üç şey aynı anda olur:
+   *   1. Program cevap anahtarıyla karşılaştırılır (anında, sanal saatle)
+   *   2. Hatalar blokların üstüne uyarı balonu olarak konur
+   *   3. Simülasyon canlı oynar; o an çalışan blok vurgulanır
+   */
   const runBlocks = () => {
     if (simRunning) return;
     setSimRunErr(null);
-    let code = '';
+    setKontrol(null);
+
+    const ws = Blockly.getMainWorkspace() as Blockly.WorkspaceSvg | null;
+    if (!ws) { setSimRunErr('Blok çalışma alanı bulunamadı.'); return; }
+
+    let alan: CalismaAlani;
     try {
-      const ws = Blockly.getMainWorkspace();
-      if (!ws) { setSimRunErr('Blok çalışma alanı bulunamadı.'); return; }
-      code = generateArmSimCode(ws as Blockly.Workspace);
+      alan = Blockly.serialization.workspaces.save(ws) as unknown as CalismaAlani;
     } catch (e) {
-      setSimRunErr('Kod üretilemedi: ' + (e as Error).message);
+      setSimRunErr('Program okunamadı: ' + (e as Error).message);
       return;
     }
-    if (!code.trim()) {
-      setSimRunErr('Önce bloklarla bir kol programı yaz (🦾 blokları).');
+    if (!alan.blocks?.blocks?.length) {
+      setSimRunErr('Çalışma alanı boş — önce blokları yerleştir.');
       return;
     }
+
+    isaretleriTemizle(ws);
+    bench.sifirla();
     runCtl.current = { abort: false };
     keysOnceRef.current.clear();
     setSimRunning(true);
     setSimLog(['▶ Simülasyonda çalışıyor…']);
-    let fn: (bot: unknown) => Promise<void>;
-    try {
-      fn = new Function('bot', '"use strict"; return (async () => {\n' + code + '\n})();') as typeof fn;
-    } catch (e) {
-      setSimRunErr('Sözdizimi hatası: ' + (e as Error).message);
-      setSimRunning(false);
-      return;
+
+    // (1)+(2) Kontrol arka planda anında koşar, sonucu bloklara işlenir.
+    const hedefGorev = gorevRef.current;
+    if (hedefGorev) {
+      setKontrolEdiliyor(true);
+      gorevKontrol(alan, hedefGorev.anahtar)
+        .then((sonuc) => {
+          setKontrol(sonuc);
+          const n = bulgulariIsaretle(ws, sonuc.bulgular);
+          setSimLog((l) => [...l,
+            sonuc.puan >= 90
+              ? `✔ Görev kontrolü: ${sonuc.puan}/100 — tamam`
+              : `◐ Görev kontrolü: ${sonuc.puan}/100 · ${n} blok işaretlendi`,
+          ]);
+        })
+        .catch((e: Error) => setSimLog((l) => [...l, 'Kontrol yapılamadı: ' + e.message]))
+        .finally(() => setKontrolEdiliyor(false));
     }
-    fn(armApi.current)
-      .then(() => setSimLog((l) => [...l, '✔ Program bitti.']))
-      .catch((e: unknown) => {
-        if (e && (e as { __stop?: boolean }).__stop) setSimLog((l) => [...l, '⏹ Durduruldu.']);
-        else setSimLog((l) => [...l, 'Hata: ' + ((e as Error)?.message || String(e))]);
+
+    // (3) Canlı simülasyon — servo pinleri panel ayarından da eşlenir.
+    const pinEklem: Record<number, number> = {};
+    cfgRef.current.joints.forEach((j, i) => { if (j.kind === 'normal') pinEklem[j.id] = i; });
+
+    vmCalistir(alan, {
+      live: true,
+      pinEklem,
+      durdur: () => runCtl.current.abort,
+      tuslar: keysRef.current,
+      tuslarBir: keysOnceRef.current,
+      eklemYaz: (eklem, aci) => {
+        const v = Math.max(0, Math.min(180, aci));
+        anglesRef.current[eklem] = v;
+        postToSim({ type: 'rx:setJoint', joint: eklem, angle: Math.round(v) });
+        hwJointRef.current(eklem, Math.round(v));
+      },
+      onBlok: (bid) => calisanBlok(ws, bid),
+      onOlay: (o) => { if (o.k === 'print') setSimLog((l) => [...l.slice(-150), String(o.text)]); },
+    })
+      .then((r) => {
+        setSimLog((l) => [...l, r.hata ? '✖ ' + r.hata : '✔ Program bitti.']);
+        if (r.hata) setSimRunErr(r.hata);
       })
-      .finally(() => setSimRunning(false));
+      .catch((e: unknown) => setSimLog((l) => [...l, 'Hata: ' + ((e as Error)?.message || String(e))]))
+      .finally(() => {
+        setSimRunning(false);
+        bench.sustur();
+        calisanBlok(ws, undefined);
+      });
   };
-  const stopBlocks = () => { runCtl.current.abort = true; };
+
+  const stopBlocks = () => { runCtl.current.abort = true; bench.sustur(); };
   // Panel kapanırken çalışan simülasyonu durdur
-  useEffect(() => () => { runCtl.current.abort = true; }, []);
+  useEffect(() => () => { runCtl.current.abort = true; bench.sustur(); }, []);
 
   // --- sim'den gelen mesajlar ---
   useEffect(() => {
@@ -439,6 +504,20 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
   };
   const usesPca = cfg.joints.some((j) => j.kind === 'pca');
 
+  /** Seçili görevin cevap anahtarında geçen giriş birimleri — donanım
+   *  şeridi yalnızca bunları gösterir, ekran kalabalıklaşmasın. */
+  const gerekliGirisler = useMemo(() => {
+    if (!gorev) return [] as Array<'mesafe' | 'pot' | 'ldr' | 'sicaklik' | 'buton'>;
+    const tipler = new Set(bloklariAc(gorev.anahtar).map((b) => b.type));
+    const liste: Array<'mesafe' | 'pot' | 'ldr' | 'sicaklik' | 'buton'> = [];
+    if (tipler.has('rx_ultrasonic_distance')) liste.push('mesafe');
+    if (tipler.has('rx_potentiometer')) liste.push('pot');
+    if (tipler.has('rx_ldr_read')) liste.push('ldr');
+    if (tipler.has('rx_analog_read') || tipler.has('rx_internal_temp')) liste.push('sicaklik', 'pot');
+    if (tipler.has('rx_button_pressed') || tipler.has('rx_digital_read')) liste.push('buton');
+    return [...new Set(liste)];
+  }, [gorev]);
+
   // --- gripper düzeni ---
   const setGripper = (patch: Partial<ArmConfig['gripper']>) => {
     setCfg((c) => {
@@ -496,6 +575,26 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           )}
         </span>
         <div className="robotarm-header-actions">
+          <div className="ra-mod" role="tablist" aria-label="Simülasyon modu">
+            <button
+              role="tab"
+              aria-selected={mode === 'kodlu'}
+              className={mode === 'kodlu' ? 'is-on' : ''}
+              onClick={() => onModeChange('kodlu')}
+              title="Bloklar solda, simülasyon sağda — görev kontrolü açık"
+            >
+              Kodlu
+            </button>
+            <button
+              role="tab"
+              aria-selected={mode === 'kodsuz'}
+              className={mode === 'kodsuz' ? 'is-on' : ''}
+              onClick={() => onModeChange('kodsuz')}
+              title="Kod yazmadan kolu elle sür — kaydırıcılar, Tıkla-Git, kalibrasyon"
+            >
+              Kodsuz
+            </button>
+          </div>
           <button className="btn btn-ghost btn-icon-only" onClick={onToggleFullscreen} title={fullscreen ? 'İkili görünüm' : 'Tam ekran'}>
             {fullscreen ? (
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -516,6 +615,45 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
         source={buildArmLiveSketch(cfg)}
       />
 
+      {/* ══ KODLU MOD ══════════════════════════════════════════════
+          Ekran ikiye bölük: bloklar App tarafında solda, burası sağ yarı.
+          Üstte görev seçici + Çalıştır, ortada simülasyon, altta donanım. */}
+      {mode === 'kodlu' ? (
+        <div className="robotarm-body ra-kodlu">
+          <TaskPanel
+            seciliId={gorev?.id ?? 0}
+            onGorevSec={(g) => { setGorev(g); setKontrol(null); isaretleriTemizle(Blockly.getMainWorkspace()); }}
+            calisiyor={simRunning}
+            onCalistir={runBlocks}
+            onDurdur={stopBlocks}
+            sonuc={kontrol}
+            kontrolEdiliyor={kontrolEdiliyor}
+            onBlogaGit={(bid) => blogaGit(Blockly.getMainWorkspace(), bid)}
+            hazirMi={simReady}
+          />
+
+          <div className="robotarm-stage ra-kodlu-stage">
+            <iframe
+              ref={iframeRef}
+              src={SIM_URL}
+              title="Robot Kol Simülasyonu"
+              className="robotarm-iframe"
+            />
+          </div>
+
+          <HardwareStrip gerekli={gerekliGirisler} />
+
+          {simRunErr && <p className="ra-warn ra-kodlu-err">{simRunErr}</p>}
+
+          {simLog.length > 0 && (
+            <pre ref={simLogRef} className="ra-simlog ra-kodlu-log">{simLog.join('\n')}</pre>
+          )}
+        </div>
+      ) : (
+
+      /* ══ KODSUZ MOD ═════════════════════════════════════════════
+         Eski tam panel: kaydırıcılar, Tıkla-Git, nokta tekrarı,
+         küp alma, eklem eşlemesi, gripper — kod yazmadan keşif. */
       <div className="robotarm-body">
         <div className="robotarm-stage">
           <iframe
@@ -843,6 +981,7 @@ export const RobotArmPanel = forwardRef<RobotArmHandle, Props>(function RobotArm
           </div>
         </aside>
       </div>
+      )}
     </div>
   );
 });

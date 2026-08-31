@@ -9,7 +9,7 @@ import { ProjectsPanel } from './components/ProjectsPanel';
 import { SerialMonitor, type SerialLine, type LineKind } from './components/SerialMonitor';
 import { Toolbar } from './components/Toolbar';
 import { UploadOverlay } from './components/UploadOverlay';
-import { RobotArmPanel, type RobotArmHandle } from './components/RobotArmPanel';
+import { RobotArmPanel, type RobotArmHandle, type ArmMode } from './components/RobotArmPanel';
 import { RoboBotPanel } from './components/RoboBotPanel';
 import { AssemblyGuide } from './components/AssemblyGuide';
 import { parseTelemetry } from './robotarm/config';
@@ -206,6 +206,15 @@ export default function App() {
   // ====== Robot Kol simülasyonu ======
   const [robotArmOpen, setRobotArmOpen] = useState(false);
   const [robotArmFullscreen, setRobotArmFullscreen] = useState(false);
+  // Kol simülasyonu modu: 'kodlu' = bloklar solda + görev kontrolü,
+  // 'kodsuz' = kod yazmadan elle sürme paneli. Seçim hatırlanır.
+  const [armMode, setArmMode] = useState<ArmMode>(
+    () => (localStorage.getItem('roboexx.roboarm.mod') === 'kodsuz' ? 'kodsuz' : 'kodlu'),
+  );
+  useEffect(() => {
+    try { localStorage.setItem('roboexx.roboarm.mod', armMode); } catch { /* yoksay */ }
+  }, [armMode]);
+
   const robotArmRef = useRef<RobotArmHandle>(null);
   // ====== Montaj rehberi (doc) ======
   const [guideOpen, setGuideOpen] = useState(false);
@@ -1983,6 +1992,7 @@ export default function App() {
           className="workspace-area"
           data-arm-open={(robotArmOpen || roboBotOpen) ? 'true' : 'false'}
           data-arm-full={((robotArmOpen && robotArmFullscreen) || (roboBotOpen && roboBotFullscreen)) ? 'true' : 'false'}
+          data-arm-mode={robotArmOpen ? armMode : undefined}
         >
           {/* Blok alanı her zaman mounted kalır; tam ekranda CSS ile gizlenir
               (unmount edilirse Blockly dispose olur ve bloklar/kod silinir). */}
@@ -2043,6 +2053,8 @@ export default function App() {
             <RobotArmPanel
               ref={robotArmRef}
               connected={bridgeState === 'connected'}
+              mode={armMode}
+              onModeChange={setArmMode}
               onSendCode={sendArmCode}
               fullscreen={robotArmFullscreen}
               onToggleFullscreen={() => setRobotArmFullscreen((f) => !f)}
